@@ -7,3 +7,5 @@
 
 ## Content:
  1. [Plan](plan.md)
+ 2. [Architecture Overview](architecture.md)
+ 3. 
