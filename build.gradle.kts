@@ -14,7 +14,7 @@ plugins {
 val sdk_version by extra("8.1.20")
 
 allprojects {
-    version = "0.0.1-SNAPSHOT"
+    version = "0.1.0-PROOF-OF-CONCEPT"
 }
 
 ignitionModule {
@@ -37,14 +37,15 @@ ignitionModule {
      */
     moduleVersion.set("${project.version}")
 
-    moduleDescription.set("A short sentence describing what it does, but not much longer than this.")
+    moduleDescription.set("Custom historian module that stores tag history data in external Factry Historian system via REST API.")
 
     /*
      * Minimum version of Ignition required for the module to function correctly.  This typically won't change over
      * the course of a major Ignition (7.9, 8.0, etc) version, except for when the Ignition Platform adds/changes APIs
      * used by the module.
      */
-    requiredIgnitionVersion.set(sdk_version)
+    // Note: SDK version (8.1.20) is for compilation, but we target Ignition 8.3+ runtime
+    requiredIgnitionVersion.set("8.3.0")
     /*
      *  This is a map of String: String, where the 'key' represents the fully qualified path to the project
      *  (using gradle path syntax), and the value is the shorthand Scope string.

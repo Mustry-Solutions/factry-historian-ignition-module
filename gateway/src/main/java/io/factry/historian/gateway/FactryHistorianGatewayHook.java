@@ -14,11 +14,16 @@ import com.inductiveautomation.ignition.gateway.web.models.IConfigTab;
 import com.inductiveautomation.ignition.gateway.web.models.SystemMap;
 import com.inductiveautomation.ignition.gateway.web.pages.config.overviewmeta.ConfigOverviewContributor;
 import com.inductiveautomation.ignition.gateway.web.pages.status.overviewmeta.OverviewContributor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Class which is instantiated by the Ignition platform when the module is loaded in the gateway scope.
  */
 public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
+    private static final Logger logger = LoggerFactory.getLogger(FactryHistorianGatewayHook.class);
+
+    private GatewayContext gatewayContext;
     /**
      * Called to before startup. This is the chance for the module to add its extension points and update persistent
      * records and schemas. None of the managers will be started up at this point, but the extension point managers will
@@ -26,7 +31,14 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
      */
     @Override
     public void setup(GatewayContext context) {
+        logger.info("========================================");
+        logger.info("Factry Historian Module - Setup Starting");
+        logger.info("========================================");
 
+        this.gatewayContext = context;
+
+        logger.info("Gateway context stored successfully");
+        logger.info("Factry Historian Module - Setup Complete");
     }
 
     /**
@@ -35,7 +47,14 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
      */
     @Override
     public void startup(LicenseState activationState) {
+        logger.info("========================================");
+        logger.info("Factry Historian Module - Startup");
+        logger.info("========================================");
+        logger.info("License State: {}", activationState.toString());
 
+        // Future: Initialize history provider and storage provider here
+
+        logger.info("Factry Historian Module - Startup Complete");
     }
 
     /**
@@ -44,7 +63,13 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
      */
     @Override
     public void shutdown() {
+        logger.info("========================================");
+        logger.info("Factry Historian Module - Shutdown");
+        logger.info("========================================");
 
+        // Future: Clean up resources here
+
+        logger.info("Factry Historian Module - Shutdown Complete");
     }
 
     /**
@@ -99,7 +124,7 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
      */
     @Override
     public boolean isFreeModule() {
-        return false;
+        return true; // Free module for development - no license required
     }
 
     /**
