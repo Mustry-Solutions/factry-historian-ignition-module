@@ -8,10 +8,10 @@
  */
 
 plugins {
-    id("io.ia.sdk.modl") version("0.4.0")
+    id("io.ia.sdk.modl") version("0.4.1")
 }
 
-val sdk_version by extra("8.1.20")
+val sdk_version by extra("8.3.1")
 
 allprojects {
     version = "0.1.0-PROOF-OF-CONCEPT"

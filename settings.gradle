@@ -11,11 +11,19 @@ rootProject.name = "factry-historian"
 
 dependencyResolutionManagement {
     repositories {
-        // enable resolving dependencies from the inductive automation artifact repository
+        mavenCentral()
+        // Inductive Automation public repository (aggregates releases and thirdparty)
         maven {
             url "https://nexus.inductiveautomation.com/repository/public"
         }
-        mavenCentral()
+        // Inductive Automation third-party repository (for jide-common, jython-ia, etc.)
+        maven {
+            url "https://nexus.inductiveautomation.com/repository/inductiveautomation-thirdparty"
+        }
+        // Inductive Automation releases repository
+        maven {
+            url "https://nexus.inductiveautomation.com/repository/inductiveautomation-releases"
+        }
     }
 }
 
