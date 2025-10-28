@@ -1,0 +1,90 @@
+package io.factry.historian.gateway;
+
+import com.inductiveautomation.historian.gateway.api.config.HistorianSettings;
+
+/**
+ * Configuration settings for the Factry Historian.
+ *
+ * This class holds all configuration properties needed to connect to the
+ * external Factry Historian system via the proxy REST API.
+ */
+public class FactryHistorianSettings implements HistorianSettings {
+
+    /**
+     * URL of the proxy REST API endpoint (e.g., http://localhost:8111)
+     */
+    private String proxyUrl = "http://localhost:8111";
+
+    /**
+     * Timeout for HTTP requests in milliseconds
+     */
+    private int timeoutMs = 5000;
+
+    /**
+     * Batch size for storing historical data points
+     */
+    private int batchSize = 100;
+
+    /**
+     * Batch interval in milliseconds - how often to send batched data
+     */
+    private int batchIntervalMs = 5000;
+
+    /**
+     * Enable debug logging for HTTP requests
+     */
+    private boolean debugLogging = false;
+
+    // Getters and setters
+
+    public String getProxyUrl() {
+        return proxyUrl;
+    }
+
+    public void setProxyUrl(String proxyUrl) {
+        this.proxyUrl = proxyUrl;
+    }
+
+    public int getTimeoutMs() {
+        return timeoutMs;
+    }
+
+    public void setTimeoutMs(int timeoutMs) {
+        this.timeoutMs = timeoutMs;
+    }
+
+    public int getBatchSize() {
+        return batchSize;
+    }
+
+    public void setBatchSize(int batchSize) {
+        this.batchSize = batchSize;
+    }
+
+    public int getBatchIntervalMs() {
+        return batchIntervalMs;
+    }
+
+    public void setBatchIntervalMs(int batchIntervalMs) {
+        this.batchIntervalMs = batchIntervalMs;
+    }
+
+    public boolean isDebugLogging() {
+        return debugLogging;
+    }
+
+    public void setDebugLogging(boolean debugLogging) {
+        this.debugLogging = debugLogging;
+    }
+
+    @Override
+    public String toString() {
+        return "FactryHistorianSettings{" +
+                "proxyUrl='" + proxyUrl + '\'' +
+                ", timeoutMs=" + timeoutMs +
+                ", batchSize=" + batchSize +
+                ", batchIntervalMs=" + batchIntervalMs +
+                ", debugLogging=" + debugLogging +
+                '}';
+    }
+}

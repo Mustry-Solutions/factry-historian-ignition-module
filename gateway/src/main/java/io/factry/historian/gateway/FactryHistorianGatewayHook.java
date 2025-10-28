@@ -1,11 +1,13 @@
 package io.factry.historian.gateway;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import javax.servlet.http.HttpServletResponse;
 
 import com.inductiveautomation.ignition.common.licensing.LicenseState;
 import com.inductiveautomation.ignition.common.project.resource.adapter.ResourceTypeAdapterRegistry;
+import com.inductiveautomation.ignition.gateway.config.ExtensionPoint;
 import com.inductiveautomation.ignition.gateway.dataroutes.RouteGroup;
 import com.inductiveautomation.ignition.gateway.model.AbstractGatewayModuleHook;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
@@ -24,6 +26,7 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
     private static final Logger logger = LoggerFactory.getLogger(FactryHistorianGatewayHook.class);
 
     private GatewayContext gatewayContext;
+    private FactryHistoryProvider historyProvider;
     /**
      * Called to before startup. This is the chance for the module to add its extension points and update persistent
      * records and schemas. None of the managers will be started up at this point, but the extension point managers will
@@ -36,6 +39,24 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
         logger.info("========================================");
 
         this.gatewayContext = context;
+
+        // Create the history provider
+        try {
+            logger.info("Creating Factry History Provider...");
+            historyProvider = new FactryHistoryProvider(
+                    context,
+                    FactryHistoryProvider.HISTORIAN_NAME,
+                    new FactryHistorianSettings()
+            );
+            logger.info("History provider created: {}", historyProvider.getName());
+
+            logger.info("Factry historian implementation is ready");
+            logger.info("Attempting to register with extension point system...");
+            // Registration will be attempted via getExtensionPoints() method
+
+        } catch (Exception e) {
+            logger.error("Failed to create history provider", e);
+        }
 
         logger.info("Gateway context stored successfully");
         logger.info("Factry Historian Module - Setup Complete");
@@ -67,9 +88,39 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
         logger.info("Factry Historian Module - Shutdown");
         logger.info("========================================");
 
-        // Future: Clean up resources here
+        // Clean up history provider
+        if (historyProvider != null) {
+            try {
+                logger.info("Shutting down history provider...");
+                historyProvider.shutdown();
+                logger.info("History provider shutdown complete");
+            } catch (Exception e) {
+                logger.error("Error shutting down history provider", e);
+            }
+        }
 
         logger.info("Factry Historian Module - Shutdown Complete");
+    }
+
+    /**
+     * EXPERIMENTAL: Attempt to register our historian as an extension point.
+     *
+     * This follows the pattern from other extension points (TagProvider, UserSource, etc.)
+     * but may not be the correct mechanism for historians in Ignition 8.3+.
+     *
+     * @return list containing our historian extension point
+     */
+    @Override
+    public List<? extends ExtensionPoint<?>> getExtensionPoints() {
+        logger.info("getExtensionPoints() called - attempting to register Factry Historian");
+        try {
+            FactryHistorianExtensionPoint extensionPoint = new FactryHistorianExtensionPoint();
+            logger.info("Created extension point: {}", extensionPoint);
+            return Collections.singletonList(extensionPoint);
+        } catch (Exception e) {
+            logger.error("Failed to create extension point", e);
+            return Collections.emptyList();
+        }
     }
 
     /**
