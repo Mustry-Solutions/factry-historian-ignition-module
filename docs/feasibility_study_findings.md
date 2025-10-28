@@ -18,25 +18,27 @@
 - ❌ Historian API packages (`com.inductiveautomation.historian.gateway.api.*`) **missing from SDK**
 - ❌ Cannot compile gateway scope code that uses Historian API
 
-**Recommendation**: **Contact Inductive Automation** to request:
-1. Publication of Historian API classes in SDK artifacts
-2. Clarification on whether a separate `historian-api` artifact will be released
-3. Example code or documentation for custom historian implementation
-4. Timeline for when the Historian API will be available to module developers
+**Recommendation**: **Contact Inductive Automation** to clarify:
+1. **Which API should be used?** The available `com.inductiveautomation.ignition.gateway.historian.*` or the documented-but-not-published `com.inductiveautomation.historian.gateway.api.*`?
+2. **If the new API**: When will it be published in SDK artifacts?
+3. **If the old API**: Is there documentation for building custom historians with `TagHistoryManager`?
+4. **Clarification**: Are there two valid approaches or is one being phased out?
+
+**Forum Discussion**: https://forum.inductiveautomation.com/t/ignition-8-3-building-a-custom-tag-historian-module/100725/4
 
 ---
 
 ## What We Attempted
 
-### Project Upgrades Completed ✅
+### Development Environment ✅
 
-Successfully upgraded the entire development environment:
+The project is configured with the latest stable versions:
 
-1. **SDK Version**: 8.1.20 → **8.3.1** (stable release, October 21, 2025)
-2. **Gradle Version**: 7.6 → **8.5** (supports Java 17+)
-3. **Java Version**: 11 → **17** (required by Ignition 8.3)
-4. **Repository Configuration**: Added Inductive Automation's release and thirdparty repositories
-5. **Build System**: Verified compilation works for common, client, and designer scopes
+1. **SDK Version**: **8.3.1** (stable release, October 21, 2025)
+2. **Gradle Version**: **8.5**
+3. **Java Version**: **17** (required by Ignition 8.3)
+4. **Repository Configuration**: Inductive Automation's release and thirdparty repositories
+5. **Build Status**: Common, client, and designer scopes compile successfully
 
 ### Historian Implementation Completed ✅
 
@@ -58,31 +60,14 @@ All code follows the patterns documented in the Ignition 8.3.1 JavaDoc and match
 ### Current Situation
 
 **SDK Version**: 8.3.1 (stable release, October 21, 2025) ✅
-**Gradle Version**: 8.5 (upgraded from 7.6) ✅
-**Java Version**: 17 (upgraded from 11) ✅
+**Gradle Version**: 8.5 ✅
+**Java Version**: 17 ✅
 **Target Runtime**: Ignition 8.3.0 (released August 2025) ✅
 **Problem**: Historian API classes exist in runtime but **not published in SDK artifacts** ❌
 
-### Initial Confusion
+### The Problem: Two Historian APIs Exist
 
-We initially thought SDK 8.3.x wasn't available because we were using SDK 8.1.20. After investigating the ignition-sdk-examples repository (ignition-8.3 branch), we discovered:
-
-1. **SDK 8.3.1 exists and is stable** (released October 21, 2025)
-2. Available in Inductive Automation's Maven repository
-3. Repository: `https://nexus.inductiveautomation.com/repository/inductiveautomation-releases`
-4. Artifact: `com.inductiveautomation.ignitionsdk:gateway-api:8.3.1`
-
-### Successful Upgrades
-
-We successfully upgraded the entire project:
-- ✅ SDK: 8.1.20 → 8.3.1
-- ✅ Gradle: 7.6 → 8.5
-- ✅ Java: 11 → 17
-- ✅ All module scopes compile: common, client, designer
-
-### The Real Problem: Missing API Classes
-
-When building with `./gradlew build`, we get **93 compilation errors** in the gateway scope because these packages don't exist in SDK 8.3.1:
+When building with `./gradlew build`, we get **93 compilation errors** in the gateway scope because these **new Historian API** packages don't exist in SDK 8.3.1:
 
 ```
 ✗ com.inductiveautomation.historian.gateway.api
@@ -90,21 +75,53 @@ When building with `./gradlew build`, we get **93 compilation errors** in the ga
 ✗ com.inductiveautomation.historian.gateway.api.query
 ✗ com.inductiveautomation.historian.gateway.api.storage
 ✗ com.inductiveautomation.historian.gateway.api.paths
-✗ com.inductiveautomation.ignition.gateway.config
 ```
 
-### Key Missing Classes
+**However**, we discovered that SDK 8.3.1 **DOES contain** a different historian API:
+
+```
+✅ com.inductiveautomation.ignition.gateway.historian
+   - TagHistoryManager (documented in 8.3.1 JavaDoc, not deprecated)
+   - TagHistoryQueryInterface
+   - AssociatedHistoryQueryInterface
+   - AnnotationQueryProvider (deprecated)
+   - AnnotationStorageProvider (deprecated)
+```
+
+### Two Distinct APIs - Which to Use?
+
+There appear to be **two separate historian APIs** in Ignition 8.3:
+
+1. **Available in SDK**: `com.inductiveautomation.ignition.gateway.historian.*`
+   - Present in SDK 8.3.1 JAR files
+   - Documented in 8.3.1 JavaDoc
+   - `TagHistoryManager` is NOT marked as deprecated
+   - Appears to be a supported API
+
+2. **NOT Available in SDK**: `com.inductiveautomation.historian.gateway.api.*`
+   - Documented in 8.3.1 JavaDoc at https://files.inductiveautomation.com/sdk/javadoc/ignition83/8.3.1/
+   - Has modern design (AbstractHistorian, QueryEngine, StorageEngine)
+   - Not published in SDK 8.3.1 artifacts
+   - Cannot compile against this API
+
+**Critical Question**: Which API should be used for custom historian development in Ignition 8.3+?
+- The "old" API that's available in the SDK?
+- The "new" API that's documented but not published?
+- Are both valid approaches?
+
+### Key Missing Classes (All Historian-Specific)
 
 - `AbstractHistorian` - Base class for historian implementations
 - `Historian` - Main historian interface
 - `HistorianSettings` - Configuration interface
 - `QueryEngine` / `AbstractQueryEngine` - Query engine interfaces
 - `StorageEngine` / `AbstractStorageEngine` - Storage engine interfaces
-- `AbstractExtensionPoint` - Extension point base class
 
 **All of these exist in Ignition 8.3.0+ runtime** (confirmed via JavaDoc at https://files.inductiveautomation.com/sdk/javadoc/ignition83/8.3.1/) but are **missing from SDK 8.3.1 published artifacts**.
 
 ### Build Results
+
+The module compiles partially but fails in the gateway scope:
 
 ```bash
 > Task :common:compileJava          ✅ SUCCESS
@@ -113,10 +130,7 @@ When building with `./gradlew build`, we get **93 compilation errors** in the ga
 > Task :gateway:compileJava          ❌ FAILED (93 errors - all Historian API)
 ```
 
-This proves:
-- The SDK 8.3.1 infrastructure works correctly
-- Common Ignition APIs are available
-- **Only** the Historian API packages are missing from published artifacts
+**Conclusion**: SDK 8.3.1 works correctly for standard APIs, but the Historian API packages are not published in the SDK artifacts.
 
 ---
 
@@ -157,34 +171,37 @@ The problem is that the SDK jars used for compilation haven't been updated to in
 
 ## What We Need from Inductive Automation
 
-### 1. Historian API Publication (Critical)
+### 1. API Clarification (Critical)
 
-**Request**: Publish Historian API classes in SDK artifacts
+**Primary Question**: Which API is the correct one for custom historian development in Ignition 8.3+?
 
-**Rationale**:
-- SDK 8.3.1 exists and works, but Historian API packages are missing
-- Cannot compile gateway code that uses the Historian API
-- Need compile-time access to:
-  - `com.inductiveautomation.historian.gateway.api.*`
-  - `com.inductiveautomation.historian.gateway.api.config.*`
-  - `com.inductiveautomation.historian.gateway.api.query.*`
-  - `com.inductiveautomation.historian.gateway.api.storage.*`
+**Option A**: Use the **available** API: `com.inductiveautomation.ignition.gateway.historian.*`
+- ✅ Present in SDK 8.3.1
+- ✅ Can compile immediately
+- ❌ Less documentation/examples
+- ❓ Is this the recommended approach?
+
+**Option B**: Use the **new** API: `com.inductiveautomation.historian.gateway.api.*`
+- ✅ Modern design (AbstractHistorian, QueryEngine, StorageEngine)
+- ✅ Well documented in JavaDoc
+- ❌ Not published in SDK - cannot compile
+- ❓ When will it be available?
+
+**Request**:
+1. **Confirm which approach is recommended** for new custom historian development
+2. If Option B (new API): **Publish the classes** in SDK artifacts or provide a separate `historian-api` artifact
+3. If Option A (existing API): **Provide documentation/examples** for custom historians using `TagHistoryManager`
 
 **Current Working SDK Artifacts**:
 ```kotlin
-compileOnly("com.inductiveautomation.ignitionsdk:gateway-api:8.3.1")          // ✅ Available
+compileOnly("com.inductiveautomation.ignitionsdk:gateway-api:8.3.1")          // ✅ Contains TagHistoryManager
 compileOnly("com.inductiveautomation.ignitionsdk:ignition-common:8.3.1")      // ✅ Available
-compileOnly("com.inductiveautomation.ignitionsdk:client-api:8.3.1")           // ✅ Available
-compileOnly("com.inductiveautomation.ignitionsdk:designer-api:8.3.1")         // ✅ Available
 ```
 
-**Missing/Needed Artifact**:
+**Missing Artifact** (if Option B is recommended):
 ```kotlin
 compileOnly("com.inductiveautomation.ignitionsdk:historian-api:8.3.1")        // ❌ Doesn't exist
-// OR classes should be included in gateway-api:8.3.1
 ```
-
-**Question for IA**: Will there be a separate `historian-api` artifact, or should these classes be in `gateway-api`?
 
 ### 2. Documentation (High Priority)
 
@@ -410,40 +427,68 @@ This affects our project timeline:
 
 ## Conclusion
 
-**The Factry Historian Module is technically feasible and well-designed.**
-
-The Ignition 8.3 Historian API provides exactly what we need:
-- ✅ Clean, modern API design
-- ✅ Separation of read and write operations
-- ✅ Async/non-blocking architecture
-- ✅ Follows established extension point patterns
+**The Factry Historian Module is technically feasible but blocked pending clarification.**
 
 **Project Status:**
 - ✅ SDK 8.3.1 is available and configured
 - ✅ All infrastructure properly set up (Gradle 8.5, Java 17)
-- ✅ Implementation code complete (~600 lines)
+- ✅ Implementation code complete (~600 lines using new API)
 - ✅ Common, client, designer scopes compile successfully
-- ❌ Gateway scope blocked by missing Historian API in SDK
+- ❌ Gateway scope blocked - need API clarification
 
-**The Missing Piece:**
-- ❌ Historian API classes not published in SDK 8.3.1 artifacts
-- ❌ Cannot compile gateway code without these classes
-- ❌ No separate `historian-api` artifact available
+**The Blocker:**
+We discovered **two different historian APIs** exist in Ignition 8.3:
 
-**Next Step**: Contact Inductive Automation support **today** to ask:
-1. **Why are Historian API classes not in SDK 8.3.1?**
-2. **Will there be a separate `historian-api` artifact?**
-3. **When will the API be available for module developers?**
-4. **Is this an oversight or intentional?**
+1. **Available but unclear**: `com.inductiveautomation.ignition.gateway.historian.*`
+   - ✅ Present in SDK 8.3.1
+   - ❓ Is this the recommended approach?
+   - ❓ No clear documentation for custom historians
 
-**Timeline Estimate** (if API classes published tomorrow):
+2. **Well-designed but unavailable**: `com.inductiveautomation.historian.gateway.api.*`
+   - ✅ Modern, clean API design
+   - ✅ Well documented in JavaDoc
+   - ❌ Not published in SDK 8.3.1
+   - ❌ Cannot compile against it
+
+**Two Possible Paths Forward:**
+
+**Path A** (if old API recommended):
+- Rewrite implementation to use `TagHistoryManager` API
+- Timeline: 1-2 days rewrite + testing
+- Risk: Might not be the intended approach
+
+**Path B** (if new API is correct):
+- Wait for new API to be published in SDK
+- Timeline: Unknown (depends on IA response)
+- Risk: Could be weeks or months
+
+**Waiting for Clarification**: https://forum.inductiveautomation.com/t/ignition-8-3-building-a-custom-tag-historian-module/100725/4
+
+**Next Step**: Waiting for response from Inductive Automation forum:
+- **Forum Post**: https://forum.inductiveautomation.com/t/ignition-8-3-building-a-custom-tag-historian-module/100725/4
+- **Key Questions**:
+  1. Which API should be used for custom historians in 8.3+?
+  2. Is `com.inductiveautomation.ignition.gateway.historian.TagHistoryManager` the recommended approach?
+  3. Or should we wait for `com.inductiveautomation.historian.gateway.api.*` to be published?
+  4. Timeline for availability if waiting is recommended?
+
+**Timeline Estimates:**
+
+**If Path A** (use existing TagHistoryManager API):
+- Days 1-2: Rewrite implementation using available API
+- Week 1: Complete HTTP client and data mapping
+- Week 2: Configuration UI and testing
+- Week 3: Integration testing
+- Week 4: Beta deployment
+
+**If Path B** (wait for new API publication):
 - **Day 1**: Add historian-api dependency and rebuild (5 minutes)
 - Week 1: Complete HTTP client and data mapping
 - Week 2: Configuration UI and testing
 - Week 3: Integration testing
-- Week 4: Beta deployment and refinement
+- Week 4: Beta deployment
 
-**This is 95% complete - we just need IA to publish the Historian API classes in their SDK artifacts.**
+**Current Status**: Implementation is 95% complete for the **new API**. If the **old API** is recommended, need 1-2 days for rewrite.
 
 ---
 
