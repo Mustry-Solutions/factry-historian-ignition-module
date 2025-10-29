@@ -1,14 +1,13 @@
 package io.factry.historian.gateway;
 
 import com.inductiveautomation.historian.gateway.api.storage.AbstractStorageEngine;
-import com.inductiveautomation.historian.gateway.api.storage.AtomicPoint;
-import com.inductiveautomation.historian.gateway.api.storage.StorageResult;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.inductiveautomation.historian.common.model.data.AtomicPoint;
+import com.inductiveautomation.historian.common.model.data.SourceChangePoint;
+import com.inductiveautomation.historian.common.model.data.StorageResult;
+import com.inductiveautomation.ignition.common.util.LoggerEx;
+import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 
 /**
  * Storage engine for writing historical data to the Factry Historian system.
@@ -16,78 +15,63 @@ import java.util.concurrent.CompletionStage;
  * This implementation sends data to the proxy REST API at /collector endpoint.
  */
 public class FactryStorageEngine extends AbstractStorageEngine {
-    private static final Logger logger = LoggerFactory.getLogger(FactryStorageEngine.class);
-
     private final FactryHistorianSettings settings;
 
-    public FactryStorageEngine(FactryHistorianSettings settings) {
+    public FactryStorageEngine(
+        GatewayContext context,
+        String historianName,
+        FactryHistorianSettings settings
+    ) {
+        super(context, historianName, LoggerEx.newBuilder().build(FactryStorageEngine.class));
         this.settings = settings;
-        logger.info("Factry Storage Engine initialized with proxy URL: {}", settings.getProxyUrl());
+        logger.info("Factry Storage Engine initialized with proxy URL: " + settings.getProxyUrl());
     }
 
     @Override
-    public <P extends AtomicPoint<?>> CompletionStage<StorageResult<P>> storeAtomic(List<P> points) {
+    protected StorageResult<AtomicPoint<?>> doStoreAtomic(List<AtomicPoint<?>> points) {
         if (settings.isDebugLogging()) {
-            logger.debug("storeAtomic called with {} points", points.size());
+            logger.debug("doStoreAtomic called with " + points.size() + " points");
         }
 
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                // TODO: Implement actual HTTP POST to proxy /collector endpoint
-                // For now, just log the points
+        try {
+            // TODO: Implement actual HTTP POST to proxy /collector endpoint
+            // For now, just log the points
 
-                logger.info("Would store {} atomic points to {}/collector",
-                        points.size(), settings.getProxyUrl());
+            logger.info("Would store " + points.size() + " atomic points to " + settings.getProxyUrl() + "/collector");
 
-                if (settings.isDebugLogging()) {
-                    for (P point : points) {
-                        logger.debug("Point: path={}, timestamp={}, value={}, quality={}",
-                                point.getPath(), point.getTimestamp(),
-                                point.getValue(), point.getQuality());
-                    }
-                }
-
-                // Return success result
-                return StorageResult.success(points);
-
-            } catch (Exception e) {
-                logger.error("Error storing atomic points", e);
-                return StorageResult.error(points, e);
+            if (settings.isDebugLogging()) {
+                logger.debug("Received " + points.size() + " atomic points for storage");
+                // TODO: Log individual point details once we understand the API better
             }
-        });
+
+            // Return success result
+            return StorageResult.success(points);
+
+        } catch (Exception e) {
+            logger.error("Error storing atomic points", e);
+            return StorageResult.failure(points);
+        }
     }
 
     @Override
-    public <C> CompletionStage<StorageResult<C>> storeComplex(List<C> complexPoints) {
-        logger.debug("storeComplex called with {} points", complexPoints.size());
+    protected StorageResult<SourceChangePoint> applySourceChanges(List<SourceChangePoint> changes) {
+        logger.debug("applySourceChanges called with " + changes.size() + " changes");
 
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                // TODO: Implement complex point storage
-                logger.info("Would store {} complex points", complexPoints.size());
-                return StorageResult.success(complexPoints);
+        try {
+            // TODO: Implement source change application
+            logger.info("Would apply " + changes.size() + " source changes");
+            return StorageResult.success(changes);
 
-            } catch (Exception e) {
-                logger.error("Error storing complex points", e);
-                return StorageResult.error(complexPoints, e);
-            }
-        });
+        } catch (Exception e) {
+            logger.error("Error applying source changes", e);
+            return StorageResult.failure(changes);
+        }
     }
 
     @Override
-    public <C> CompletionStage<StorageResult<C>> applyChanges(List<C> changes) {
-        logger.debug("applyChanges called with {} changes", changes.size());
-
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                // TODO: Implement change application
-                logger.info("Would apply {} changes", changes.size());
-                return StorageResult.success(changes);
-
-            } catch (Exception e) {
-                logger.error("Error applying changes", e);
-                return StorageResult.error(changes, e);
-            }
-        });
+    protected boolean isEngineUnavailable() {
+        // TODO: Check if proxy is reachable
+        // For now, assume always available
+        return false;
     }
 }

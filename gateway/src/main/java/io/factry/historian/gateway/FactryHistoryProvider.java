@@ -5,6 +5,7 @@ import com.inductiveautomation.historian.gateway.api.query.QueryEngine;
 import com.inductiveautomation.historian.gateway.api.storage.StorageEngine;
 import com.inductiveautomation.historian.gateway.api.paths.QualifiedPathAdapter;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
+import com.inductiveautomation.ignition.gateway.model.ProfileStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,8 +41,8 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
     public FactryHistoryProvider(GatewayContext context, String historianName, FactryHistorianSettings settings) {
         super(context, historianName);
         this.settings = settings;
-        this.queryEngine = new FactryQueryEngine(settings);
-        this.storageEngine = new FactryStorageEngine(settings);
+        this.queryEngine = new FactryQueryEngine(context, historianName, settings);
+        this.storageEngine = new FactryStorageEngine(context, historianName, settings);
 
         logger.info("Factry Historian created: name={}, proxyUrl={}",
                 historianName, settings.getProxyUrl());
@@ -101,6 +102,13 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         logger.info("Historian settings change requested: {} -> {}", settings, newSettings);
         // TODO: Implement settings change logic - may need to recreate engines
         return true;
+    }
+
+    @Override
+    public ProfileStatus getStatus() {
+        // TODO: Check actual connection status to proxy
+        // For now, return RUNNING if started
+        return started ? ProfileStatus.RUNNING : ProfileStatus.UNKNOWN;
     }
 
     @Override
