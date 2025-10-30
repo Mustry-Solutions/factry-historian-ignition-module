@@ -24,25 +24,33 @@ This produces:
 - **Signed module**: `build/Factry-Historian.modl` (use this for production)
 - **Unsigned module**: `build/Factry-Historian.unsigned.modl`
 
-### 2. Copy Module to Docker Volume
+### 2. Copy Module to Docker Volume and Restart
 
-The Docker Compose setup mounts the `ignition/` folder. Copy the **signed** module directly to the data directory:
+The Docker Compose setup mounts the `ignition/` folder. **IMPORTANT**: You must stop Ignition, remove the old module file, copy the new one, then start Ignition:
 
 ```bash
-# Copy signed module
+# Stop Ignition
+docker compose stop ignition
+
+# Remove old module file
+rm ignition/data/Factry-Historian.modl
+
+# Copy new signed module
 cp build/Factry-Historian.modl ignition/data/
 
-# Remove any old unsigned versions (if present)
-rm ignition/data/Factry-Historian.unsigned.modl 2>/dev/null || true
+# Start Ignition
+docker compose start ignition
 ```
 
-**Important**: Copy to `ignition/data/` NOT `ignition/data/modules/` - Ignition will detect modules in the data directory.
+**Why this is necessary**: Ignition loads modules into memory on startup. Simply copying a new file while Ignition is running or using `docker compose restart` will NOT reload the module. You must:
+1. Stop the container
+2. Remove the old module file
+3. Copy the new module file
+4. Start the container
 
-### 3. Restart Ignition Gateway
-
+**Alternative one-liner**:
 ```bash
-# Using docker compose (without hyphen)
-docker compose restart ignition
+docker compose stop ignition && rm ignition/data/Factry-Historian.modl && cp build/Factry-Historian.modl ignition/data/ && docker compose start ignition
 ```
 
 ### 4. View Logs to Verify Loading
@@ -73,14 +81,14 @@ After the first installation or when the module certificate changes:
 ## Quick Reference Commands
 
 ```bash
-# Full workflow in one command
-java11 && ./gradlew clean build && cp build/Factry-Historian.modl ignition/data/ && docker compose restart ignition
+# Full workflow in one command (CORRECT)
+java11 && ./gradlew clean build && docker compose stop ignition && rm ignition/data/Factry-Historian.modl && cp build/Factry-Historian.modl ignition/data/ && docker compose start ignition
 
 # Watch logs after restart
 docker compose logs ignition -f --tail=100
 
-# Check module status in logs
-docker compose logs ignition --tail=300 | grep -A 10 "Factry Historian"
+# Check module status in logs (use --since for recent logs only)
+docker compose logs ignition --since 1m | grep -i "factry"
 ```
 
 ## Verification Checklist
