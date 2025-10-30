@@ -11,7 +11,9 @@ import com.inductiveautomation.ignition.common.browsing.BrowseFilter;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -23,6 +25,7 @@ import java.util.Set;
  */
 public class FactryQueryEngine extends AbstractQueryEngine {
     private final FactryHistorianSettings settings;
+    private final FactryHttpClient httpClient;
 
     public FactryQueryEngine(
         GatewayContext context,
@@ -31,6 +34,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     ) {
         super(context, historianName, LoggerEx.newBuilder().build(FactryQueryEngine.class));
         this.settings = settings;
+        this.httpClient = new FactryHttpClient(settings);
         logger.info("Factry Query Engine initialized with proxy URL: " + settings.getProxyUrl());
     }
 
@@ -49,16 +53,17 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
         try {
             // TODO: Implement actual HTTP POST to proxy /provider endpoint
-            // Convert options to JSON: tagPaths, startTime, endTime, maxPoints
-            // Parse response and call processor.processPoint() for each point
+            // For now, just log what we would query
 
             logger.info("Would query tag paths from " + settings.getProxyUrl() + "/provider");
-            // TODO: Extract and log tag paths from options once we understand the API better
 
-            // Example of how to use processor:
-            // for (TagSample sample : responseSamples) {
-            //     processor.processPoint(historicalNode, timestamp, value, quality);
-            // }
+            // Log query details if debug enabled
+            if (settings.isDebugLogging()) {
+                logger.debug("Query keys: " + options.getQueryKeys().size());
+                options.getTimeRange().ifPresent(tr ->
+                    logger.debug("Time range: " + tr.startTime() + " to " + tr.endTime())
+                );
+            }
 
             return Optional.of(0); // Return number of points processed
 

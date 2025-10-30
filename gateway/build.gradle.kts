@@ -19,6 +19,9 @@ dependencies {
     compileOnly("com.inductiveautomation.historian:historian-gateway:1.3.1")
     compileOnly("com.inductiveautomation.historian:historian-common:1.3.1")
 
+    // JSON library for HTTP communication with proxy
+    compileOnly("com.google.code.gson:gson:2.10.1")
+
     compileOnly(project(":common"))
     // add gateway scoped dependencies here
 }

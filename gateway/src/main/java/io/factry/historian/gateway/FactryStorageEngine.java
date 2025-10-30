@@ -7,6 +7,7 @@ import com.inductiveautomation.historian.common.model.data.StorageResult;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -16,6 +17,7 @@ import java.util.List;
  */
 public class FactryStorageEngine extends AbstractStorageEngine {
     private final FactryHistorianSettings settings;
+    private final FactryHttpClient httpClient;
 
     public FactryStorageEngine(
         GatewayContext context,
@@ -24,6 +26,7 @@ public class FactryStorageEngine extends AbstractStorageEngine {
     ) {
         super(context, historianName, LoggerEx.newBuilder().build(FactryStorageEngine.class));
         this.settings = settings;
+        this.httpClient = new FactryHttpClient(settings);
         logger.info("Factry Storage Engine initialized with proxy URL: " + settings.getProxyUrl());
     }
 
@@ -41,7 +44,14 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
             if (settings.isDebugLogging()) {
                 logger.debug("Received " + points.size() + " atomic points for storage");
-                // TODO: Log individual point details once we understand the API better
+                // Log details of first point as example
+                if (!points.isEmpty()) {
+                    AtomicPoint<?> first = points.get(0);
+                    logger.debug("Example point - source: " + first.source() +
+                               ", timestamp: " + first.timestamp() +
+                               ", value: " + first.value() +
+                               ", quality: " + first.quality());
+                }
             }
 
             // Return success result
