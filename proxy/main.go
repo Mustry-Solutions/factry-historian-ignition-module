@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	httpSwagger "github.com/swaggo/http-swagger"
+	// httpSwagger "github.com/swaggo/http-swagger"
 
-	_ "factry-historian-proxy/docs" // Import generated docs
+	// _ "factry-historian-proxy/docs" // Import generated docs
 )
 
 // @title Factry Historian Proxy API
@@ -42,8 +42,8 @@ func main() {
 	r.HandleFunc("/collector", CollectorHandler).Methods("POST")
 	r.HandleFunc("/provider", ProviderHandler).Methods("POST")
 
-	// Swagger UI
-	r.PathPrefix("/swagger/").Handler(httpSwagger.WrapHandler)
+	// Swagger UI (disabled - run 'swag init' to generate docs)
+	// r.PathPrefix("/swagger/").Handler(httpSwagger.WrapHandler)
 
 	// Health check endpoint
 	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -58,8 +58,7 @@ func main() {
 			"Endpoints:\n" +
 			"  POST /collector - Receive tag data (batch writes)\n" +
 			"  POST /provider  - Query historical data\n" +
-			"  GET  /health    - Health check\n" +
-			"  GET  /swagger/  - Swagger UI documentation\n"))
+			"  GET  /health    - Health check\n"))
 	}).Methods("GET")
 
 	// Configure server
@@ -78,7 +77,7 @@ func main() {
 	log.Printf("Starting server on port %s", Port)
 	log.Printf("Collector endpoint: http://localhost%s/collector", Port)
 	log.Printf("Provider endpoint:  http://localhost%s/provider", Port)
-	log.Printf("Swagger UI:         http://localhost%s/swagger/index.html", Port)
+	log.Printf("Health check:       http://localhost%s/health", Port)
 	log.Printf("=================================================")
 
 	if err := srv.ListenAndServe(); err != nil {

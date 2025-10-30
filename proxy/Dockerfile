@@ -1,5 +1,5 @@
 # Dockerfile for Factry Historian Proxy
-FROM golang:1.21-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 WORKDIR /build
 
