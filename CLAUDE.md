@@ -148,6 +148,19 @@ The `ignition/` folder contains persistent data and is git-ignored.
 
 ## Development Workflow
 
+### Module Update Workflow
+
+**IMPORTANT**: Browser-based module upload via the Ignition Gateway web interface does not work reliably.
+
+**Use the Docker volume mounting workflow instead**:
+
+1. Build the module: `./gradlew clean build`
+2. Copy to Docker volume: `cp build/Factry-Historian.unsigned.modl ignition/data/modules/`
+3. Restart Gateway: `docker-compose restart ignition`
+4. On first install: Accept the **Mustry Solution** certificate in **Config → System → Modules**
+
+See **`docs/module_update_workflow.md`** for complete details and troubleshooting.
+
 ### Adding Gateway Functionality
 
 1. Implement logic in `gateway/src/main/java/io/factry/historian/gateway/`
