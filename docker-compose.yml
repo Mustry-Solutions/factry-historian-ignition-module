@@ -1,0 +1,54 @@
+services:
+  ignition:
+    image: inductiveautomation/ignition:8.3.1
+    container_name: ignition-dev
+    ports:
+      - "8088:8088"   # HTTP - Gateway web interface
+      - "8043:8043"   # HTTPS
+      - "8060:8060"   # Gateway Network
+    volumes:
+      # Mount data directory for persistence (modules, projects, gateway config, etc.)
+      - ./ignition/data:/usr/local/bin/ignition/data
+
+      # Optional: Mount module directly for hot deployment
+      # Uncomment after first build to auto-install the module
+      # - ./build/Factry-Historian.modl:/usr/local/bin/ignition/user-lib/modules/Factry-Historian.modl
+    environment:
+      # Accept EULA automatically
+      ACCEPT_IGNITION_EULA: "Y"
+
+      # Gateway admin credentials (change these!)
+      GATEWAY_ADMIN_USERNAME: "admin"
+      GATEWAY_ADMIN_PASSWORD: "password"
+
+      # Gateway network settings
+      GATEWAY_NETWORK_0_HOST: "ignition-dev"
+
+      # Increase memory for development
+      IGNITION_OPTS: "-Xmx2g"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8088/StatusPing"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Optional: Add the Go proxy for testing
+  factry-proxy:
+    build:
+      context: ./proxy
+      dockerfile: Dockerfile
+    container_name: factry-proxy
+    ports:
+      - "8111:8111"   # Proxy API
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8111/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  default:
+    name: factry-historian-dev

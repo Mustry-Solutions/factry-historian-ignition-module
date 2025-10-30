@@ -122,6 +122,30 @@ The gateway hook is where most module logic lives, including:
 - Resource mounting (`getMountedResourceFolder()`)
 - Licensing (`isFreeModule()`)
 
+## Docker Development Environment
+
+For local testing with Ignition 8.3.1, use the provided Docker Compose setup:
+
+```bash
+# Start Ignition and proxy
+docker-compose up -d
+
+# Access gateway
+open http://localhost:8088
+# Credentials: admin / password
+
+# View logs
+docker-compose logs -f
+```
+
+See **`DOCKER_SETUP.md`** for complete documentation including:
+- Module installation
+- Data persistence
+- Testing procedures
+- Troubleshooting
+
+The `ignition/` folder contains persistent data and is git-ignored.
+
 ## Development Workflow
 
 ### Adding Gateway Functionality
