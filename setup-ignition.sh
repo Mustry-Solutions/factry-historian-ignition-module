@@ -19,7 +19,7 @@ if [ -d "$IGNITION_DATA_DIR" ] && [ "$(ls -A $IGNITION_DATA_DIR)" ]; then
         rm -rf "$IGNITION_DATA_DIR"
     else
         echo "✅ Keeping existing data. Starting Ignition..."
-        docker-compose up -d
+        docker compose up -d
         exit 0
     fi
 fi
@@ -29,7 +29,6 @@ echo ""
 
 # Create temporary docker-compose file without volumes
 cat > docker-compose.temp.yml << 'EOF'
-version: '3.8'
 
 services:
   ignition:
@@ -49,7 +48,7 @@ services:
 EOF
 
 echo "Starting temporary container..."
-docker-compose -f docker-compose.temp.yml up -d
+docker compose -f docker-compose.temp.yml up -d
 
 echo ""
 echo "⏳ Waiting for Ignition to initialize (this takes ~30-60 seconds)..."
@@ -76,7 +75,7 @@ done
 if [ $COUNTER -eq $MAX_WAIT ]; then
     echo "❌ ERROR: Ignition failed to start within $MAX_WAIT seconds"
     echo "Check logs with: docker logs ignition-init-temp"
-    docker-compose -f docker-compose.temp.yml down
+    docker compose -f docker-compose.temp.yml down
     rm docker-compose.temp.yml
     exit 1
 fi
@@ -99,53 +98,44 @@ if [ -d "$IGNITION_DATA_DIR/db" ]; then
     echo "   Size: $(du -sh $IGNITION_DATA_DIR | cut -f1)"
 else
     echo "❌ ERROR: Data copy failed"
-    docker-compose -f docker-compose.temp.yml down
+    docker compose -f docker-compose.temp.yml down
     rm docker-compose.temp.yml
     exit 1
 fi
 
 echo ""
 echo "🛑 Step 3: Stopping temporary container..."
-docker-compose -f docker-compose.temp.yml down
+docker compose -f docker-compose.temp.yml down
 rm docker-compose.temp.yml
-
-echo ""
-echo "🚀 Step 4: Starting Ignition with mounted volumes..."
-docker-compose up -d
-
-echo ""
-echo "⏳ Waiting for Ignition to start with mounted data..."
-sleep 5
-
-# Wait for Ignition to be ready with mounted data
-COUNTER=0
-while [ $COUNTER -lt 60 ]; do
-    if docker exec ignition-dev curl -sf http://localhost:8088/StatusPing > /dev/null 2>&1; then
-        echo "✅ Ignition is ready with mounted data!"
-        break
-    fi
-    sleep 1
-    COUNTER=$((COUNTER + 1))
-done
 
 echo ""
 echo "=========================================="
 echo "✅ Setup Complete!"
 echo "=========================================="
 echo ""
-echo "Ignition Gateway is running at:"
-echo "  🌐 http://localhost:8088"
+echo "Ignition data has been initialized in:"
+echo "  📁 $IGNITION_DATA_DIR"
+echo "  📊 Size: $(du -sh $IGNITION_DATA_DIR | cut -f1)"
 echo ""
-echo "Default credentials:"
-echo "  👤 Username: admin"
-echo "  🔑 Password: password"
+echo "Next steps:"
 echo ""
-echo "To view logs:"
-echo "  docker-compose logs -f"
+echo "1. Start Ignition and proxy:"
+echo "   docker compose up -d"
 echo ""
-echo "To stop:"
-echo "  docker-compose down"
+echo "2. Wait ~30 seconds for startup, then access:"
+echo "   🌐 Ignition Gateway: http://localhost:8088"
+echo "   🔌 Proxy Health:     http://localhost:8111/health"
 echo ""
-echo "To reset everything:"
-echo "  docker-compose down && rm -rf ./ignition && ./setup-ignition.sh"
+echo "3. Login with default credentials:"
+echo "   👤 Username: admin"
+echo "   🔑 Password: password"
+echo ""
+echo "4. Install the module:"
+echo "   - Go to Config → System → Modules"
+echo "   - Upload: build/Factry-Historian.modl"
+echo ""
+echo "Useful commands:"
+echo "  docker compose logs -f          # View logs"
+echo "  docker compose down             # Stop services"
+echo "  docker compose restart ignition # Restart Ignition"
 echo ""
