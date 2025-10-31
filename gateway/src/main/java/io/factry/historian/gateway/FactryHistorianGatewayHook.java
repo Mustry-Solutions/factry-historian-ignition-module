@@ -1,5 +1,8 @@
 package io.factry.historian.gateway;
 
+import com.inductiveautomation.historian.gateway.HistorianGatewayHook;
+import com.inductiveautomation.historian.gateway.HistorianManagerImpl;
+import com.inductiveautomation.historian.gateway.api.HistorianManager;
 import com.inductiveautomation.ignition.common.licensing.LicenseState;
 import com.inductiveautomation.ignition.gateway.model.AbstractGatewayModuleHook;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
@@ -10,11 +13,16 @@ import org.slf4j.LoggerFactory;
  * Gateway hook for the Factry Historian module.
  *
  * This is instantiated by Ignition when the module is loaded in the gateway scope.
+ *
+ * This module registers a HistorianExtensionPoint with the Historian Core module,
+ * allowing users to create Factry Historian instances through the Gateway UI at:
+ * Config → Services → Historians → Create New Historian Profile
  */
 public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
     private static final Logger logger = LoggerFactory.getLogger(FactryHistorianGatewayHook.class);
 
     private GatewayContext gatewayContext;
+    private FactryHistorianExtensionPoint extensionPoint;
     private FactryHistoryProvider historyProvider;
 
     /**
@@ -29,23 +37,22 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
 
         this.gatewayContext = context;
 
-        // Create the history provider
-        try {
-            logger.info("Creating Factry History Provider...");
-            historyProvider = new FactryHistoryProvider(
-                    context,
-                    FactryHistoryProvider.HISTORIAN_NAME,
-                    new FactryHistorianSettings()
-            );
-            logger.info("History provider created: {}", historyProvider.getName());
-            logger.info("Factry historian implementation is ready");
+        // Create the extension point - it will be discovered by the Historian Core module
+        extensionPoint = new FactryHistorianExtensionPoint();
 
-        } catch (Exception e) {
-            logger.error("Failed to create history provider", e);
-        }
+        logger.info("Factry Historian extension point created");
+        logger.info("Extension point type: {}", FactryHistorianExtensionPoint.TYPE_ID);
 
-        logger.info("Gateway context stored successfully");
         logger.info("Factry Historian Module - Setup Complete");
+        logger.info("========================================");
+    }
+
+    /**
+     * Get the FactryHistorianExtensionPoint for use by the Historian Core module.
+     * @return The extension point instance
+     */
+    public FactryHistorianExtensionPoint getExtensionPoint() {
+        return extensionPoint;
     }
 
     /**
@@ -55,21 +62,39 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
     public void startup(LicenseState activationState) {
         logger.info("========================================");
         logger.info("Factry Historian Module - Startup");
-        logger.info("========================================");
         logger.info("License State: {}", activationState.toString());
 
-        // Start the historian if created
-        if (historyProvider != null) {
-            try {
-                logger.info("Starting historian...");
-                historyProvider.startup();
-                logger.info("Historian started successfully");
-            } catch (Exception e) {
-                logger.error("Failed to start historian", e);
-            }
+        // WORKAROUND: Create historian instance programmatically
+        // Since we cannot register the extension point in the UI dropdown,
+        // we create a historian instance directly
+        try {
+            logger.info("Creating Factry Historian instance programmatically...");
+
+            // Create default settings
+            FactryHistorianSettings settings = new FactryHistorianSettings();
+            settings.setProxyUrl("http://factry-proxy:8080"); // Default value
+            settings.setDebugLogging(true);
+
+            // Create the historian provider
+            historyProvider = new FactryHistoryProvider(
+                gatewayContext,
+                "FactryHistorian",
+                settings
+            );
+
+            // Start the historian
+            historyProvider.startup();
+
+            logger.info("Factry Historian instance created and started successfully");
+            logger.info("Historian name: FactryHistorian");
+            logger.info("Proxy URL: {}", settings.getProxyUrl());
+
+        } catch (Exception e) {
+            logger.error("Failed to create Factry Historian instance", e);
         }
 
         logger.info("Factry Historian Module - Startup Complete");
+        logger.info("========================================");
     }
 
     /**
@@ -79,20 +104,20 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
     public void shutdown() {
         logger.info("========================================");
         logger.info("Factry Historian Module - Shutdown");
-        logger.info("========================================");
 
-        // Clean up history provider
+        // Shutdown the historian instance if it was created
         if (historyProvider != null) {
             try {
-                logger.info("Shutting down history provider...");
+                logger.info("Shutting down Factry Historian instance...");
                 historyProvider.shutdown();
-                logger.info("History provider shutdown complete");
+                logger.info("Factry Historian instance shutdown complete");
             } catch (Exception e) {
-                logger.error("Error shutting down history provider", e);
+                logger.error("Error shutting down Factry Historian instance", e);
             }
         }
 
         logger.info("Factry Historian Module - Shutdown Complete");
+        logger.info("========================================");
     }
 
     /**
