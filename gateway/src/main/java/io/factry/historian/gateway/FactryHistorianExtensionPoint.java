@@ -38,6 +38,7 @@ public class FactryHistorianExtensionPoint extends HistorianExtensionPoint<Histo
 
     /**
      * Creates a new Factry Historian extension point.
+     * Uses literal strings instead of resource bundle keys for simplicity.
      */
     public FactryHistorianExtensionPoint() {
         super(TYPE_ID, DISPLAY_NAME, DESCRIPTION);
