@@ -13,7 +13,7 @@ public class FactryHistorianSettings implements HistorianSettings {
     /**
      * URL of the proxy REST API endpoint (e.g., http://localhost:8111)
      */
-    private String proxyUrl = "http://localhost:8111";
+    private String url = "http://localhost:8111";
 
     /**
      * Timeout for HTTP requests in milliseconds
@@ -35,14 +35,20 @@ public class FactryHistorianSettings implements HistorianSettings {
      */
     private boolean debugLogging = false;
 
-    // Getters and setters
-
-    public String getProxyUrl() {
-        return proxyUrl;
+    /**
+     * No-arg constructor required for serialization
+     */
+    public FactryHistorianSettings() {
     }
 
-    public void setProxyUrl(String proxyUrl) {
-        this.proxyUrl = proxyUrl;
+    // Getters and setters
+
+    public String getUrl() {
+        return url;
+    }
+
+    public void setUrl(String url) {
+        this.url = url;
     }
 
     public int getTimeoutMs() {
@@ -80,7 +86,7 @@ public class FactryHistorianSettings implements HistorianSettings {
     @Override
     public String toString() {
         return "FactryHistorianSettings{" +
-                "proxyUrl='" + proxyUrl + '\'' +
+                "url='" + url + '\'' +
                 ", timeoutMs=" + timeoutMs +
                 ", batchSize=" + batchSize +
                 ", batchIntervalMs=" + batchIntervalMs +

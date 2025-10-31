@@ -27,7 +27,7 @@ public class FactryStorageEngine extends AbstractStorageEngine {
         super(context, historianName, LoggerEx.newBuilder().build(FactryStorageEngine.class));
         this.settings = settings;
         this.httpClient = new FactryHttpClient(settings);
-        logger.info("Factry Storage Engine initialized with proxy URL: " + settings.getProxyUrl());
+        logger.info("Factry Storage Engine initialized with proxy URL: " + settings.getUrl());
     }
 
     @Override
@@ -40,7 +40,7 @@ public class FactryStorageEngine extends AbstractStorageEngine {
             // TODO: Implement actual HTTP POST to proxy /collector endpoint
             // For now, just log the points
 
-            logger.info("Would store " + points.size() + " atomic points to " + settings.getProxyUrl() + "/collector");
+            logger.info("Would store " + points.size() + " atomic points to " + settings.getUrl() + "/collector");
 
             if (settings.isDebugLogging()) {
                 logger.debug("Received " + points.size() + " atomic points for storage");

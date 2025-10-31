@@ -35,7 +35,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         super(context, historianName, LoggerEx.newBuilder().build(FactryQueryEngine.class));
         this.settings = settings;
         this.httpClient = new FactryHttpClient(settings);
-        logger.info("Factry Query Engine initialized with proxy URL: " + settings.getProxyUrl());
+        logger.info("Factry Query Engine initialized with proxy URL: " + settings.getUrl());
     }
 
     @Override
@@ -55,7 +55,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             // TODO: Implement actual HTTP POST to proxy /provider endpoint
             // For now, just log what we would query
 
-            logger.info("Would query tag paths from " + settings.getProxyUrl() + "/provider");
+            logger.info("Would query tag paths from " + settings.getUrl() + "/provider");
 
             // Log query details if debug enabled
             if (settings.isDebugLogging()) {

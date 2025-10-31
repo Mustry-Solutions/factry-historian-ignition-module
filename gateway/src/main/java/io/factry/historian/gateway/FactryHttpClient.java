@@ -39,7 +39,7 @@ public class FactryHttpClient {
      * @throws IOException if HTTP communication fails
      */
     public CollectorResponse sendToCollector(List<TagSample> samples) throws IOException {
-        String url = settings.getProxyUrl() + "/collector";
+        String url = settings.getUrl() + "/collector";
 
         CollectorRequest request = new CollectorRequest();
         request.samples = samples;
@@ -71,7 +71,7 @@ public class FactryHttpClient {
      * @throws IOException if HTTP communication fails
      */
     public ProviderResponse queryFromProvider(List<String> tagPaths, long startTime, long endTime, int maxPoints) throws IOException {
-        String url = settings.getProxyUrl() + "/provider";
+        String url = settings.getUrl() + "/provider";
 
         ProviderRequest request = new ProviderRequest();
         request.tagPaths = tagPaths;
