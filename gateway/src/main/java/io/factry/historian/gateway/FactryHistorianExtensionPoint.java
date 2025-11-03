@@ -6,9 +6,15 @@ import com.inductiveautomation.historian.gateway.api.HistorianProvider;
 import com.inductiveautomation.historian.gateway.api.config.HistorianSettings;
 import com.inductiveautomation.ignition.gateway.config.DecodedResource;
 import com.inductiveautomation.ignition.gateway.config.ExtensionPointConfig;
+import com.inductiveautomation.ignition.gateway.dataroutes.openapi.SchemaUtil;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
+import com.inductiveautomation.ignition.gateway.web.nav.ExtensionPointResourceForm;
+import com.inductiveautomation.ignition.gateway.web.nav.WebUiComponent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.Optional;
+import java.util.Set;
 
 /**
  * Extension point for the Factry Historian.
@@ -27,22 +33,67 @@ public class FactryHistorianExtensionPoint extends HistorianExtensionPoint<Histo
     public static final String TYPE_ID = "factry-historian";
 
     /**
-     * Display name shown in the Gateway UI.
+     * Display name for the historian type.
+     * This appears in the Gateway UI when selecting a historian type.
      */
     public static final String DISPLAY_NAME = "Factry Historian";
 
     /**
-     * Description shown in the Gateway UI.
+     * Description for the historian type.
+     * This appears in the Gateway UI when selecting a historian type.
      */
     public static final String DESCRIPTION = "External historian for Factry Historian system via REST API";
 
     /**
      * Creates a new Factry Historian extension point.
-     * Uses literal strings instead of resource bundle keys for simplicity.
+     * Passes literal display strings to the parent constructor.
      */
     public FactryHistorianExtensionPoint() {
         super(TYPE_ID, DISPLAY_NAME, DESCRIPTION);
-        logger.info("Factry Historian Extension Point created: type={}, name={}", TYPE_ID, DISPLAY_NAME);
+        logger.info("========================================");
+        logger.info("Factry Historian Extension Point created");
+        logger.info("MODULE VERSION: {}", io.factry.historian.common.FactryHistorianModule.MODULE_VERSION);
+        logger.info("Type: {}, Name: {}", TYPE_ID, DISPLAY_NAME);
+        logger.info("========================================");
+    }
+
+    /**
+     * Provides the web UI component for configuring the historian.
+     *
+     * This method returns the form definition that Ignition uses to render
+     * the configuration page in the Gateway UI.
+     *
+     * @param type The type of UI component requested
+     * @return Optional containing the web UI component configuration
+     */
+    @Override
+    public Optional<WebUiComponent> getWebUiComponent(ComponentType type) {
+        logger.info("========================================");
+        logger.info("getWebUiComponent called!");
+        logger.info("Component Type: {}", type);
+        logger.info("Resource Type: {}", resourceType());
+        logger.info("TYPE_ID: {}", TYPE_ID);
+        logger.info("========================================");
+
+        try {
+            var schema = SchemaUtil.fromType(FactryHistorianConfig.class);
+            logger.info("Schema created successfully: {}", schema);
+
+            var component = new ExtensionPointResourceForm(
+                    resourceType(),  // Use the historian resource type from parent class
+                    "Factry Historian Configuration",  // Form title
+                    TYPE_ID,  // Extension point type ID
+                    schema,  // Use config for profile parameter (try both instead of null)
+                    schema,  // Our config schema
+                    Set.of()  // No additional capabilities
+            );
+
+            logger.info("ExtensionPointResourceForm created successfully");
+            return Optional.of(component);
+        } catch (Exception e) {
+            logger.error("Error creating web UI component", e);
+            return Optional.empty();
+        }
     }
 
     /**

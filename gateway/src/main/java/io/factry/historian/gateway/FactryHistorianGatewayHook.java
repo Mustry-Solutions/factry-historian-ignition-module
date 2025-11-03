@@ -1,10 +1,14 @@
 package io.factry.historian.gateway;
 
 import com.inductiveautomation.ignition.common.licensing.LicenseState;
+import com.inductiveautomation.ignition.gateway.config.ExtensionPoint;
 import com.inductiveautomation.ignition.gateway.model.AbstractGatewayModuleHook;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Gateway hook for the Factry Historian module.
@@ -25,6 +29,7 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
 
     private GatewayContext gatewayContext;
     private FactryHistoryProvider historyProvider;
+    private final FactryHistorianExtensionPoint extensionPoint = new FactryHistorianExtensionPoint();
 
     /**
      * Called before startup. This is the chance for the module to add its extension points
@@ -34,6 +39,7 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
     public void setup(GatewayContext context) {
         logger.info("========================================");
         logger.info("Factry Historian Module - Setup Starting");
+        logger.info("MODULE VERSION: {}", io.factry.historian.common.FactryHistorianModule.MODULE_VERSION);
         logger.info("========================================");
 
         this.gatewayContext = context;
@@ -50,6 +56,7 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
     public void startup(LicenseState activationState) {
         logger.info("========================================");
         logger.info("Factry Historian Module - Startup");
+        logger.info("MODULE VERSION: {}", io.factry.historian.common.FactryHistorianModule.MODULE_VERSION);
         logger.info("License State: {}", activationState.toString());
         logger.info("========================================");
 
@@ -73,8 +80,11 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
 
             logger.info("Starting Factry Historian...");
 
-            // Start the historian
+            // Start the historian - this should register it with the system
             historyProvider.startup();
+
+            // The historian is now started and should be accessible via system.tag.* functions
+            logger.info("Historian is running. Use system.tag.configure() in scripts to set historian.");
 
             logger.info("========================================");
             logger.info("Factry Historian started successfully!");
@@ -87,6 +97,10 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
             logger.info("2. Set History Provider to: FactryHistorian");
             logger.info("3. Add tag to PowerChart to view historical data");
             logger.info("4. Create memo tag and change values to test collector");
+            logger.info("");
+            logger.info("NOTE: If FactryHistorian doesn't appear in dropdown,");
+            logger.info("the historian may need to be registered differently.");
+            logger.info("Check Gateway logs for registration messages.");
             logger.info("========================================");
 
         } catch (Exception e) {
@@ -126,5 +140,31 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
     @Override
     public boolean isFreeModule() {
         return true; // Free module for development - no license required
+    }
+
+    /**
+     * Return extension points provided by this module.
+     * This makes the Factry Historian appear in the "Create Historian" dropdown.
+     *
+     * Note: Clicking "Next" will show "Web UI Component type not found" error
+     * because third-party modules cannot provide UI components yet.
+     *
+     * For testing, use Jython scripts to access the historian directly.
+     * See: docs/historian_from_jython.md
+     */
+    @Override
+    public List<? extends ExtensionPoint<?>> getExtensionPoints() {
+        logger.debug("getExtensionPoints() called - returning Factry Historian extension point");
+        return Collections.singletonList(extensionPoint);
+    }
+
+    /**
+     * Get the running historian instance for Jython script access.
+     * This allows scripts to bypass the tag system and directly use the historian.
+     *
+     * @return The FactryHistoryProvider instance, or null if not started
+     */
+    public FactryHistoryProvider getHistorian() {
+        return historyProvider;
     }
 }
