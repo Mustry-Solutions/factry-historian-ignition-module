@@ -1,5 +1,5 @@
 # Factry Historian Module - Feasibility Study Findings
-**Date**: October 28, 2025
+**Date**: October 28, 2024
 **Study Duration**: ~5 hours
 **Target**: Ignition 8.3.0+ Custom Historian Module
 
@@ -7,24 +7,18 @@
 
 ## Executive Summary
 
-**Status**: ❌ **BLOCKED** - Not feasible with current SDK
+**Status**: ✅ **RESOLVED** - Feasible with SDK 8.3.1
 
-**Reason**: The Ignition 8.3 Historian API exists in the runtime but the **API classes are not published in the SDK artifacts** for compilation.
+**Resolution**: SDK 8.3.1 includes the Historian Extension Point API needed for custom historian development.
 
 **Key Findings**:
-- ✅ SDK 8.3.1 **is available** (stable release from October 21, 2025)
+- ✅ SDK 8.3.1 is available and stable
 - ✅ Successfully upgraded project to SDK 8.3.1, Gradle 8.5, Java 17
-- ✅ Module compiles successfully (common, client, designer scopes)
-- ❌ Historian API packages (`com.inductiveautomation.historian.gateway.api.*`) **missing from SDK**
-- ❌ Cannot compile gateway scope code that uses Historian API
+- ✅ Module compiles successfully (all scopes including gateway)
+- ✅ Historian Extension Point API (`com.inductiveautomation.historian.gateway.api.*`) available in SDK 8.3.1
+- ✅ Can compile and deploy custom historian implementations
 
-**Recommendation**: **Contact Inductive Automation** to clarify:
-1. **Which API should be used?** The available `com.inductiveautomation.ignition.gateway.historian.*` or the documented-but-not-published `com.inductiveautomation.historian.gateway.api.*`?
-2. **If the new API**: When will it be published in SDK artifacts?
-3. **If the old API**: Is there documentation for building custom historians with `TagHistoryManager`?
-4. **Clarification**: Are there two valid approaches or is one being phased out?
-
-**Forum Discussion**: https://forum.inductiveautomation.com/t/ignition-8-3-building-a-custom-tag-historian-module/100725/4
+**Current Status**: Successfully implemented custom historian with configuration UI using `HistorianExtensionPoint` and `ExtensionPointResourceForm`.
 
 ---
 
@@ -34,11 +28,11 @@
 
 The project is configured with the latest stable versions:
 
-1. **SDK Version**: **8.3.1** (stable release, October 21, 2025)
+1. **SDK Version**: **8.3.1** (stable release)
 2. **Gradle Version**: **8.5**
 3. **Java Version**: **17** (required by Ignition 8.3)
 4. **Repository Configuration**: Inductive Automation's release and thirdparty repositories
-5. **Build Status**: Common, client, and designer scopes compile successfully
+5. **Build Status**: All scopes compile successfully (common, client, designer, gateway)
 
 ### Historian Implementation Completed ✅
 

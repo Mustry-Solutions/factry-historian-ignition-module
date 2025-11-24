@@ -7,6 +7,6 @@ public class FactryHistorianModule {
      * Module version - should match version in build.gradle.kts
      * Update this whenever you bump the version!
      */
-    public static final String MODULE_VERSION = "0.1.3";
+    public static final String MODULE_VERSION = "0.1.5";
 
 }

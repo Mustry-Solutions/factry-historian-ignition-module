@@ -11,7 +11,7 @@ services:
       - ./ignition/data:/usr/local/bin/ignition/data
 
       # Optional: Mount module directly for hot deployment
-      # Uncomment after first build to auto-install the module
+      # NOTE: This does NOT work reliably for updates - always use manual UI upload
       # - ./build/Factry-Historian.modl:/usr/local/bin/ignition/user-lib/modules/Factry-Historian.modl
     environment:
       # Accept EULA automatically

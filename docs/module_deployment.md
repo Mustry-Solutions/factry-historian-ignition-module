@@ -14,11 +14,11 @@ When using Docker volume mounts to deploy the module (`docker-compose.yml` with 
 ### Root Cause
 Ignition maintains an internal module registry and cache system at `/usr/local/bin/ignition/data/var/ignition/modl/` that persists across container restarts. Volume-mounted modules may be loaded once and then cached indefinitely.
 
-## Solution: Manual Module Installation via Gateway UI
+## Solution: Module Installation and Updates
 
-### ✅ Working Method
+### Initial Installation Required
 
-**Always use manual uninstall → reinstall through the Gateway UI when updating modules:**
+**The first time**, or after Ignition has cached an old version, you must use manual installation through the Gateway UI:
 
 1. **Build the new module**:
    ```bash
@@ -57,7 +57,7 @@ Ignition maintains an internal module registry and cache system at `/usr/local/b
      I [i.f.h.g.FactryHistorianGatewayHook] [...]: MODULE VERSION: 0.1.4
      ```
 
-### ❌ Methods That Don't Work
+### ❌ Methods That Don't Work for Updates
 
 1. **Docker volume mount hot-reload**:
    ```yaml

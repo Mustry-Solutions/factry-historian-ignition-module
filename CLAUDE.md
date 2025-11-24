@@ -17,31 +17,29 @@ The module integrates with Ignition's Tag History system and supports standard h
 Key implications:
 - **Use 8.3+ APIs**: The module system changed significantly in Ignition 8.3. Always reference 8.3+ documentation and examples.
 - **Module Dependencies**: Use the newer `moduleDependencySpecs` block (not `moduleDependencies`) to leverage the "required" flag feature introduced in 8.3
-- **SDK Version**: Currently using SDK 8.1.20, but APIs and patterns should follow 8.3+ conventions
+- **SDK Version**: Using SDK 8.3.1
 - **Deprecated APIs**: Avoid any APIs or patterns marked as deprecated or designed for pre-8.3 compatibility
 
 When searching for documentation or examples, always specify "Ignition 8.3" or later to avoid outdated patterns from the 8.1/8.2 era.
 
 ## Java Version Requirement
 
-**CRITICAL**: This project requires **Java 11** to build and run.
+**CRITICAL**: This project requires **Java 17** to build and run.
 
-The codebase is configured with Java 11 toolchain in all `build.gradle.kts` files. To switch to Java 11:
+The codebase is configured with Java 17 toolchain in all `build.gradle.kts` files. Both the build toolchain and Ignition 8.3.1 runtime use Java 17.
+
+To verify your Java version:
 ```bash
-# Use the alias (after sourcing ~/.zshrc)
-java11
-
-# Or set JAVA_HOME manually for the build
-export JAVA_HOME=$(/usr/libexec/java_home -v 11)
+java -version  # Should show Java 17
 ```
 
-Java 21/22 will cause build failures, particularly with Gradle and Kotlin toolchains.
+Java versions other than 17 may cause build or runtime compatibility issues.
 
 ## Build Commands
 
 ### Basic Build
 ```bash
-# Clean build (requires Java 11)
+# Clean build (requires Java 17)
 ./gradlew clean build
 
 # Build without signing (for development)
@@ -97,9 +95,9 @@ The module uses Ignition's standard multi-scope architecture with 4 subprojects:
 Module metadata is defined in root `build.gradle.kts`:
 - **Module ID**: `io.factry.historian.FactryHistorian`
 - **Display Name**: Factry Historian
-- **Ignition SDK Version**: 8.1.20
+- **Ignition SDK Version**: 8.3.1
 - **Target Ignition Version**: 8.3+ (not backward compatible with 8.1/8.2)
-- **Required Ignition Version**: Currently set to 8.1.20 but module uses 8.3+ features
+- **Required Ignition Version**: 8.3.0
 
 Scope mappings in `projectScopes`:
 - Gateway: "G"
@@ -107,7 +105,7 @@ Scope mappings in `projectScopes`:
 - Designer: "D"
 - Common: "GCD"
 
-**Note**: While `requiredIgnitionVersion` is set to SDK version 8.1.20, this module is designed exclusively for Ignition 8.3+ and uses APIs/features that may not work on earlier versions.
+**Note**: This module is designed exclusively for Ignition 8.3+ and uses the new Historian Extension Point API introduced in 8.3.
 
 ### Hook Classes
 
@@ -227,8 +225,8 @@ When implementing features, always reference Ignition 8.3+ documentation:
 ## Common Issues
 
 ### Build fails with "cannot access class com.sun.tools.javac.main.JavaCompiler"
-- **Cause**: Building with Java 16+ instead of Java 11
-- **Solution**: Switch to Java 11 using `java11` alias or setting `JAVA_HOME`
+- **Cause**: Building with wrong Java version (not Java 17)
+- **Solution**: Ensure Java 17 is installed and active: `java -version`
 
 ### "Required certificate file location not found"
 - **Cause**: Missing or incorrectly configured `gradle.properties`

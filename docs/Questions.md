@@ -125,7 +125,8 @@ public Optional<List<ConfigPanel>> getConfigPanels() {
 ## Module Details
 
 - **Ignition Version:** 8.3.1
-- **SDK Version:** 8.1.20
+- **SDK Version:** 8.3.1
+- **Java Version:** 17
 - **Module Structure:** Multi-scope (Gateway, Client, Designer, Common)
 - **Historian Type:** External REST API integration (read/write)
 - **Implementation:** AbstractHistorian with QueryEngine and StorageEngine

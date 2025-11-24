@@ -1,7 +1,8 @@
 # Ignition 8.3 Historian API Research
 **Date**: January 2025
-**Ignition Version**: 8.3.0 (Released August 2025)
-**SDK Version**: 8.1.20 (for compilation)
+**Ignition Version**: 8.3.0 (Released August 2024)
+**SDK Version**: 8.3.1
+**Java Version**: 17
 **JavaDoc Source**: https://files.inductiveautomation.com/sdk/javadoc/ignition83/8.3.1/
 
 ---
@@ -487,7 +488,7 @@ Attempt to create a working historian registration based on patterns from other 
 
 4. **Documentation Timeline**: When will complete documentation for the Historian API be available?
 
-5. **SDK Version**: Should we be using a different SDK version for 8.3+ development? Currently using SDK 8.1.20 with runtime target 8.3.0.
+5. **SDK Version**: We're using SDK 8.3.1 which is the correct version for Ignition 8.3+ development.
 
 ---
 

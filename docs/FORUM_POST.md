@@ -113,7 +113,8 @@ Our goal is to create a **production-ready custom historian** that:
 ## Module Details
 
 - **Ignition Version:** 8.3.1
-- **SDK Version:** 8.1.20
+- **SDK Version:** 8.3.1
+- **Java Version:** 17
 - **Module Structure:** Multi-scope (Gateway, Client, Designer, Common)
 - **Architecture:**
   - `FactryHistorianExtensionPoint extends HistorianExtensionPoint<HistorianSettings>`
