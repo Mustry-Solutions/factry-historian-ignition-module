@@ -1,3 +1,11 @@
+<div class="cover-page">
+  <div class="cover-center">
+    <img src="OriginalDark.jpg" class="cover-logo-large" />
+    <h1 class="cover-title">Factry Historian Module<br/>Specification</h1>
+  </div>
+</div>
+
+<br/>
 # Specification
 
 This document is based on five days of research into the Ignition 8.3 Historian API and Factry system integration.
@@ -84,7 +92,7 @@ Tags are named data points that represent real-time values from industrial sourc
 
 The Tag Browser displays all tags organized by tag provider:
 
-<img src="tag-browser.png" width="700px"/>
+<img src="tag-browser.png" width="400px"/>
 
 Beyond the current value, each tag has additional properties:
 - **Metadata**: Engineering units, format string, documentation
@@ -93,7 +101,7 @@ Beyond the current value, each tag has additional properties:
 
 The History property is where the Factry Historian connects to a tag. All tag properties can be configured in the Tag Editor, including assigning Factry Historian as the history provider:
 
-<img src="tag-editor.jpg" width="700px"/>
+<img src="tag-editor.jpg" width="600px"/>
 
 ### Data Flow
 
@@ -132,134 +140,177 @@ The module supports two deployment modes:
 **Note:** The Factry Provider component is not yet implemented, and the Collector may not have all planned features available. 
 
 
-# Ignition Python functions
+# Ignition Python Functions
 
-With proper implementaiton of the historian module the historian functionality is also available from the python script language of Ignition. This chapter elaborates the function which can be used.
+With proper implementation of the historian module, the historian functionality is available from Ignition's Python scripting environment. This chapter documents the available functions.
 
-## Historian Function
+## Supported Functions
 
-The list below demostrates the functions in Ignition. 
+The Factry Historian module implements 6 of the available historian functions. Functions marked as out of scope are not implemented in this version.
 
-Decision is made to implement 6 features (the covered elements are outscope from this version)
 <img src="ignition_historian_function.excalidraw.svg" width="700px">
 
-1. browse: Returns a list of browse results for the specified Historian.
-```
-# Syntax #1
-system.historian.browse(rootPath, BrowseFilter)
-```
-Parameters:
+### 1. browse
 
-<img src="image-3.png" width="700px">
+Returns a list of browse results for the specified historian.
 
-Filter Keys
-The following keys represent filter criteria that can be used by the browseFilter parameter.
-
-dataType: Represents the data type on the tag. Valid values can be found on the Tag Properties page.
-
-valueSource: Represents how the node derives its value. Generally only used by nodes with a tag type of "AtomicTag".
-
-tagType: The type of the node (tag, folder, UDT instance, etc). A list of possible types can be found on the Tag Properties page.
-
-typeId: Represents the UDT type of the node. If the node is a UDT definition, then the value will be None. If the node is not a UDT, then this filter choice will not remove the element. As such, this filter functions best when paired with a tagType filter with a value of UdtInstance.
-
-quality: Represents the "Bad" and "Good" quality on the node. All other quality codes are ignored.
-
-maxResults: Limits the amount of results that will be returned by the function.
-
+**Syntax 1:**
 ```python
-# Syntax #2
-system.historian.browse(rootPath[, snapshotTime][, nameFilters][, maxSize][, recursive][, continuationPoint][, includeMetadata]
-```
-
-<img src="image-4.png" width="700px">
-
-
-
-1. queryAggregatedPoints: Queries aggregated data points for the specified historian.
-```python
-system.historian.queryAggregatedPoints(paths, startTime, endTime, [aggregates], [fillModes], [columnNames], [returnFormat], [returnSize], [includeBounds], [excludeObservations])
-```
-Parameters:
-
-<img src="image-6.png" width="700px">
-
-1. queryRawPoints Queries raw data points for the specified historian.
-
-Syntax:
-```python
-system.historian.queryRawPoints(paths, startTime, endTime, [columnNames], [returnFormat], [returnSize], includeBounds, [excludeObservations])
+system.historian.browse(rootPath, browseFilter)
 ```
 
 Parameters:
+- `rootPath` (String): The root path to start browsing from.
+- `browseFilter` (Dictionary[String, Any]): A dictionary of browse filter keys. Keys are listed below.
 
-<img src="image-5.png" width="700px">
+**Filter Keys:**
+- `dataType`: Represents the data type on the tag. Valid values can be found on the Tag Properties page.
+- `valueSource`: Represents how the node derives its value. Generally only used by nodes with a tag type of "AtomicTag".
+- `tagType`: The type of the node (tag, folder, UDT instance, etc). A list of possible types can be found on the Tag Properties page.
+- `typeId`: Represents the UDT type of the node. If the node is a UDT definition, then the value will be None. If the node is not a UDT, then this filter choice will not remove the element. Functions best when paired with a tagType filter with a value of UdtInstance.
+- `quality`: Represents the "Bad" and "Good" quality on the node. All other quality codes are ignored.
+- `maxResults`: Limits the amount of results that will be returned by the function.
 
-Code example
+**Syntax 2:**
 ```python
-# Query a specified historical simulator tag path and display raw data from within the past minute
+system.historian.browse(rootPath[, snapshotTime][, nameFilters][, maxSize][, recursive][, continuationPoint][, includeMetadata])
+```
 
+Parameters:
+- `rootPath` (String): The root path to start browsing from.
+- `snapshotTime` (Date): The snapshot time to browse at. [optional]
+- `nameFilters` (List): A list of name filters to apply to the browse results. [optional]
+- `maxSize` (Integer): The maximum number of results to return. [optional]
+- `recursive` (Boolean): Whether to browse recursively. Accepted values are True and False. False is the default, meaning that the browse will only return data directly inside the root path. [optional]
+- `continuationPoint` (String): The continuation point to continue browsing from. [optional]
+- `includeMetadata` (Boolean): Whether to include metadata in the browse results. [optional]
+
+### 2. queryAggregatedPoints
+
+Queries aggregated data points for the specified historian.
+
+```python
+system.historian.queryAggregatedPoints(paths, startTime, endTime[, aggregates][, fillModes][, columnNames][, returnFormat][, returnSize][, includeBounds][, excludeObservations])
+```
+
+Parameters:
+- `paths` (List): A list of historical paths to query aggregated data points for.
+- `startTime` (Date): A start time to query aggregated data points for.
+- `endTime` (Date): An end time to query aggregated data points for.
+- `aggregates` (List): A list of aggregate functions to apply to the query. [optional]
+- `fillModes` (List): A list of fill modes to apply to the query. [optional]
+- `columnNames` (List): A list of alias column names for the returned dataset. [optional]
+- `returnFormat` (String): The desired return format for the query. [optional]
+- `returnSize` (Integer): The maximum number of results to return. [optional]
+- `includeBounds` (Boolean): Whether to include the bounds in the query results. [optional]
+- `excludeObservations` (Boolean): Whether to exclude observed aggregated data points in the query results. [optional]
+
+### 3. queryRawPoints
+
+Queries raw data points for the specified historian.
+
+```python
+system.historian.queryRawPoints(paths, startTime, endTime[, columnNames][, returnFormat][, returnSize], includeBounds[, excludeObservations])
+```
+
+Parameters:
+- `paths` (List): A list of historical paths to query aggregated data points for.
+- `startTime` (Date): A start time to query aggregated data points for.
+- `endTime` (Date): An end time to query aggregated data points for.
+- `columnNames` (List): A list of alias column names for the returned dataset. [optional]
+- `returnFormat` (String): The desired return format for the query. [optional]
+- `returnSize` (Integer): The maximum number of results to return. [optional]
+- `includeBounds` (Boolean): Whether to include the bounds in the query results.
+- `excludeObservations` (Boolean): Whether to exclude observed aggregated data points in the query results. [optional]
+
+**Example:**
+```python
+# Query a historical tag path and display raw data from the past minute
 end = system.date.now()
 start = system.date.addMinutes(end, -1)
 
-myDataset = system.historian.queryRawPoints(["[default]_Simulator_/Random/RandomInteger1"], start, end, includeBounds=False)
+myDataset = system.historian.queryRawPoints(
+    ["[default]_Simulator_/Random/RandomInteger1"],
+    start,
+    end,
+    includeBounds=False
+)
 
 for row in myDataset:
     print row[0], row[1]
 ```
 
-4. queryMetadata: Queries metadata for the specified Historian.
+### 4. queryMetadata
+
+Queries metadata for the specified historian.
+
 ```python
 system.historian.queryMetadata(paths[, startDate][, endDate])
 ```
 
-<img src="image-7.png" width="700px">
-1. storeMetadata 
+Parameters:
+- `paths` (String): A list of historical paths to query metadata for.
+- `startDate` (Date): A start time to query metadata for. This parameter is optional, unless an end time is specified.
+- `endDate` (Date): An end time to query metadata for. If specifying an end time, a start time must be provided. [optional]
 
-# syntax 2
+### 5. storeMetadata
+
+Stores metadata for the specified historian.
+
+**Syntax 1:**
 ```python
 system.historian.storeMetadata(metadata)
-```   
+```
+
 Parameters:
-<img src="image-8.png" width="700px">
+- `metadata` (List): A list of metadata.
 
-
+**Syntax 2:**
 ```python
-# syntax 2
 system.historian.storeMetadata(paths, timestamps, properties)
 ```
 
-<img src="image-9.png" width="700px">
+Parameters:
+- `paths` (List): A list of historical paths.
+- `timestamps` (List): A list of timestamps.
+- `properties` (Dictionary): A dictionary of desired properties to be stored as historical metadata.
 
-1. storeDataPoints   
+### 6. storeDataPoints
 
+Stores data points to the specified historian.
+
+**Syntax 1:**
 ```python
-# syntax 1
 system.historian.storeDataPoints(datapoints)
 ```
-Parameters
 
-<img src="image-11.png" width="700px">
+Parameters:
+- `datapoints` (List): A list of data points.
 
+**Syntax 2:**
 ```python
-# syntax 2
 system.historian.storeDataPoints(paths, values[, timestamps][, qualities])
 ```
-Parameters
 
-<img src="image-10.png" width="700px">
+Parameters:
+- `paths` (List): A list of historical paths.
+- `values` (List): A list of historical values.
+- `timestamps` (List): A list of timestamps. [optional]
+- `qualities` (List): A list of qualities. [optional]
 
-
+**Example using DataPoint:**
 ```python
-## DataPoint can be imported and used for constructing
+from com.inductiveautomation.historian.common.model import DataPoint
 
-datapoint = DataPoint("histprov:test:/sys:myGateway:/prov:default:/tag:me", 42, system.date.now(), 192) 
+datapoint = DataPoint(
+    "histprov:test:/sys:myGateway:/prov:default:/tag:me",
+    42,
+    system.date.now(),
+    192
+)
 
 system.historian.storeDataPoints([datapoint])
-
 ```
-
-Ignition screenshots with explanations
 
 
 ## Implementation 
