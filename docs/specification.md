@@ -47,6 +47,13 @@ Ignition modules uses OOP logic: implementatio of the new historian connecection
 ![Abstract classes](abstract_classes.excalidraw.svg)
 
 ### Ignition Modules Folder Structure 
+
+We use GCD scope, which means the code is available in all contexts:
+- **G** (Gateway): Server-side code running on the Ignition Gateway
+- **C** (Client): Code for Vision Clients and Designer environment
+- **D** (Designer): Designer-only functionality
+
+
 The Factry Historian module follows Ignition's standard multi-scope architecture:
 
 ```
@@ -68,15 +75,11 @@ factry-historian-module/
 └── docs/               - Project documentation
 ```
 
-### Ignition Scope
-We use GCD scope, which means the code is available in all contexts:
-- **G** (Gateway): Server-side code running on the Ignition Gateway
-- **C** (Client): Code for Vision Clients and Designer environment
-- **D** (Designer): Designer-only functionality
 
-## Tags in ignition
 
-TODO: short 1 sentence definition of what are the tags in ignition
+## Tags in Ignition
+
+Tags are named data points that represent real-time values from industrial sources (PLCs, sensors, OPC servers) or calculated values, serving as the fundamental abstraction for accessing, storing, and scripting against process data throughout the Ignition platform.
 
 ![Tags](tags.excalidraw.svg)
 
