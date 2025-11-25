@@ -42,9 +42,10 @@ com.inductiveautomation.historian.gateway.api
 └── paths/
     └── QualifiedPathAdapter       - Path normalization
 ```
-Ignition modules uses OOP logic: implementatio of the new historian connecection is based on inheriting and overwriting the abstract classes.
+Ignition modules uses OOP logic: implementation of the new historian connecection is based on inheriting and overwriting the abstract classes.
 
-![Abstract classes](abstract_classes.excalidraw.svg)
+<img src="abstract_classes.excalidraw.svg" width="700px">
+
 
 ### Ignition Modules Folder Structure 
 
@@ -54,7 +55,7 @@ We use GCD scope, which means the code is available in all contexts:
 - **D** (Designer): Designer-only functionality
 
 
-The Factry Historian module follows Ignition's standard multi-scope architecture:
+The Factry Historian module follows Ignition's GCD-scope architecture:
 
 ```
 factry-historian-module/
@@ -81,20 +82,37 @@ factry-historian-module/
 
 Tags are named data points that represent real-time values from industrial sources (PLCs, sensors, OPC servers) or calculated values, serving as the fundamental abstraction for accessing, storing, and scripting against process data throughout the Ignition platform.
 
-![Tags](tags.excalidraw.svg)
+In historian all tags are listed in the tag browser per tag providers.
+
+<img src="tag-browser.png" width="700px"/>
+
+Beside the value, the tags have a lot of othere propperties like metadata( Engineering unit, format string), quality (is there active connection to the tag provider, isn't it obsolate), etc.
+
+One property is the History: The factry historian should be connected at this point to the tag. 
+
+
+All this properties can be changeged in the tag editor and this is where we can assign the historan property to Factry Historian.
+
+<img src="tag-editor.jpg" width="700px"/>
+
+
+The next picture explains the logic how the tag sends and recieve the data. 
+
+<img src="tags.excalidraw.svg" width="700px"/>
+
+Let's suppose a tag provider changes the value of a tag. Through the inherited and implemented Factry classes in the Factry module the appropriate method is invoked. In our implementation we send the new datapoint information to the Factry collector (either it is a proxy collector or direct Factry Historian).
+
+When we add the tag to a chart, another method is invoked. This is responsible to form a query and this query will be sent to Factry Historian. The recieved data will be plotted on the chart. 
 
 ## Communication Protocol
 The module communicates with external Factry services using gRPC, a high-performance RPC framework. Protocol Buffer (protobuf) definitions are shared between the Factry system and the Ignition module to generate type-safe Java objects for bi-directional communication.
 
-## Factry Integration logic
+## Use Factry Collector
 The Factry Collector provides advanced features such as data compression and buffering that can be leveraged by the historian module. Therefore we plan to make it possible to use that as well as a proxy component between Ignition and Factry Historian
 
 ![Architectural Overview](architecture.excalidraw.svg)
 
 **Note:** The Factry Provider component is not yet implemented, and the Collector may not have all planned features available. 
-
-## Mapping
-Ignition maps the tag to the factry object(measurement, calculation, assets)
 
 
 ## Ignition Python functions
@@ -105,9 +123,8 @@ This chapter elaborates the function which can be used in Ignition scripts.
 
 The list below demostrates the functions in Ignition. 
 
-
 Decision is made to implement 6 features (the covered elements are outscope from this version)
-![Ignition Historian Functions](ignition_historian_function.excalidraw.svg)
+<img src="ignition_historian_function.excalidraw.svg" width="700px">
 
 1. browse: Returns a list of browse results for the specified Historian.
 ```
@@ -115,7 +132,8 @@ Decision is made to implement 6 features (the covered elements are outscope from
 system.historian.browse(rootPath, BrowseFilter)
 ```
 Parameters:
-![alt text](image-3.png)
+
+<img src="image-3.png" width="700px">
 
 Filter Keys
 The following keys represent filter criteria that can be used by the browseFilter parameter.
@@ -136,18 +154,20 @@ maxResults: Limits the amount of results that will be returned by the function.
 # Syntax #2
 system.historian.browse(rootPath[, snapshotTime][, nameFilters][, maxSize][, recursive][, continuationPoint][, includeMetadata]
 ```
-![alt text](image-4.png)
+
+<img src="image-4.png" width="700px">
 
 
 
-2. queryAggregatedPoints: Queries aggregated data points for the specified historian.
+1. queryAggregatedPoints: Queries aggregated data points for the specified historian.
 ```python
 system.historian.queryAggregatedPoints(paths, startTime, endTime, [aggregates], [fillModes], [columnNames], [returnFormat], [returnSize], [includeBounds], [excludeObservations])
 ```
 Parameters:
-![alt text](image-6.png)
 
-3. queryRawPoints Queries raw data points for the specified historian.
+<img src="image-6.png" width="700px">
+
+1. queryRawPoints Queries raw data points for the specified historian.
 
 Syntax:
 ```python
@@ -155,7 +175,8 @@ system.historian.queryRawPoints(paths, startTime, endTime, [columnNames], [retur
 ```
 
 Parameters:
-![alt text](image-5.png)   
+
+<img src="image-5.png" width="700px">
 
 Code example
 ```python
@@ -174,37 +195,42 @@ for row in myDataset:
 ```python
 system.historian.queryMetadata(paths[, startDate][, endDate])
 ```
-![queryMetadata Syntax](image-7.png)
-5. storeMetadata 
+
+<img src="image-7.png" width="700px">
+1. storeMetadata 
 
 # syntax 2
 ```python
 system.historian.storeMetadata(metadata)
 ```   
 Parameters:
-![StoreMetaData Syntax1](image-8.png)
+<img src="image-8.png" width="700px">
+
 
 ```python
 # syntax 2
 system.historian.storeMetadata(paths, timestamps, properties)
 ```
-![StoreMetaData Syntax2](image-9.png)
 
-6. storeDataPoints   
+<img src="image-9.png" width="700px">
+
+1. storeDataPoints   
 
 ```python
 # syntax 1
 system.historian.storeDataPoints(datapoints)
 ```
 Parameters
-![alt text](image-11.png)
+
+<img src="image-11.png" width="700px">
 
 ```python
 # syntax 2
 system.historian.storeDataPoints(paths, values[, timestamps][, qualities])
 ```
 Parameters
-![alt text](image-10.png)
+
+<img src="image-10.png" width="700px">
 
 
 ```python
@@ -223,12 +249,13 @@ Ignition screenshots with explanations
 
 # Milestones:
 1. Demo  
-  ![POC.excalidraw.svg](POC.excalidraw.svg)
+  
+  <img src="POC.excalidraw.svg" width="700px">
   Factry modules sends the new datapoints to the Factry Historian directly
 
-2. Historian Collector
+1. Historian Collector
   Full implementation of the Factry modules collector part as described here. 
-3. Historian Provider
+1. Historian Provider
    Full implementation of the Factry modules provider part as described here. 
    
 
