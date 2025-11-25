@@ -110,3 +110,5 @@ gradle.properties
 
 # Local Docker development - Ignition data directory
 ignition/
+
+venv
