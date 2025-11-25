@@ -5,12 +5,22 @@ const path = require('path');
 const logoPath = path.join(__dirname, 'OriginalDark.jpg');
 const logoBase64 = fs.readFileSync(logoPath).toString('base64');
 
+// Read Visby font and convert to base64
+const visbyPath = path.join(__dirname, 'visby.woff2');
+const visbyBase64 = fs.readFileSync(visbyPath).toString('base64');
+
 module.exports = {
   basedir: __dirname,
   body_class: 'markdown-body',
   css: `
+    @font-face {
+      font-family: 'Visby';
+      src: url('data:font/woff2;base64,${visbyBase64}') format('woff2');
+      font-weight: 800;
+      font-style: normal;
+    }
     .markdown-body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      font-family: 'Visby', -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
       font-size: 12px;
       line-height: 1.6;
       padding: 20px;
@@ -48,19 +58,28 @@ module.exports = {
       padding: 0;
       margin: 0;
     }
+    /* Table of contents page */
+    .toc-page {
+      page-break-after: always;
+      height: calc(100vh - 160px);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      font-size: 130%;
+    }
     .cover-logo-top {
       height: 60px;
     }
     .cover-center {
       text-align: center;
-      flex-grow: 1;
       display: flex;
       flex-direction: column;
-      justify-content: center;
       align-items: center;
+      margin-top: 100px;
     }
     .cover-logo-large {
-      height: 80px;
+      height: 72px;
       margin-bottom: 40px;
     }
     .cover-title {
@@ -89,21 +108,21 @@ module.exports = {
   pdf_options: {
     format: 'A4',
     margin: {
-      top: '80px',
-      bottom: '80px',
-      left: '40px',
-      right: '40px'
+      top: '120px',
+      bottom: '120px',
+      left: '60px',
+      right: '60px'
     },
     displayHeaderFooter: true,
     headerTemplate: `
-      <div style="width: 100%; font-size: 10px; padding: 10px 60px; box-sizing: border-box;">
+      <div style="width: 100%; font-size: 12px; padding: 20px 80px 10px 80px; box-sizing: border-box;">
         <img src="data:image/jpeg;base64,${logoBase64}" style="height: 35px;" />
       </div>
     `,
     footerTemplate: `
-      <div style="width: 100%; font-size: 9px; padding: 10px 60px; box-sizing: border-box; color: #666; display: flex; justify-content: space-between;">
+      <div style="width: 100%; font-size: 12px; padding: 10px 80px 20px 80px; box-sizing: border-box; color: #ddd; display: flex; justify-content: space-between; font-family: 'Visby', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-weight: bold;">
         <div style="line-height: 1.4;">
-          <div style="color: #333;">Mustry Solutions BV</div>
+          <div style="color: #ccc;">Mustry Solutions BV</div>
           <div>Dreef Ter Elst 20</div>
           <div>8560 Gullegem</div>
         </div>

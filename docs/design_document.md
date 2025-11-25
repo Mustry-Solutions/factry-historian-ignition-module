@@ -1,33 +1,52 @@
 <div class="cover-page">
   <div class="cover-center">
     <img src="OriginalDark.jpg" class="cover-logo-large" />
-    <h1 class="cover-title">Factry Historian Module<br/>Specification</h1>
+    <h1 class="cover-title">Factry Historian Module<br/>Design Document</h1>
   </div>
 </div>
 
-<br/>
-# Specification
+<div class="toc-page">
 
-This document is based on five days of research into the Ignition 8.3 Historian API and Factry system integration.
+## Content
 
-# Overview: Ignition Historian Module
+ - Introduction 
+ - Ignition Historian SDK
+ - Tag Mapping and Data Flow
+ - Communication Protocol 
+ - Ignition Python Functions 
+ - Summary of Required Features
+ - Appendix 
+
+</div>
+
+# Introduction
+
+This document is based on five days of research into the Ignition 8.3 Historian API and Factry Historian integration.
 
 ## Ignition Platform
-Ignition is an industrial automation platform for SCADA, IIoT, MES, and more from Inductive Automation. Version 8.3, released in August 2024, is the latest major release. Ignition is written in Java and Kotlin, with version 8.3 requiring Java 17. The platform uses Gradle as its official build tool and package manager.
+Ignition is an industrial automation platform for SCADA, IIoT, MES, and more from Inductive Automation. Version 8.3, released in August 2024, is the latest major release. Ignition is written in Java and Kotlin, with version 8.3 requiring Java 17. The platform provides a module SDK that allows users to extend its functionality with custom modules. Gradle is the recommended build tool and package manager.
 
-Documentation is auto-generated from JavaDoc, but Kotlin components are not fully documented. Combined with limited examples for the new 8.3 APIs, this creates challenges for module development. The official Inductive Automation forum provides active support from experts to fill these gaps.
+Ignition documentation is auto-generated from JavaDoc, but Kotlin components are not fully documented. Combined with limited examples for the new 8.3 APIs, this creates challenges for module development. The official Inductive Automation forum provides active support from experts to fill these gaps.
 
 ## Historian Concept
 In industrial automation, a historian is a software component that continuously collects, stores, and serves time-series data from industrial sources (such as PLC tags and devices) for querying, trending, and analysis.
 
-Ignition provides an abstract Historian API and SDK for both internal use and third-party historian integration through custom modules.
+The Ignition module SDK contains the Historian API for third-party historian integration. This allows us to write a custom module for Factry Historian. 
 
-## Ignition 8.3 Historian API
+# Ignition Historian SDK
 Version 8.3 introduced a major refactoring of the Historian API. While the core changes are complete, documentation and examples are still limited. The public API is primarily contained in two packages:
   - `com.inductiveautomation.historian.gateway.api`
   - `com.inductiveautomation.historian.common.model`
 
+
+Ignition modules use OOP concepts: implementation of a new historian connection is based on inheriting and overriding the abstract classes.
+
+<img src="abstract_classes.excalidraw.svg" width="500px">
+
+
 ### API Structure
+
+To give a quick overview of the new API, here is list of the most important elements.  
 ```
 com.inductiveautomation.historian.gateway.api
 ├── Historian<S>                    - Main historian interface
@@ -50,20 +69,19 @@ com.inductiveautomation.historian.gateway.api
 └── paths/
     └── QualifiedPathAdapter       - Path normalization
 ```
-Ignition modules uses OOP logic: implementation of the new historian connecection is based on inheriting and overwriting the abstract classes.
-
-<img src="abstract_classes.excalidraw.svg" width="700px">
 
 
 ### Ignition Modules Folder Structure 
 
-We use GCD scope, which means the code is available in all contexts:
+Ignition defines scopes that constrain where parts of a module may execute. 
+We use the GCD scopes, meaning the module's shared code is available in all three scopes:
 - **G** (Gateway): Server-side code running on the Ignition Gateway
 - **C** (Client): Code for Vision Clients and Designer environment
 - **D** (Designer): Designer-only functionality
 
+<br/>
 
-The Factry Historian module follows Ignition's GCD-scope architecture:
+The module folder structure partly reflects Ignition's GCD-scope architecture:
 
 ```
 factry-historian-module/
@@ -79,50 +97,36 @@ factry-historian-module/
 ├── build/              - Gradle build output
 │   └── Factry-Historian.modl  - Final signed module file
 ├── gradle/             - Gradle wrapper files
-├── ignition/           - Docker development environment data (git-ignored)
-├── proxy/              - Development proxy server
 └── docs/               - Project documentation
 ```
 
-
-
-## Tags in Ignition
+# Flow of data
 
 Tags are named data points that represent real-time values from industrial sources (PLCs, sensors, OPC servers) or calculated values, serving as the fundamental abstraction for accessing, storing, and scripting against process data throughout the Ignition platform.
 
 The Tag Browser displays all tags organized by tag provider:
 
-<img src="tag-browser.png" width="400px"/>
+<img src="tag-browser.png" width="300px"/>
 
-Beyond the current value, each tag has additional properties:
+Beyond a simple 'value', each tag has additional properties:
 - **Metadata**: Engineering units, format string, documentation
 - **Quality**: Connection status, staleness indicators
 - **History**: Configuration for historical data storage
+etc..
 
 The History property is where the Factry Historian connects to a tag. All tag properties can be configured in the Tag Editor, including assigning Factry Historian as the history provider:
 
-<img src="tag-editor.jpg" width="600px"/>
+<img src="tag-editor.jpg" width="400px"/>
 
-### Data Flow
+### Tag Mapping and Data Flow
 
 The following diagram illustrates how tags send and receive historical data:
 
 <img src="tags.excalidraw.svg" width="700px"/>
 
-**Writing data (Storage):** When a tag provider updates a tag value, the Factry module's storage engine is invoked. Our implementation forwards the new data point to the Factry Collector (either as a proxy or directly to Factry Historian).
+**Writing data (Storage):** When a tag provider updates a tag value, the Factry module's storage engine is invoked. The implementation should forward the new data point to the Factry Collector (either as a proxy or directly to Factry Historian).
 
 **Reading data (Query):** When a tag is added to a chart or trend, the Factry module's query engine is invoked. It constructs and sends a query to Factry Historian, then returns the retrieved data for visualization. 
-
-## Communication Protocol
-
-The module communicates with Factry services using gRPC, a high-performance RPC framework designed for low-latency, high-throughput communication.
-
-**Protocol Buffers (protobuf)** define the message formats and service interfaces shared between Factry and the Ignition module. These definitions generate type-safe Java classes for:
-- Data point transmission (timestamps, values, quality codes)
-- Query requests and responses
-- Configuration and metadata exchange
-
-This approach ensures consistent serialization, backward compatibility, and efficient binary encoding for industrial data volumes.
 
 ## Factry Collector Integration
 
@@ -137,8 +141,20 @@ The module supports two deployment modes:
 1. **Direct mode**: Ignition communicates directly with Factry Historian
 2. **Collector mode**: Ignition sends data through the Factry Collector proxy
 
-**Note:** The Factry Provider component is not yet implemented, and the Collector may not have all planned features available. 
+**Note:** The Factry Provider component is not yet implemented, and the Collector may not have all planned features available.
 
+<br/>
+
+# Communication Protocol
+
+The module communicates with Factry services using gRPC, a high-performance RPC framework designed for low-latency, high-throughput communication.
+
+**Protocol Buffers (protobuf)** define the message formats and service interfaces shared between Factry and the Ignition module. These definitions generate type-safe Java classes for:
+- Data point transmission (timestamps, values, quality codes)
+- Query requests and responses
+- Configuration and metadata exchange
+
+This approach ensures consistent serialization, backward compatibility, and efficient binary encoding for industrial data volumes.
 
 # Ignition Python Functions
 
@@ -146,7 +162,7 @@ With proper implementation of the historian module, the historian functionality 
 
 ## Supported Functions
 
-The Factry Historian module implements 6 of the available historian functions. Functions marked as out of scope are not implemented in this version.
+The Factry Historian module implements 6 of the available historian functions: Functions marked as out of scope are not implemented in this version.
 
 <img src="ignition_historian_function.excalidraw.svg" width="700px">
 
@@ -214,14 +230,14 @@ system.historian.queryRawPoints(paths, startTime, endTime[, columnNames][, retur
 ```
 
 Parameters:
-- `paths` (List): A list of historical paths to query aggregated data points for.
-- `startTime` (Date): A start time to query aggregated data points for.
-- `endTime` (Date): An end time to query aggregated data points for.
+- `paths` (List): A list of historical paths to query raw data points for.
+- `startTime` (Date): A start time to query raw data points for.
+- `endTime` (Date): An end time to query raw data points for.
 - `columnNames` (List): A list of alias column names for the returned dataset. [optional]
 - `returnFormat` (String): The desired return format for the query. [optional]
 - `returnSize` (Integer): The maximum number of results to return. [optional]
 - `includeBounds` (Boolean): Whether to include the bounds in the query results.
-- `excludeObservations` (Boolean): Whether to exclude observed aggregated data points in the query results. [optional]
+- `excludeObservations` (Boolean): Whether to exclude observed raw data points in the query results. [optional]
 
 **Example:**
 ```python
@@ -312,31 +328,64 @@ datapoint = DataPoint(
 system.historian.storeDataPoints([datapoint])
 ```
 
-
-## Implementation 
-
-# Milestones:
-1. Demo  
-  
-  <img src="POC.excalidraw.svg" width="700px">
-  Factry modules sends the new datapoints to the Factry Historian directly
-
-1. Historian Collector
-  Full implementation of the Factry modules collector part as described here. 
-1. Historian Provider
-   Full implementation of the Factry modules provider part as described here. 
    
+# Summary of Required Features
 
+The Factry Historian module consists of two main components:
+
+### Collector (Storage Provider)
+Responsible for writing data from Ignition to Factry Historian:
+- Store tag data points with timestamps and quality codes
+- Store tag metadata changes
+- Support direct mode (Ignition → Factry Historian)
+- Support collector mode (Ignition → Factry Collector → Factry Historian)
+- Handle connection failures and reconnection
+
+### Provider (History Provider)
+Responsible for reading historical data from Factry Historian:
+- Query raw data points for specified time ranges
+- Query aggregated data points with configurable aggregation functions
+- Query tag metadata
+- Browse available historical tags
+- Support pagination for large result sets
+
+In addition to these, we must ensure that the following components also function correctly.
+
+### Configuration
+- Gateway configuration page for connection settings
+- Support for multiple Factry Historian instances
+- Tag history provider selection in Tag Editor
+
+### Python scripts
+- the scoped 6 python methods 
 
 # Appendix
 
+## Milestones
+
+1. Demo  
+  Factry module sends the new datapoints to the Factry Historian directly. 
+
+  <img src="POC.excalidraw.svg" width="200px">
+  
+1. Historian Collector
+  Full implementation of the Factry module's collector part as described here. 
+1. Historian Provider
+   Full implementation of the Factry module's provider part as described here. 
+
 
 ## Links
-System historian fucntions:
-https://docs.inductiveautomation.com/docs/8.3/appendix/scripting-functions/system-historian
+Ingition 8.3 documentation
+
+  https://www.docs.inductiveautomation.com/docs/8.3/intro
+
+System historian functions
+
+  https://docs.inductiveautomation.com/docs/8.3/appendix/scripting-functions/system-historian
 
 Custom historian forum
-https://forum.inductiveautomation.com/t/ignition-8-3-building-a-custom-tag-historian-module/100725
+
+  https://forum.inductiveautomation.com/t/ignition-8-3-building-a-custom-tag-historian-module/100725
 
 
 
