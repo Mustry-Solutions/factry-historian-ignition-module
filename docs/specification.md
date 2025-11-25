@@ -106,19 +106,35 @@ The following diagram illustrates how tags send and receive historical data:
 **Reading data (Query):** When a tag is added to a chart or trend, the Factry module's query engine is invoked. It constructs and sends a query to Factry Historian, then returns the retrieved data for visualization. 
 
 ## Communication Protocol
-The module communicates with external Factry services using gRPC, a high-performance RPC framework. Protocol Buffer (protobuf) definitions are shared between the Factry system and the Ignition module to generate type-safe Java objects for bi-directional communication.
 
-## Use Factry Collector
-The Factry Collector provides advanced features such as data compression and buffering that can be leveraged by the historian module. Therefore we plan to make it possible to use that as well as a proxy component between Ignition and Factry Historian
+The module communicates with Factry services using gRPC, a high-performance RPC framework designed for low-latency, high-throughput communication.
 
-![Architectural Overview](architecture.excalidraw.svg)
+**Protocol Buffers (protobuf)** define the message formats and service interfaces shared between Factry and the Ignition module. These definitions generate type-safe Java classes for:
+- Data point transmission (timestamps, values, quality codes)
+- Query requests and responses
+- Configuration and metadata exchange
+
+This approach ensures consistent serialization, backward compatibility, and efficient binary encoding for industrial data volumes.
+
+## Factry Collector Integration
+
+The Factry Collector can serve as an intermediary between Ignition and Factry Historian, providing:
+- **Data buffering**: Store-and-forward capability during network outages
+- **Compression**: Reduce bandwidth usage for high-frequency data
+- **Local aggregation**: Pre-process data before transmission
+
+<img src="architecture.excalidraw.svg" width="700px"/>
+
+The module supports two deployment modes:
+1. **Direct mode**: Ignition communicates directly with Factry Historian
+2. **Collector mode**: Ignition sends data through the Factry Collector proxy
 
 **Note:** The Factry Provider component is not yet implemented, and the Collector may not have all planned features available. 
 
 
-## Ignition Python functions
+# Ignition Python functions
 
-This chapter elaborates the function which can be used in Ignition scripts.
+With proper implementaiton of the historian module the historian functionality is also available from the python script language of Ignition. This chapter elaborates the function which can be used.
 
 ## Historian Function
 
