@@ -82,27 +82,28 @@ factry-historian-module/
 
 Tags are named data points that represent real-time values from industrial sources (PLCs, sensors, OPC servers) or calculated values, serving as the fundamental abstraction for accessing, storing, and scripting against process data throughout the Ignition platform.
 
-In historian all tags are listed in the tag browser per tag providers.
+The Tag Browser displays all tags organized by tag provider:
 
 <img src="tag-browser.png" width="700px"/>
 
-Beside the value, the tags have a lot of othere propperties like metadata( Engineering unit, format string), quality (is there active connection to the tag provider, isn't it obsolate), etc.
+Beyond the current value, each tag has additional properties:
+- **Metadata**: Engineering units, format string, documentation
+- **Quality**: Connection status, staleness indicators
+- **History**: Configuration for historical data storage
 
-One property is the History: The factry historian should be connected at this point to the tag. 
-
-
-All this properties can be changeged in the tag editor and this is where we can assign the historan property to Factry Historian.
+The History property is where the Factry Historian connects to a tag. All tag properties can be configured in the Tag Editor, including assigning Factry Historian as the history provider:
 
 <img src="tag-editor.jpg" width="700px"/>
 
+### Data Flow
 
-The next picture explains the logic how the tag sends and recieve the data. 
+The following diagram illustrates how tags send and receive historical data:
 
 <img src="tags.excalidraw.svg" width="700px"/>
 
-Let's suppose a tag provider changes the value of a tag. Through the inherited and implemented Factry classes in the Factry module the appropriate method is invoked. In our implementation we send the new datapoint information to the Factry collector (either it is a proxy collector or direct Factry Historian).
+**Writing data (Storage):** When a tag provider updates a tag value, the Factry module's storage engine is invoked. Our implementation forwards the new data point to the Factry Collector (either as a proxy or directly to Factry Historian).
 
-When we add the tag to a chart, another method is invoked. This is responsible to form a query and this query will be sent to Factry Historian. The recieved data will be plotted on the chart. 
+**Reading data (Query):** When a tag is added to a chart or trend, the Factry module's query engine is invoked. It constructs and sends a query to Factry Historian, then returns the retrieved data for visualization. 
 
 ## Communication Protocol
 The module communicates with external Factry services using gRPC, a high-performance RPC framework. Protocol Buffer (protobuf) definitions are shared between the Factry system and the Ignition module to generate type-safe Java objects for bi-directional communication.
