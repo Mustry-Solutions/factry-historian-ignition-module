@@ -24,6 +24,8 @@ module.exports = {
       font-size: 12px;
       line-height: 1.6;
       padding: 20px;
+      orphans: 5;
+      widows: 5;
     }
     .markdown-body h1 {
       border-bottom: 1px solid #eaecef;
@@ -47,6 +49,18 @@ module.exports = {
     }
     .markdown-body img {
       max-width: 100%;
+    }
+    /* Prevent page breaks inside elements */
+    pre, table, img {
+      page-break-inside: avoid;
+    }
+    /* Keep headings with following content */
+    h1, h2, h3 {
+      page-break-after: avoid;
+    }
+    /* Always start h1 on a new page */
+    h1 {
+      page-break-before: always;
     }
     /* Cover page styles */
     .cover-page {
