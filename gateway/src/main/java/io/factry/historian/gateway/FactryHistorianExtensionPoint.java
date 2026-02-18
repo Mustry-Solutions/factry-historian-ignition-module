@@ -23,7 +23,7 @@ import java.util.Set;
  * created and managed through the Ignition Gateway UI at:
  * Config → Services → Historians → Create New Historian Profile
  */
-public class FactryHistorianExtensionPoint extends HistorianExtensionPoint<HistorianSettings> {
+public class FactryHistorianExtensionPoint extends HistorianExtensionPoint<FactryHistorianSettings> {
     private static final Logger logger = LoggerFactory.getLogger(FactryHistorianExtensionPoint.class);
 
     /**
@@ -55,6 +55,16 @@ public class FactryHistorianExtensionPoint extends HistorianExtensionPoint<Histo
         logger.info("MODULE VERSION: {}", io.factry.historian.common.FactryHistorianModule.MODULE_VERSION);
         logger.info("Type: {}, Name: {}", TYPE_ID, DISPLAY_NAME);
         logger.info("========================================");
+    }
+
+    /**
+     * Provides the default settings instance for the historian.
+     * This is required for Ignition to know the concrete settings type
+     * when decoding config JSON. Without this, "Unable to decode config: no settings type" occurs.
+     */
+    @Override
+    public Optional<FactryHistorianSettings> defaultSettings() {
+        return Optional.of(new FactryHistorianSettings());
     }
 
     /**
@@ -109,22 +119,29 @@ public class FactryHistorianExtensionPoint extends HistorianExtensionPoint<Histo
      * @throws Exception if the historian cannot be created
      */
     @Override
-    public Historian<HistorianSettings> createHistorianProvider(
+    public Historian<FactryHistorianSettings> createHistorianProvider(
             GatewayContext context,
             DecodedResource<ExtensionPointConfig<HistorianProvider, HistorianSettings>> resource
     ) throws Exception {
         logger.info("Creating Factry Historian provider from extension point");
 
-        // Extract the historian name from the resource
         String historianName = resource.name();
 
-        logger.info("Creating Factry Historian: name={}", historianName);
+        // The settings are decoded as our concrete FactryHistorianSettings type
+        // thanks to defaultSettings() providing the type information
+        FactryHistorianSettings settings = resource.config().settings()
+                .filter(s -> s instanceof FactryHistorianSettings)
+                .map(s -> (FactryHistorianSettings) s)
+                .orElseGet(() -> {
+                    logger.warn("Settings not of expected type, using defaults");
+                    return new FactryHistorianSettings();
+                });
 
-        // Create and return the historian provider
-        // Note: Settings will be passed via the FactryHistoryProvider's configure method
-        FactryHistoryProvider provider = new FactryHistoryProvider(context, historianName, new FactryHistorianSettings());
+        logger.info("Creating Factry Historian: name={}, settings={}", historianName, settings);
+
+        FactryHistoryProvider provider = new FactryHistoryProvider(context, historianName, settings);
 
         logger.info("Factry Historian provider created successfully");
-        return (Historian<HistorianSettings>) (Historian<?>) provider;
+        return provider;
     }
 }
