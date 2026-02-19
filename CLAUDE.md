@@ -8,6 +8,14 @@ This is the **Factry Historian Module** for Inductive Automation's Ignition plat
 - **Collector (Storage Provider)**: Writes tag data to external storage via REST API
 - **Provider (History Provider)**: Reads historical data from external storage and provides it to Ignition
 
+## Sibling Project
+
+There is a sibling project at `/Users/monogab/Workspace/mustry/timescaledb-historian-module` (TimescaleDB Historian Module). Both projects are Ignition historian modules with the same architecture, but different backends:
+- **This project (Factry)**: Connects to the Factry Historian system via a REST API proxy
+- **Sibling (TimescaleDB)**: Connects directly to TimescaleDB via JDBC
+
+Both share the same Ignition 8.3+ historian extension point pattern. Changes to the core module structure, extension point registration, or Ignition API usage in one project often need to be mirrored in the other.
+
 The module integrates with Ignition's Tag History system and supports standard historian features like deadbands, sample modes, and DataSet organization.
 
 ## Ignition Version Targeting
