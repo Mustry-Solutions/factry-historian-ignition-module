@@ -26,7 +26,7 @@ services:
       # Gateway network settings
       GATEWAY_NETWORK_0_HOST: "ignition-dev"
 
-    command: -d
+    command: -- -agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=*:8000
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8088/StatusPing"]
