@@ -1,18 +1,7 @@
-# Factry Historian Module - Implementation Steps
+# Manaul test steps
 
-Incremental implementation plan with testing after each step to ensure everything works before moving forward.
+## Check if the module can be installed
 
-## Implementation Order
-
-### Step 1: Module Loads Successfully ✅
-**Goal**: Module appears in Gateway → Config → System → Modules
-
-**Implementation**:
-- Verify the basic `GatewayHook` is working
-- Module shows up as "Running" status
-- No errors in gateway logs
-
-**Test**:
 - Install `.modl` file in Ignition Gateway
 - Check Gateway → Config → System → Modules
 - Verify status is "Running"
@@ -20,7 +9,9 @@ Incremental implementation plan with testing after each step to ensure everythin
 
 **Success Criteria**: Module listed and running without errors
 
----
+## Create new historian
+
+
 
 ### Step 2: History Provider Appears in List 📋
 **Goal**: See "Factry Historian" in Gateway → Config → Tags → History

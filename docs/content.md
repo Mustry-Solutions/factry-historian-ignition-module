@@ -1,12 +1,14 @@
 # Factry Historian Module - Documentation Index
 
+ 
+
 ## Context and Background
 
-- [Specification](specification.md) - Factry historian module specification
-- [Questions](Questions.md) - Technical questions for Inductive Automation forum regarding historian module limitations
 - [Notes](notes.md) - Quick notes on proxy architecture, gRPC, protobuf, and token-based historian config
 - [Report](report.md) - Development report (Nov 4, 2025) summarizing 4 days of research
 - [Forum Post](FORUM_POST.md) - Inductive Automation community post on custom historian module implementation
+
+https://forum.inductiveautomation.com/t/ignition-8-3-building-a-custom-tag-historian-module/100725/8
 
 ## Overview, Architecture and Design
 
