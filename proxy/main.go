@@ -2,48 +2,31 @@ package main
 
 import (
 	"log"
+	"net"
 	"net/http"
 	"time"
 
 	"github.com/gorilla/mux"
-	// httpSwagger "github.com/swaggo/http-swagger"
+	"google.golang.org/grpc"
 
-	// _ "factry-historian-proxy/docs" // Import generated docs
+	pb "factry-historian-proxy/proto/historianpb"
 )
 
-// @title Factry Historian Proxy API
-// @version 1.0
-// @description Mock historian proxy server with collector and provider endpoints for testing the Factry Historian Ignition module.
-// @termsOfService http://swagger.io/terms/
-
-// @contact.name Factry Support
-// @contact.url https://factry.io
-// @contact.email support@factry.io
-
-// @license.name MIT
-// @license.url https://opensource.org/licenses/MIT
-
-// @host localhost:8111
-// @BasePath /
-// @schemes http
-
 const (
-	Port = ":8111"
+	HTTPPort = ":8111"
+	GRPCPort = ":50051"
 )
 
 func main() {
-	// Seed random number generator
-	// Note: For Go 1.20+, rand is automatically seeded
+	// Start gRPC server in a goroutine
+	go startGRPCServer()
 
-	// Create router
+	// Create HTTP router
 	r := mux.NewRouter()
 
 	// Register endpoints
 	r.HandleFunc("/collector", CollectorHandler).Methods("POST")
 	r.HandleFunc("/provider", ProviderHandler).Methods("POST")
-
-	// Swagger UI (disabled - run 'swag init' to generate docs)
-	// r.PathPrefix("/swagger/").Handler(httpSwagger.WrapHandler)
 
 	// Health check endpoint
 	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -58,13 +41,14 @@ func main() {
 			"Endpoints:\n" +
 			"  POST /collector - Receive tag data (batch writes)\n" +
 			"  POST /provider  - Query historical data\n" +
-			"  GET  /health    - Health check\n"))
+			"  GET  /health    - Health check\n" +
+			"  gRPC :50051     - HistorianCollector.Store\n"))
 	}).Methods("GET")
 
 	// Configure server
 	srv := &http.Server{
 		Handler:      r,
-		Addr:         Port,
+		Addr:         HTTPPort,
 		WriteTimeout: 15 * time.Second,
 		ReadTimeout:  15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -74,13 +58,29 @@ func main() {
 	log.Printf("=================================================")
 	log.Printf("Factry Historian Proxy Server")
 	log.Printf("=================================================")
-	log.Printf("Starting server on port %s", Port)
-	log.Printf("Collector endpoint: http://localhost%s/collector", Port)
-	log.Printf("Provider endpoint:  http://localhost%s/provider", Port)
-	log.Printf("Health check:       http://localhost%s/health", Port)
+	log.Printf("HTTP server on port %s", HTTPPort)
+	log.Printf("gRPC server on port %s", GRPCPort)
+	log.Printf("Collector endpoint: http://localhost%s/collector", HTTPPort)
+	log.Printf("Provider endpoint:  http://localhost%s/provider", HTTPPort)
+	log.Printf("Health check:       http://localhost%s/health", HTTPPort)
 	log.Printf("=================================================")
 
 	if err := srv.ListenAndServe(); err != nil {
-		log.Fatalf("Server failed to start: %v", err)
+		log.Fatalf("HTTP server failed to start: %v", err)
+	}
+}
+
+func startGRPCServer() {
+	lis, err := net.Listen("tcp", GRPCPort)
+	if err != nil {
+		log.Fatalf("Failed to listen on %s: %v", GRPCPort, err)
+	}
+
+	s := grpc.NewServer()
+	pb.RegisterHistorianCollectorServer(s, &historianServer{})
+
+	log.Printf("gRPC server listening on %s", GRPCPort)
+	if err := s.Serve(lis); err != nil {
+		log.Fatalf("gRPC server failed: %v", err)
 	}
 }

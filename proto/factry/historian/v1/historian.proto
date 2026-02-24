@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package factry.historian.v1;
+
+option java_multiple_files = true;
+option java_package = "io.factry.historian.proto";
+option java_outer_classname = "HistorianProto";
+option go_package = "factry-historian-proxy/proto/historianpb";
+
+message TagSample {
+  string tag_path = 1;
+  int64 timestamp_ms = 2;
+  int32 value_int = 3;
+  double value_double = 4;
+  int32 quality = 5;
+}
+
+message StoreRequest {
+  repeated TagSample samples = 1;
+}
+
+message StoreResponse {
+  bool success = 1;
+  string message = 2;
+  int32 count = 3;
+}
+
+service HistorianCollector {
+  rpc Store(StoreRequest) returns (StoreResponse);
+}
