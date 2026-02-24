@@ -34,12 +34,12 @@ dependencies {
 
     compileOnly(project(":common"))
 
-    // gRPC and Protobuf dependencies (runtime - bundled in module)
-    implementation("io.grpc:grpc-netty-shaded:$grpcVersion")
-    implementation("io.grpc:grpc-protobuf:$grpcVersion")
-    implementation("io.grpc:grpc-stub:$grpcVersion")
-    implementation("com.google.protobuf:protobuf-java:$protobufVersion")
-    implementation("javax.annotation:javax.annotation-api:1.3.2")
+    // gRPC and Protobuf dependencies (bundled in .modl via modlImplementation)
+    modlImplementation("io.grpc:grpc-netty-shaded:$grpcVersion")
+    modlImplementation("io.grpc:grpc-protobuf:$grpcVersion")
+    modlImplementation("io.grpc:grpc-stub:$grpcVersion")
+    modlImplementation("com.google.protobuf:protobuf-java:$protobufVersion")
+    modlImplementation("javax.annotation:javax.annotation-api:1.3.2")
 }
 
 protobuf {
