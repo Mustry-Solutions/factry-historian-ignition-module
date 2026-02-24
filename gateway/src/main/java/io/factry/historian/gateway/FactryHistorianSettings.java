@@ -112,10 +112,8 @@ public class FactryHistorianSettings implements HistorianSettings {
     @Override
     public String toString() {
         return "FactryHistorianSettings{" +
-                "url='" + url + '\'' +
-                ", grpcHost='" + grpcHost + '\'' +
+                "grpcHost='" + grpcHost + '\'' +
                 ", grpcPort=" + grpcPort +
-                ", timeoutMs=" + timeoutMs +
                 ", batchSize=" + batchSize +
                 ", batchIntervalMs=" + batchIntervalMs +
                 ", debugLogging=" + debugLogging +

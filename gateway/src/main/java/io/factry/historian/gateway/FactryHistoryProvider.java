@@ -44,8 +44,8 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         this.queryEngine = new FactryQueryEngine(context, historianName, settings);
         this.storageEngine = new FactryStorageEngine(context, historianName, settings);
 
-        logger.info("Factry Historian created: name={}, proxyUrl={}",
-                historianName, settings.getUrl());
+        logger.info("Factry Historian created: name={}, grpcTarget={}:{}",
+                historianName, settings.getGrpcHost(), settings.getGrpcPort());
     }
 
     /**

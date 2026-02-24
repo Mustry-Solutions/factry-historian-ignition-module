@@ -11,48 +11,30 @@ import com.inductiveautomation.ignition.gateway.web.nav.FormFieldType;
 /**
  * Configuration record for the Factry Historian web UI form.
  *
- * This record defines the configuration fields that appear in the Gateway UI
- * when creating or editing a Factry Historian profile.
- *
  * The record is flat (no nesting) so the field names match FactryHistorianSettings
  * exactly. @FormCategory controls the visual grouping in the UI.
  */
 public record FactryHistorianConfig(
         @FormCategory("Connection")
-        @Label("Proxy URL*")
-        @FormField(FormFieldType.TEXT)
-        @DefaultValue("http://localhost:8111")
-        @Required
-        @Description("URL of the Factry Historian proxy REST API endpoint")
-        String url,
-
-        @FormCategory("Connection")
-        @Label("Timeout (ms)")
-        @FormField(FormFieldType.NUMBER)
-        @DefaultValue("5000")
-        @Description("HTTP request timeout in milliseconds")
-        int timeoutMs,
-
-        @FormCategory("Connection")
-        @Label("gRPC Host*")
+        @Label("Host*")
         @FormField(FormFieldType.TEXT)
         @DefaultValue("localhost")
         @Required
-        @Description("Hostname of the gRPC proxy server")
+        @Description("Hostname of the Factry Historian server")
         String grpcHost,
 
         @FormCategory("Connection")
-        @Label("gRPC Port")
+        @Label("Port")
         @FormField(FormFieldType.NUMBER)
         @DefaultValue("9876")
-        @Description("Port of the gRPC proxy server")
+        @Description("gRPC port of the Factry Historian server")
         int grpcPort,
 
         @FormCategory("Advanced")
         @Label("Batch Size")
         @FormField(FormFieldType.NUMBER)
         @DefaultValue("100")
-        @Description("Number of historical data points to collect before sending to the proxy")
+        @Description("Number of historical data points to collect before sending")
         int batchSize,
 
         @FormCategory("Advanced")
@@ -66,16 +48,11 @@ public record FactryHistorianConfig(
         @Label("Debug Logging")
         @FormField(FormFieldType.CHECKBOX)
         @DefaultValue("false")
-        @Description("Enable detailed debug logging for HTTP requests and responses")
+        @Description("Enable detailed debug logging")
         boolean debugLogging
 ) {
-    /**
-     * Convert this config record to FactryHistorianSettings.
-     */
     public FactryHistorianSettings toSettings() {
         FactryHistorianSettings settings = new FactryHistorianSettings();
-        settings.setUrl(url);
-        settings.setTimeoutMs(timeoutMs);
         settings.setGrpcHost(grpcHost);
         settings.setGrpcPort(grpcPort);
         settings.setBatchSize(batchSize);
@@ -84,13 +61,8 @@ public record FactryHistorianConfig(
         return settings;
     }
 
-    /**
-     * Create a config record from FactryHistorianSettings.
-     */
     public static FactryHistorianConfig fromSettings(FactryHistorianSettings settings) {
         return new FactryHistorianConfig(
-                settings.getUrl(),
-                settings.getTimeoutMs(),
                 settings.getGrpcHost(),
                 settings.getGrpcPort(),
                 settings.getBatchSize(),
