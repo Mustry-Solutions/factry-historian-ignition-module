@@ -1,5 +1,8 @@
+import com.google.protobuf.gradle.*
+
 plugins {
     `java-library`
+    id("com.google.protobuf") version "0.9.4"
 }
 
 java {
@@ -7,6 +10,9 @@ java {
         languageVersion.set(org.gradle.jvm.toolchain.JavaLanguageVersion.of(17))
     }
 }
+
+val grpcVersion = "1.62.2"
+val protobufVersion = "3.25.3"
 
 dependencies {
     compileOnly("com.inductiveautomation.ignitionsdk:ignition-common:${rootProject.extra["sdk_version"]}")
@@ -16,12 +22,48 @@ dependencies {
     // These are in separate artifacts because historian is now a dedicated module
     // The SDK POMs (com.inductiveautomation.ignitionsdk) reference the real artifacts (com.inductiveautomation.historian)
     // We need to add the real artifacts directly since compileOnly doesn't pull transitive dependencies
-    compileOnly("com.inductiveautomation.historian:historian-gateway:1.3.1")
-    compileOnly("com.inductiveautomation.historian:historian-common:1.3.1")
+    compileOnly("com.inductiveautomation.historian:historian-gateway:1.3.1") {
+        isTransitive = false
+    }
+    compileOnly("com.inductiveautomation.historian:historian-common:1.3.1") {
+        isTransitive = false
+    }
 
     // JSON library for HTTP communication with proxy
     compileOnly("com.google.code.gson:gson:2.10.1")
 
     compileOnly(project(":common"))
-    // add gateway scoped dependencies here
+
+    // gRPC and Protobuf dependencies (runtime - bundled in module)
+    implementation("io.grpc:grpc-netty-shaded:$grpcVersion")
+    implementation("io.grpc:grpc-protobuf:$grpcVersion")
+    implementation("io.grpc:grpc-stub:$grpcVersion")
+    implementation("com.google.protobuf:protobuf-java:$protobufVersion")
+    implementation("javax.annotation:javax.annotation-api:1.3.2")
+}
+
+protobuf {
+    protoc {
+        artifact = "com.google.protobuf:protoc:$protobufVersion"
+    }
+    plugins {
+        id("grpc") {
+            artifact = "io.grpc:protoc-gen-grpc-java:$grpcVersion"
+        }
+    }
+    generateProtoTasks {
+        all().forEach { task ->
+            task.plugins {
+                id("grpc")
+            }
+        }
+    }
+}
+
+sourceSets {
+    main {
+        proto {
+            srcDir("${rootProject.projectDir}/proto")
+        }
+    }
 }

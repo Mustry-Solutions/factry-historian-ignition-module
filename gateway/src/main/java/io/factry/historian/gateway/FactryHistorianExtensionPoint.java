@@ -93,7 +93,7 @@ public class FactryHistorianExtensionPoint extends HistorianExtensionPoint<Factr
                     resourceType(),  // Use the historian resource type from parent class
                     "Factry Historian Configuration",  // Form title
                     TYPE_ID,  // Extension point type ID
-                    schema,  // Use config for profile parameter (try both instead of null)
+                    null,    // no profile-level parameters
                     schema,  // Our config schema
                     Set.of()  // No additional capabilities
             );

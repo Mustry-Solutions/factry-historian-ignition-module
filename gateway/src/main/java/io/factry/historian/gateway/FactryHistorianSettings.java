@@ -31,6 +31,16 @@ public class FactryHistorianSettings implements HistorianSettings {
     private int batchIntervalMs = 5000;
 
     /**
+     * gRPC host for the proxy server
+     */
+    private String grpcHost = "localhost";
+
+    /**
+     * gRPC port for the proxy server
+     */
+    private int grpcPort = 50051;
+
+    /**
      * Enable debug logging for HTTP requests
      */
     private boolean debugLogging = false;
@@ -75,6 +85,22 @@ public class FactryHistorianSettings implements HistorianSettings {
         this.batchIntervalMs = batchIntervalMs;
     }
 
+    public String getGrpcHost() {
+        return grpcHost;
+    }
+
+    public void setGrpcHost(String grpcHost) {
+        this.grpcHost = grpcHost;
+    }
+
+    public int getGrpcPort() {
+        return grpcPort;
+    }
+
+    public void setGrpcPort(int grpcPort) {
+        this.grpcPort = grpcPort;
+    }
+
     public boolean isDebugLogging() {
         return debugLogging;
     }
@@ -87,6 +113,8 @@ public class FactryHistorianSettings implements HistorianSettings {
     public String toString() {
         return "FactryHistorianSettings{" +
                 "url='" + url + '\'' +
+                ", grpcHost='" + grpcHost + '\'' +
+                ", grpcPort=" + grpcPort +
                 ", timeoutMs=" + timeoutMs +
                 ", batchSize=" + batchSize +
                 ", batchIntervalMs=" + batchIntervalMs +

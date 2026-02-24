@@ -63,7 +63,9 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
         try {
             // Create historian settings
             FactryHistorianSettings settings = new FactryHistorianSettings();
-            settings.setUrl("http://localhost:8111");  // Proxy server URL
+            settings.setUrl("http://factry-proxy:8111");  // Proxy server URL (Docker service name)
+            settings.setGrpcHost("factry-proxy");          // gRPC host (Docker service name)
+            settings.setGrpcPort(50051);                   // gRPC port
             settings.setTimeoutMs(5000);
             settings.setBatchSize(100);
             settings.setBatchIntervalMs(5000);

@@ -71,7 +71,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         logger.info("Factry Historian - Shutting Down");
         logger.info("========================================");
         logger.info("Name: {}", historianName);
-        // TODO: Clean up HTTP client connections, thread pools, etc.
+        storageEngine.shutdown();
         logger.info("Factry Historian - Shutdown Complete");
     }
 

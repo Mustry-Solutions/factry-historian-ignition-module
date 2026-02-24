@@ -1,8 +1,11 @@
 pluginManagement {
+    plugins {
+        id 'com.google.protobuf' version '0.9.4'
+    }
     repositories {
         gradlePluginPortal()
         maven {
-            url = "https://nexus.inductiveautomation.com/repository/public" 
+            url = "https://nexus.inductiveautomation.com/repository/public"
         }
     }
 }

@@ -26,7 +26,7 @@ services:
       # Gateway network settings
       GATEWAY_NETWORK_0_HOST: "ignition-dev"
 
-    command: -- -agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=*:8000
+    command: -- -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:8000
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8088/StatusPing"]
@@ -42,7 +42,8 @@ services:
       dockerfile: Dockerfile
     container_name: factry-proxy
     ports:
-      - "8111:8111"   # Proxy API
+      - "8111:8111"   # Proxy HTTP API
+      - "50051:50051" # gRPC
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8111/health"]
