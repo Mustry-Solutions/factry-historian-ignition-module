@@ -43,7 +43,7 @@ services:
     container_name: factry-proxy
     ports:
       - "8111:8111"   # Proxy HTTP API
-      - "50051:50051" # gRPC
+      - "9876:9876" # gRPC
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8111/health"]

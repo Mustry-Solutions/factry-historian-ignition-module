@@ -4,6 +4,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -12,14 +13,19 @@ import (
 	pb "factry-historian-proxy/proto/historianpb"
 )
 
-const (
-	HTTPPort = ":8111"
-	GRPCPort = ":50051"
-)
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
 
 func main() {
+	httpPort := getEnv("HTTP_PORT", ":8111")
+	grpcPort := getEnv("GRPC_PORT", ":9876")
+
 	// Start gRPC server in a goroutine
-	go startGRPCServer()
+	go startGRPCServer(grpcPort)
 
 	// Create HTTP router
 	r := mux.NewRouter()
@@ -42,13 +48,13 @@ func main() {
 			"  POST /collector - Receive tag data (batch writes)\n" +
 			"  POST /provider  - Query historical data\n" +
 			"  GET  /health    - Health check\n" +
-			"  gRPC :50051     - HistorianCollector.Store\n"))
+			"  gRPC " + grpcPort + "     - HistorianCollector.Store\n"))
 	}).Methods("GET")
 
 	// Configure server
 	srv := &http.Server{
 		Handler:      r,
-		Addr:         HTTPPort,
+		Addr:         httpPort,
 		WriteTimeout: 15 * time.Second,
 		ReadTimeout:  15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -58,11 +64,11 @@ func main() {
 	log.Printf("=================================================")
 	log.Printf("Factry Historian Proxy Server")
 	log.Printf("=================================================")
-	log.Printf("HTTP server on port %s", HTTPPort)
-	log.Printf("gRPC server on port %s", GRPCPort)
-	log.Printf("Collector endpoint: http://localhost%s/collector", HTTPPort)
-	log.Printf("Provider endpoint:  http://localhost%s/provider", HTTPPort)
-	log.Printf("Health check:       http://localhost%s/health", HTTPPort)
+	log.Printf("HTTP server on port %s", httpPort)
+	log.Printf("gRPC server on port %s", grpcPort)
+	log.Printf("Collector endpoint: http://localhost%s/collector", httpPort)
+	log.Printf("Provider endpoint:  http://localhost%s/provider", httpPort)
+	log.Printf("Health check:       http://localhost%s/health", httpPort)
 	log.Printf("=================================================")
 
 	if err := srv.ListenAndServe(); err != nil {
@@ -70,16 +76,16 @@ func main() {
 	}
 }
 
-func startGRPCServer() {
-	lis, err := net.Listen("tcp", GRPCPort)
+func startGRPCServer(port string) {
+	lis, err := net.Listen("tcp", port)
 	if err != nil {
-		log.Fatalf("Failed to listen on %s: %v", GRPCPort, err)
+		log.Fatalf("Failed to listen on %s: %v", port, err)
 	}
 
 	s := grpc.NewServer()
 	pb.RegisterHistorianCollectorServer(s, &historianServer{})
 
-	log.Printf("gRPC server listening on %s", GRPCPort)
+	log.Printf("gRPC server listening on %s", port)
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("gRPC server failed: %v", err)
 	}

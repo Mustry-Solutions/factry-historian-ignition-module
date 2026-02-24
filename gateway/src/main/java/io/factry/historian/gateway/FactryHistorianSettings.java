@@ -38,7 +38,7 @@ public class FactryHistorianSettings implements HistorianSettings {
     /**
      * gRPC port for the proxy server
      */
-    private int grpcPort = 50051;
+    private int grpcPort = 9876;
 
     /**
      * Enable debug logging for HTTP requests

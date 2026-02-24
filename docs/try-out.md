@@ -25,7 +25,7 @@ You should see:
 ```
 Factry Historian Proxy Server
 HTTP server on port :8111
-gRPC server on port :50051
+gRPC server on port :9876
 ```
 
 Keep this terminal open — gRPC messages from Ignition will appear here.
@@ -54,7 +54,7 @@ On first install, go to **Config > System > Modules** and accept the **Mustry So
 | Proxy URL | `http://host.docker.internal:8111` | See "Host value" below |
 | Timeout (ms) | `5000` | |
 | gRPC Host | `host.docker.internal` | See "Host value" below |
-| gRPC Port | `50051` | |
+| gRPC Port | `9876` | |
 
 ### Advanced
 
@@ -110,7 +110,7 @@ The gRPC host should be `host.docker.internal` when the proxy runs on the host m
 - Check gateway logs for errors (search for "Factry" or "gRPC")
 
 ### Programmatic historian conflicts with UI-created one
-The gateway hook auto-creates a "FactryHistorian" historian on startup (hardcoded to `factry-proxy:50051`). If you also create one from the UI, you will have two historians. The UI-created one uses the settings you provide, so use that one for testing with the local proxy.
+The gateway hook auto-creates a "FactryHistorian" historian on startup (hardcoded to `factry-proxy:9876`). If you also create one from the UI, you will have two historians. The UI-created one uses the settings you provide, so use that one for testing with the local proxy.
 
 ### Fields appear duplicated in the Create Historian form
 Rebuild and reinstall the module — this was a bug that has been fixed.

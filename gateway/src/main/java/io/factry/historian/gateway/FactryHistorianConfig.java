@@ -44,7 +44,7 @@ public record FactryHistorianConfig(
         @FormCategory("Connection")
         @Label("gRPC Port")
         @FormField(FormFieldType.NUMBER)
-        @DefaultValue("50051")
+        @DefaultValue("9876")
         @Description("Port of the gRPC proxy server")
         int grpcPort,
 
