@@ -7,14 +7,22 @@
  * Gradle Docs: https://docs.gradle.org/current/userguide/userguide.html
  */
 
+import java.util.Date
+import java.text.SimpleDateFormat
+
 plugins {
     id("io.ia.sdk.modl") version("0.4.1")
 }
 
 val sdk_version by extra("8.3.1")
 
+val buildNumberFile = file("build-number.txt")
+val buildNumber = if (buildNumberFile.exists()) buildNumberFile.readText().trim().toInt() else 0
+
+val timestamp = SimpleDateFormat("yyyyMMddHH").format(Date())
+
 allprojects {
-    version = "0.1.5"
+    version = "0.1.${buildNumber}"
 }
 
 ignitionModule {
@@ -35,7 +43,7 @@ ignitionModule {
     /*
      * Version of the module.  Here being set to the same version that gradle uses, up above in this file.
      */
-    moduleVersion.set("${project.version}")
+    moduleVersion.set("${project.version}.${timestamp}")
 
     moduleDescription.set("Custom historian module that stores tag history data in external Factry Historian system via REST API.")
 
@@ -127,4 +135,29 @@ ignitionModule {
      * be used merely for development testing
      */
     skipModlSigning.set(false)
+}
+
+tasks.named("build") {
+    doLast {
+        buildNumberFile.writeText("${buildNumber + 1}")
+    }
+}
+
+// Deploy tasks — copy module to Ignition and restart the container
+val ignitionModlDir = file("ignition/data/var/ignition/modl")
+
+tasks.register<Copy>("copy") {
+    group = "deploy"
+    description = "Copy the built module to the Ignition modules directory"
+    dependsOn("build")
+    from(layout.buildDirectory.file("Factry-Historian.modl"))
+    into(ignitionModlDir)
+    rename { "Factry-Historian.modl" }
+}
+
+tasks.register<Exec>("restart") {
+    group = "deploy"
+    description = "Restart the Ignition Docker container"
+    dependsOn("copy")
+    commandLine("docker", "compose", "restart", "ignition")
 }

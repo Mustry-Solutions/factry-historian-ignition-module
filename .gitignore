@@ -112,3 +112,4 @@ gradle.properties
 ignition/
 
 venv
+build-number.txt
