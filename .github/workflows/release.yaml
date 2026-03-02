@@ -1,0 +1,83 @@
+name: Release
+run-name: Release
+
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch all tags
+        run: git fetch --tags
+
+      - name: Download module artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ignition-module
+
+      - name: Calculate version
+        run: |
+          MAJOR=$(grep MAJOR VERSION | cut -d= -f2)
+          MINOR=$(grep MINOR VERSION | cut -d= -f2)
+          CURRENT_MINOR="$MAJOR.$MINOR"
+
+          LAST_TAG=$(git tag -l "${MAJOR}.${MINOR}.*" --sort=-v:version | head -1)
+
+          if [ -z "$LAST_TAG" ]; then
+            PATCH=0
+          else
+            LAST_MINOR=$(echo $LAST_TAG | cut -d. -f1,2)
+            if [ "$CURRENT_MINOR" != "$LAST_MINOR" ]; then
+              PATCH=0
+            else
+              PATCH=$(( $(echo $LAST_TAG | cut -d. -f3) + 1 ))
+            fi
+          fi
+
+          VERSION="$MAJOR.$MINOR.$PATCH"
+          DATE=$(date '+%Y%m%d')
+          BRANCH_NAME=$(echo "${GITHUB_REF#refs/heads/}" | tr '/' '-')
+          RELEASE_NAME="Release_v${VERSION}_${DATE}.${GITHUB_RUN_NUMBER}-${BRANCH_NAME}"
+
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "RELEASE_NAME=${RELEASE_NAME}" >> $GITHUB_ENV
+          echo "BRANCH_NAME=${BRANCH_NAME}" >> $GITHUB_ENV
+
+          echo "Calculated version: ${VERSION}"
+          echo "Release name: ${RELEASE_NAME}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: ${{ env.RELEASE_NAME }}
+          body: |
+            ## Factry Historian Module ${{ env.RELEASE_NAME }}
+
+            ### Version
+            - Module Version: `${{ env.VERSION }}`
+            - Branch: `${{ env.BRANCH_NAME }}`
+
+            ### Installation
+            1. Download the `.modl` file below
+            2. In Ignition Gateway: **Config > System > Modules > Install or Upgrade a Module**
+            3. Upload the `.modl` file
+            4. Accept the certificate if prompted
+
+            ### Requirements
+            - Ignition 8.3+
+            - Factry Historian system
+          files: Factry-Historian.unsigned.modl
+          draft: false
+          prerelease: ${{ github.ref == 'refs/heads/develop' }}

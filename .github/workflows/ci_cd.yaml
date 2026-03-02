@@ -1,0 +1,28 @@
+name: CI/CD pipeline
+run-name: Test, Build and Release by ${{ github.actor }}
+
+on:
+  push:
+    branches:
+      - feature/**
+      - hotfix/**
+      - develop
+      - main
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yaml
+    secrets: inherit
+
+  build:
+    needs: test
+    uses: ./.github/workflows/build.yaml
+    secrets: inherit
+
+  release:
+    needs: build
+    uses: ./.github/workflows/release.yaml
+    secrets: inherit
