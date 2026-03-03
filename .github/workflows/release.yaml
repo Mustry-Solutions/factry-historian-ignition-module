@@ -78,6 +78,6 @@ jobs:
             ### Requirements
             - Ignition 8.3+
             - Factry Historian system
-          files: Factry-Historian.unsigned.modl
+          files: Factry-Historian.modl
           draft: false
           prerelease: ${{ github.ref == 'refs/heads/develop' }}

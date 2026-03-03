@@ -3,6 +3,17 @@ run-name: Build
 
 on:
   workflow_call:
+    secrets:
+      SIGNING_KEYSTORE_BASE64:
+        required: true
+      SIGNING_CERT_FILE_BASE64:
+        required: true
+      SIGNING_KEYSTORE_PASSWORD:
+        required: true
+      SIGNING_CERT_ALIAS:
+        required: true
+      SIGNING_CERT_PASSWORD:
+        required: true
 
 jobs:
   build:
@@ -18,12 +29,24 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Build Ignition module
-        run: ./gradlew clean build -PskipSigning=true
+      - name: Decode signing certificates
+        run: |
+          mkdir -p certificates
+          echo "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" | base64 -d > certificates/keystore.jks
+          echo "${{ secrets.SIGNING_CERT_FILE_BASE64 }}" | base64 -d > certificates/cert.p7b
+
+      - name: Build signed Ignition module
+        run: |
+          ./gradlew clean build \
+            -Pignition.signing.keystoreFile=certificates/keystore.jks \
+            -Pignition.signing.keystorePassword=${{ secrets.SIGNING_KEYSTORE_PASSWORD }} \
+            -Pignition.signing.certAlias=${{ secrets.SIGNING_CERT_ALIAS }} \
+            -Pignition.signing.certFile=certificates/cert.p7b \
+            -Pignition.signing.certPassword=${{ secrets.SIGNING_CERT_PASSWORD }}
 
       - name: Upload module artifact
         uses: actions/upload-artifact@v4
         with:
           name: ignition-module
-          path: build/Factry-Historian.unsigned.modl
+          path: build/Factry-Historian.modl
           retention-days: 7
