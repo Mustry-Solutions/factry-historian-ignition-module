@@ -8,13 +8,15 @@ import com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.L
 import com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.Required;
 import com.inductiveautomation.ignition.gateway.web.nav.FormFieldType;
 
-/**
- * Configuration record for the Factry Historian web UI form.
- *
- * The record is flat (no nesting) so the field names match FactryHistorianSettings
- * exactly. @FormCategory controls the visual grouping in the UI.
- */
 public record FactryHistorianConfig(
+        @FormCategory("Connection")
+        @Label("Collector UUID*")
+        @FormField(FormFieldType.TEXT)
+        @DefaultValue("")
+        @Required
+        @Description("UUID of the collector registered in Factry Historian")
+        String collectorUUID,
+
         @FormCategory("Connection")
         @Label("Host*")
         @FormField(FormFieldType.TEXT)
@@ -53,6 +55,7 @@ public record FactryHistorianConfig(
 ) {
     public FactryHistorianSettings toSettings() {
         FactryHistorianSettings settings = new FactryHistorianSettings();
+        settings.setCollectorUUID(collectorUUID);
         settings.setGrpcHost(grpcHost);
         settings.setGrpcPort(grpcPort);
         settings.setBatchSize(batchSize);
@@ -63,6 +66,7 @@ public record FactryHistorianConfig(
 
     public static FactryHistorianConfig fromSettings(FactryHistorianSettings settings) {
         return new FactryHistorianConfig(
+                settings.getCollectorUUID(),
                 settings.getGrpcHost(),
                 settings.getGrpcPort(),
                 settings.getBatchSize(),

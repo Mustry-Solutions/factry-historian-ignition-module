@@ -36,13 +36,12 @@ public class FactryHistorianExtensionPoint extends HistorianExtensionPoint<Factr
      * Display name for the historian type.
      * This appears in the Gateway UI when selecting a historian type.
      */
-    public static final String DISPLAY_NAME = "Factry Historian";
+    public static final String DISPLAY_NAME = "FactryHistorianExtensionPoint.HistorianType.Name";
 
     /**
-     * Description for the historian type.
-     * This appears in the Gateway UI when selecting a historian type.
+     * Description key for the historian type (resolved via BundleUtil).
      */
-    public static final String DESCRIPTION = "External historian for Factry Historian system via REST API";
+    public static final String DESCRIPTION = "FactryHistorianExtensionPoint.HistorianType.Description";
 
     /**
      * Creates a new Factry Historian extension point.

@@ -2,71 +2,24 @@ package io.factry.historian.gateway;
 
 import com.inductiveautomation.historian.gateway.api.config.HistorianSettings;
 
-/**
- * Configuration settings for the Factry Historian.
- *
- * This class holds all configuration properties needed to connect to the
- * external Factry Historian system via the proxy REST API.
- */
 public class FactryHistorianSettings implements HistorianSettings {
 
-    /**
-     * URL of the proxy REST API endpoint (e.g., http://localhost:8111)
-     */
-    private String url = "http://localhost:8111";
-
-    /**
-     * Timeout for HTTP requests in milliseconds
-     */
-    private int timeoutMs = 5000;
-
-    /**
-     * Batch size for storing historical data points
-     */
+    private String collectorUUID = "";
     private int batchSize = 100;
-
-    /**
-     * Batch interval in milliseconds - how often to send batched data
-     */
     private int batchIntervalMs = 5000;
-
-    /**
-     * gRPC host for the proxy server
-     */
     private String grpcHost = "localhost";
-
-    /**
-     * gRPC port for the proxy server
-     */
     private int grpcPort = 9876;
-
-    /**
-     * Enable debug logging for HTTP requests
-     */
     private boolean debugLogging = false;
 
-    /**
-     * No-arg constructor required for serialization
-     */
     public FactryHistorianSettings() {
     }
 
-    // Getters and setters
-
-    public String getUrl() {
-        return url;
+    public String getCollectorUUID() {
+        return collectorUUID;
     }
 
-    public void setUrl(String url) {
-        this.url = url;
-    }
-
-    public int getTimeoutMs() {
-        return timeoutMs;
-    }
-
-    public void setTimeoutMs(int timeoutMs) {
-        this.timeoutMs = timeoutMs;
+    public void setCollectorUUID(String collectorUUID) {
+        this.collectorUUID = collectorUUID;
     }
 
     public int getBatchSize() {
@@ -112,7 +65,8 @@ public class FactryHistorianSettings implements HistorianSettings {
     @Override
     public String toString() {
         return "FactryHistorianSettings{" +
-                "grpcHost='" + grpcHost + '\'' +
+                "collectorUUID='" + collectorUUID + '\'' +
+                ", grpcHost='" + grpcHost + '\'' +
                 ", grpcPort=" + grpcPort +
                 ", batchSize=" + batchSize +
                 ", batchIntervalMs=" + batchIntervalMs +

@@ -14,7 +14,7 @@ plugins {
     id("io.ia.sdk.modl") version("0.4.1")
 }
 
-val sdk_version by extra("8.3.1")
+val sdk_version by extra("8.3.3")
 
 val buildNumberFile = file("build-number.txt")
 val buildNumber = if (buildNumberFile.exists()) buildNumberFile.readText().trim().toInt() else 0
@@ -22,7 +22,7 @@ val buildNumber = if (buildNumberFile.exists()) buildNumberFile.readText().trim(
 val timestamp = SimpleDateFormat("yyyyMMddHH").format(Date())
 
 allprojects {
-    version = "0.1.${buildNumber}"
+    version = "0.3.${buildNumber}"
 }
 
 ignitionModule {
@@ -45,7 +45,7 @@ ignitionModule {
      */
     moduleVersion.set("${project.version}.${timestamp}")
 
-    moduleDescription.set("Custom historian module that stores tag history data in external Factry Historian system via REST API.")
+    moduleDescription.set("Custom historian module that stores tag history data in external Factry Historian system.")
 
     /*
      * Minimum version of Ignition required for the module to function correctly.  This typically won't change over

@@ -39,7 +39,7 @@ public class FactryHttpClient {
      * @throws IOException if HTTP communication fails
      */
     public CollectorResponse sendToCollector(List<TagSample> samples) throws IOException {
-        String url = settings.getUrl() + "/collector";
+        String url = "http://" + settings.getGrpcHost() + ":8111/collector";
 
         CollectorRequest request = new CollectorRequest();
         request.samples = samples;
@@ -71,7 +71,7 @@ public class FactryHttpClient {
      * @throws IOException if HTTP communication fails
      */
     public ProviderResponse queryFromProvider(List<String> tagPaths, long startTime, long endTime, int maxPoints) throws IOException {
-        String url = settings.getUrl() + "/provider";
+        String url = "http://" + settings.getGrpcHost() + ":8111/provider";
 
         ProviderRequest request = new ProviderRequest();
         request.tagPaths = tagPaths;
@@ -112,8 +112,8 @@ public class FactryHttpClient {
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
             conn.setRequestProperty("Accept", "application/json");
-            conn.setConnectTimeout(settings.getTimeoutMs());
-            conn.setReadTimeout(settings.getTimeoutMs());
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
             conn.setDoOutput(true);
 
             // Write request body

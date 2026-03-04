@@ -48,7 +48,7 @@ func main() {
 			"  POST /collector - Receive tag data (batch writes)\n" +
 			"  POST /provider  - Query historical data\n" +
 			"  GET  /health    - Health check\n" +
-			"  gRPC " + grpcPort + "     - HistorianCollector.Store\n"))
+			"  gRPC " + grpcPort + "     - Historian service\n"))
 	}).Methods("GET")
 
 	// Configure server
@@ -83,7 +83,7 @@ func startGRPCServer(port string) {
 	}
 
 	s := grpc.NewServer()
-	pb.RegisterHistorianCollectorServer(s, &historianServer{})
+	pb.RegisterHistorianServer(s, newHistorianServer())
 
 	log.Printf("gRPC server listening on %s", port)
 	if err := s.Serve(lis); err != nil {

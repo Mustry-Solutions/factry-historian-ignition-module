@@ -1,5 +1,6 @@
 package io.factry.historian.gateway;
 
+import com.inductiveautomation.ignition.common.BundleUtil;
 import com.inductiveautomation.ignition.common.licensing.LicenseState;
 import com.inductiveautomation.ignition.gateway.config.ExtensionPoint;
 import com.inductiveautomation.ignition.gateway.model.AbstractGatewayModuleHook;
@@ -31,6 +32,8 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
         logger.info("========================================");
 
         this.gatewayContext = context;
+
+        BundleUtil.get().addBundle(FactryHistorianExtensionPoint.class);
     }
 
     @Override
@@ -48,6 +51,8 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
         logger.info("========================================");
         logger.info("Factry Historian Module - Shutdown");
         logger.info("========================================");
+
+        BundleUtil.get().removeBundle(FactryHistorianExtensionPoint.class);
     }
 
     @Override

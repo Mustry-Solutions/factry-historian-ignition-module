@@ -39,6 +39,7 @@ dependencies {
     modlImplementation("io.grpc:grpc-protobuf:$grpcVersion")
     modlImplementation("io.grpc:grpc-stub:$grpcVersion")
     modlImplementation("com.google.protobuf:protobuf-java:$protobufVersion")
+    modlImplementation("com.google.protobuf:protobuf-java-util:$protobufVersion")
     modlImplementation("javax.annotation:javax.annotation-api:1.3.2")
 }
 
