@@ -1,34 +1,26 @@
 # Try-Out Guide
 
-Step-by-step guide to get the Factry Historian module running for the first time.
+Step-by-step guide to get the Factry Historian module running with a real Factry Historian instance.
 
-## 1. Start Ignition
-
-```bash
-docker-compose up -d ignition
-```
-
-This starts **Ignition** at http://localhost:8088 (admin / password).
-
-## 2. Start the proxy
-
-In a separate terminal, build and run the Go proxy directly:
+## 1. Start the services
 
 ```bash
-cd proxy
-go build -o factry-proxy .
-./factry-proxy
+docker-compose up -d
 ```
 
-You should see:
+This starts:
+- **Ignition** at http://localhost:8088 (admin / password)
+- **Factry Historian** at http://localhost:8000 (factry / password)
+- **Grafana** at http://localhost:3000 (admin / admin)
 
-```
-Factry Historian Proxy Server
-HTTP server on port :8111
-gRPC server on port :9876
-```
+## 2. Create a Collector in Factry Historian
 
-Keep this terminal open — gRPC messages from Ignition will appear here.
+1. Open http://localhost:8000 and log in (factry / password)
+2. Go to **Collectors** in the sidebar
+3. Click **Create Collector**
+4. Give it a name (e.g., `ignition-collector`)
+5. Click **Generate Token** and **copy the token** — you'll need it in step 4
+6. Note the **Collector UUID** shown on the collector detail page
 
 ## 3. Build and install the module
 
@@ -40,7 +32,7 @@ docker-compose restart ignition
 
 On first install, go to **Config > System > Modules** and accept the **Mustry Solution** certificate.
 
-## 4. Create a Historian
+## 4. Create a Historian in Ignition
 
 1. Go to **Config > Tags > History > Historians**
 2. Click **Create New Historian Profile**
@@ -51,10 +43,10 @@ On first install, go to **Config > System > Modules** and accept the **Mustry So
 
 | Field | Value | Notes |
 |-------|-------|-------|
-| Collector UUID | `<your-collector-uuid>` | UUID of the collector registered in Factry Historian |
-| Token | `<your-bearer-token>` | Bearer token for Factry Historian authentication |
-| Host | `host.docker.internal` | See "Host value" below |
-| Port | `9876` | gRPC port of the Factry Historian server |
+| Collector UUID | `<uuid from step 2>` | The UUID shown on the collector page |
+| Token | `<token from step 2>` | The generated bearer token |
+| Host | `historian` | Docker service name (both containers share the same network) |
+| Port | `8001` | Factry Historian gRPC port |
 
 ### Advanced
 
@@ -63,11 +55,6 @@ On first install, go to **Config > System > Modules** and accept the **Mustry So
 | Batch Size | `100` | |
 | Batch Interval (ms) | `5000` | |
 | Debug Logging | checked | Recommended for first-time testing |
-
-**Host value** depends on your setup:
-- **Factry running on your host machine**: use `host.docker.internal` (Docker resolves this to the host)
-- **Factry running remotely**: use the server hostname/IP
-- **Ignition running natively** (not in Docker): use `localhost`
 
 5. Click **Create Historian**
 
@@ -81,36 +68,30 @@ On first install, go to **Config > System > Modules** and accept the **Mustry So
 6. Set **Sample Mode** = On Change (or All Data)
 7. Save the tag
 
-## 6. Trigger a write
+## 6. Trigger writes and verify in Factry
 
-Change the tag value manually in the Tag Browser. Each value change should trigger a write via gRPC.
+1. In Ignition's Tag Browser, change the tag value manually a few times
+2. Open the Factry Historian web UI at http://localhost:8000
+3. Go to **Measurements** — you should see a measurement matching your tag name
+4. Click on the measurement to view its data points with the values you entered
 
-In the proxy terminal you should see output like:
-
-```
-[gRPC] Received StoreRequest with 1 samples
-[gRPC]   sample[0]: tag=prov:default:/tag:TestTag  time=2026-02-24 14:30:05.123  value_int=42  value_double=42.000000  quality=192
-```
-
-Check the Ignition gateway logs for messages like:
+You can also check the Ignition gateway logs for messages like:
 
 ```
-doStoreAtomic called with 1 points
 gRPC store succeeded: stored, count=1
 ```
 
 ## Troubleshooting
 
-### "Connection refused" or "UNAVAILABLE" in gateway logs
-The gRPC host should be `host.docker.internal` when the proxy runs on the host machine, not `localhost`. Ignition runs inside Docker and `localhost` refers to the container itself.
+### "UNAVAILABLE" or TLS errors in gateway logs
+- Verify the Host is set to `historian` (the Docker service name), not `localhost`
+- Verify the Port is `8001` (gRPC port), not `8000` (web UI port)
 
-### Tag history not appearing
+### Historian status shows error
+- Check that the Collector UUID and Token are correct
+- Check the Factry Historian logs: `docker-compose logs historian`
+
+### Tag history not appearing in Factry
 - Check that the historian status shows **Running** in the Historians list
 - Check that the tag's History Provider matches the historian name
-- Check gateway logs for errors (search for "Factry" or "gRPC")
-
-### Programmatic historian conflicts with UI-created one
-The gateway hook auto-creates a "FactryHistorian" historian on startup (hardcoded to `factry-proxy:9876`). If you also create one from the UI, you will have two historians. The UI-created one uses the settings you provide, so use that one for testing with the local proxy.
-
-### Fields appear duplicated in the Create Historian form
-Rebuild and reinstall the module — this was a bug that has been fixed.
+- Check Ignition gateway logs for errors: `docker-compose logs ignition | grep -i factry`

@@ -10,19 +10,15 @@ services:
     volumes:
       # Mount data directory for persistence (modules, projects, gateway config, etc.)
       - ./ignition/data:/usr/local/bin/ignition/data
-
-      # Optional: Mount module directly for hot deployment
-      # NOTE: This does NOT work reliably for updates - always use manual UI upload
-      # - ./build/Factry-Historian.modl:/usr/local/bin/ignition/user-lib/modules/Factry-Historian.modl
     environment:
       # Accept EULA automatically
       ACCEPT_IGNITION_EULA: "Y"
-      
+
       # Gateway admin credentials (change these!)
       GATEWAY_ADMIN_USERNAME: "admin"
       GATEWAY_ADMIN_PASSWORD: "password"
 
-      
+
       # Gateway network settings
       GATEWAY_NETWORK_0_HOST: "ignition-dev"
 
@@ -35,21 +31,65 @@ services:
       retries: 3
       start_period: 60s
 
-  # Optional: Add the Go proxy for testing
-  factry-proxy:
-    build:
-      context: ./scripts
-      dockerfile: Dockerfile
-    container_name: factry-proxy
+  # Factry Historian
+  historian:
+    image: factry/historian:latest
+    container_name: factry-historian
     ports:
-      - "8111:8111"   # Proxy HTTP API
-      - "9876:9876" # gRPC
+      - "8000:8000"   # Web UI
+      - "8001:8001"   # gRPC
+    environment:
+      HISTORIAN_POSTGRES_HOST: postgres
+      HISTORIAN_POSTGRES_USER: factry
+      HISTORIAN_POSTGRES_PASSWORD: password
+      HISTORIAN_POSTGRES_DB: factry
+      HISTORIAN_INFLUXDB_URL: http://influx:8086
+    depends_on:
+      postgres:
+        condition: service_healthy
+      influx:
+        condition: service_started
+    restart: unless-stopped
+    volumes:
+      - historian_data:/data
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: factry-postgres
+    environment:
+      POSTGRES_USER: factry
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: factry
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8111/health"]
-      interval: 30s
+      test: ["CMD-SHELL", "pg_isready -U factry"]
+      interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+
+  influx:
+    image: influxdb:1.8
+    container_name: factry-influx
+    volumes:
+      - influx_data:/var/lib/influxdb
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: factry-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+
+volumes:
+  historian_data:
+  postgres_data:
+  influx_data:
+  grafana_data:
 
 networks:
   default:
