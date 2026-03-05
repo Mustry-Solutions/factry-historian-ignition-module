@@ -6,7 +6,7 @@ services:
       - "8088:8088"   # HTTP - Gateway web interface
       - "8043:8043"   # HTTPS
       - "8060:8060"   # Gateway Network
-      - "8000:8000"    # Java debug port
+      - "8022:8022"    # Java debug port
     volumes:
       # Mount data directory for persistence (modules, projects, gateway config, etc.)
       - ./ignition/data:/usr/local/bin/ignition/data
@@ -26,7 +26,7 @@ services:
       # Gateway network settings
       GATEWAY_NETWORK_0_HOST: "ignition-dev"
 
-    command: -- -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:8000
+    command: -- -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:8022
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8088/StatusPing"]
@@ -38,7 +38,7 @@ services:
   # Optional: Add the Go proxy for testing
   factry-proxy:
     build:
-      context: ./proxy
+      context: ./scripts
       dockerfile: Dockerfile
     container_name: factry-proxy
     ports:

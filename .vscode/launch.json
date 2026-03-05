@@ -6,7 +6,7 @@
             "name": "Debug Factry Historian Module",
             "request": "attach",
             "hostName": "localhost",
-            "port": 8000,
+            "port": 8022,
             "projectName": "gateway"
         }
     ]

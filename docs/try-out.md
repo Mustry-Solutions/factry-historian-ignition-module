@@ -51,10 +51,10 @@ On first install, go to **Config > System > Modules** and accept the **Mustry So
 
 | Field | Value | Notes |
 |-------|-------|-------|
-| Proxy URL | `http://host.docker.internal:8111` | See "Host value" below |
-| Timeout (ms) | `5000` | |
-| gRPC Host | `host.docker.internal` | See "Host value" below |
-| gRPC Port | `9876` | |
+| Collector UUID | `<your-collector-uuid>` | UUID of the collector registered in Factry Historian |
+| Token | `<your-bearer-token>` | Bearer token for Factry Historian authentication |
+| Host | `host.docker.internal` | See "Host value" below |
+| Port | `9876` | gRPC port of the Factry Historian server |
 
 ### Advanced
 
@@ -65,8 +65,8 @@ On first install, go to **Config > System > Modules** and accept the **Mustry So
 | Debug Logging | checked | Recommended for first-time testing |
 
 **Host value** depends on your setup:
-- **Proxy running on your host machine** (this guide): use `host.docker.internal` (Docker resolves this to the host)
-- **Proxy running in docker-compose**: use `factry-proxy` (the container name)
+- **Factry running on your host machine**: use `host.docker.internal` (Docker resolves this to the host)
+- **Factry running remotely**: use the server hostname/IP
 - **Ignition running natively** (not in Docker): use `localhost`
 
 5. Click **Create Historian**
