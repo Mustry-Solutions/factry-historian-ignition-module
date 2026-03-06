@@ -5,6 +5,9 @@ import com.inductiveautomation.historian.gateway.api.query.QueryEngine;
 import com.inductiveautomation.historian.gateway.api.storage.StorageEngine;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 import com.inductiveautomation.ignition.gateway.model.ProfileStatus;
+import com.inductiveautomation.ignition.gateway.secrets.Plaintext;
+import com.inductiveautomation.ignition.gateway.secrets.Secret;
+import com.inductiveautomation.ignition.gateway.secrets.SecretConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,7 +32,8 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         this.grpcClient = new FactryGrpcClient(
                 settings.getGrpcHost(),
                 settings.getGrpcPort(),
-                settings.getCollectorUUID()
+                settings.getCollectorUUID(),
+                resolveToken(context, settings.getToken())
         );
         this.measurementCache = new MeasurementCache();
 
@@ -99,6 +103,18 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
     @Override
     public ProfileStatus getStatus() {
         return started ? ProfileStatus.RUNNING : ProfileStatus.UNKNOWN;
+    }
+
+    private static String resolveToken(GatewayContext context, SecretConfig secretConfig) {
+        if (secretConfig == null) {
+            return "";
+        }
+        try (Plaintext plaintext = Secret.create(context, secretConfig).getPlaintext()) {
+            return plaintext.getAsString();
+        } catch (Exception e) {
+            logger.error("Failed to resolve token secret", e);
+            return "";
+        }
     }
 
     @Override

@@ -1,6 +1,7 @@
 package io.factry.historian.gateway;
 
 import com.inductiveautomation.historian.gateway.api.config.HistorianSettings;
+import com.inductiveautomation.ignition.gateway.secrets.SecretConfig;
 
 public class FactryHistorianSettings implements HistorianSettings {
 
@@ -10,6 +11,7 @@ public class FactryHistorianSettings implements HistorianSettings {
     private String grpcHost = "localhost";
     private int grpcPort = 9876;
     private boolean debugLogging = false;
+    private SecretConfig token;
 
     public FactryHistorianSettings() {
     }
@@ -60,6 +62,14 @@ public class FactryHistorianSettings implements HistorianSettings {
 
     public void setDebugLogging(boolean debugLogging) {
         this.debugLogging = debugLogging;
+    }
+
+    public SecretConfig getToken() {
+        return token;
+    }
+
+    public void setToken(SecretConfig token) {
+        this.token = token;
     }
 
     @Override

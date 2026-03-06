@@ -6,6 +6,7 @@ import com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.F
 import com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.FormField;
 import com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.Label;
 import com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.Required;
+import com.inductiveautomation.ignition.gateway.secrets.SecretConfig;
 import com.inductiveautomation.ignition.gateway.web.nav.FormFieldType;
 
 public record FactryHistorianConfig(
@@ -16,6 +17,13 @@ public record FactryHistorianConfig(
         @Required
         @Description("UUID of the collector registered in Factry Historian")
         String collectorUUID,
+
+        @FormCategory("Connection")
+        @Label("Token*")
+        @FormField(FormFieldType.SECRET)
+        @Required
+        @Description("Bearer token for Factry Historian authentication")
+        SecretConfig token,
 
         @FormCategory("Connection")
         @Label("Host*")
@@ -56,6 +64,7 @@ public record FactryHistorianConfig(
     public FactryHistorianSettings toSettings() {
         FactryHistorianSettings settings = new FactryHistorianSettings();
         settings.setCollectorUUID(collectorUUID);
+        settings.setToken(token);
         settings.setGrpcHost(grpcHost);
         settings.setGrpcPort(grpcPort);
         settings.setBatchSize(batchSize);
@@ -67,6 +76,7 @@ public record FactryHistorianConfig(
     public static FactryHistorianConfig fromSettings(FactryHistorianSettings settings) {
         return new FactryHistorianConfig(
                 settings.getCollectorUUID(),
+                settings.getToken(),
                 settings.getGrpcHost(),
                 settings.getGrpcPort(),
                 settings.getBatchSize(),

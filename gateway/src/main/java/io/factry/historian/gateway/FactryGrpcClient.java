@@ -8,34 +8,49 @@ import io.factry.historian.proto.MeasurementRequest;
 import io.factry.historian.proto.Measurements;
 import io.factry.historian.proto.Points;
 import io.grpc.ManagedChannel;
-import io.grpc.ManagedChannelBuilder;
 import io.grpc.Metadata;
+import io.grpc.netty.shaded.io.grpc.netty.GrpcSslContexts;
+import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
+import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext;
+import io.grpc.netty.shaded.io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.grpc.stub.MetadataUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.net.ssl.SSLException;
 import java.util.concurrent.TimeUnit;
 
 public class FactryGrpcClient {
     private static final Logger logger = LoggerFactory.getLogger(FactryGrpcClient.class);
     private static final Metadata.Key<String> COLLECTOR_UUID_KEY =
             Metadata.Key.of("collectoruuid", Metadata.ASCII_STRING_MARSHALLER);
+    private static final Metadata.Key<String> AUTHORIZATION_KEY =
+            Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER);
 
     private final ManagedChannel channel;
     private final HistorianGrpc.HistorianBlockingStub blockingStub;
 
-    public FactryGrpcClient(String host, int port, String collectorUUID) {
-        this.channel = ManagedChannelBuilder.forAddress(host, port)
-                .usePlaintext()
-                .build();
+    public FactryGrpcClient(String host, int port, String collectorUUID, String token) {
+        try {
+            SslContext sslContext = GrpcSslContexts.forClient()
+                    .trustManager(InsecureTrustManagerFactory.INSTANCE)
+                    .build();
+
+            this.channel = NettyChannelBuilder.forAddress(host, port)
+                    .sslContext(sslContext)
+                    .build();
+        } catch (SSLException e) {
+            throw new RuntimeException("Failed to create TLS-enabled gRPC channel", e);
+        }
 
         Metadata headers = new Metadata();
         headers.put(COLLECTOR_UUID_KEY, collectorUUID);
+        headers.put(AUTHORIZATION_KEY, "Bearer " + token);
 
         this.blockingStub = HistorianGrpc.newBlockingStub(channel)
                 .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers));
 
-        logger.info("gRPC client created, target={}:{}, collectorUUID={}", host, port, collectorUUID);
+        logger.info("gRPC client created (TLS), target={}:{}, collectorUUID={}", host, port, collectorUUID);
     }
 
     public CreatePointsReply createPoints(Points points) {

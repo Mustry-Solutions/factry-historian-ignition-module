@@ -20,10 +20,12 @@ Check try-out.md.
 
 known issue:
   - store and forward is not yet added (in progress)
-  - edit settings are not possible in ignition, always restart
+  - edit settings are not possible in ignition, always recreate historian
 
 
-
+Questions:
+  - for provider we have to wait, but browsing measurements can be done. Only measurements?
+  - 
 
 # 16/03/2026 
 

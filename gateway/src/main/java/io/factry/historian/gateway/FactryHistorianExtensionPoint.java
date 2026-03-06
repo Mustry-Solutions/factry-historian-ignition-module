@@ -8,8 +8,10 @@ import com.inductiveautomation.ignition.gateway.config.DecodedResource;
 import com.inductiveautomation.ignition.gateway.config.ExtensionPointConfig;
 import com.inductiveautomation.ignition.gateway.dataroutes.openapi.SchemaUtil;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
+import com.inductiveautomation.ignition.gateway.secrets.SecretConfig;
 import com.inductiveautomation.ignition.gateway.web.nav.ExtensionPointResourceForm;
 import com.inductiveautomation.ignition.gateway.web.nav.WebUiComponent;
+import com.inductiveautomation.ignition.common.gson.GsonBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,6 +56,15 @@ public class FactryHistorianExtensionPoint extends HistorianExtensionPoint<Factr
         logger.info("MODULE VERSION: {}", io.factry.historian.common.FactryHistorianModule.MODULE_VERSION);
         logger.info("Type: {}, Name: {}", TYPE_ID, DISPLAY_NAME);
         logger.info("========================================");
+    }
+
+    /**
+     * Register the SecretConfig Gson adapter so the extension point can
+     * serialize/deserialize FactryHistorianSettings (which contains a SecretConfig token field).
+     */
+    @Override
+    protected void customizeGson(GsonBuilder builder) {
+        builder.registerTypeAdapter(SecretConfig.class, new SecretConfig.GsonAdapter());
     }
 
     /**
