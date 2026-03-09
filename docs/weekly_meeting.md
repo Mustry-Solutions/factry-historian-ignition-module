@@ -4,10 +4,10 @@
 
 This is the first version of sending tag changes to the factry collector.
 
-Previously:
+Prior work:
   - scaffolding ignition module
   - design document
-  - installing module, creating historian, assinging to tag
+  - installing module, creating historian, assigning to tag
    
 Recently:
   - implementing gRPC collector implementation for the module 
@@ -25,7 +25,13 @@ known issue:
 
 Questions:
   - for provider we have to wait, but browsing measurements can be done. Only measurements?
-  - 
+  - docker-compose with everything (ignition + factry historian + dbs )?
+  - how do you want to install the module and ignition (docker?)
+  - documentation
+      design document and other assets there
+      signing the module
+      try-out
+
 
 # 16/03/2026 
 
