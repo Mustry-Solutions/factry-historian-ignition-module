@@ -8,6 +8,8 @@ import io.factry.historian.proto.Measurements;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class MeasurementCache {
@@ -20,46 +22,63 @@ public class MeasurementCache {
             MeasurementRequest request = MeasurementRequest.newBuilder().build();
             Measurements response = grpcClient.getMeasurements(request);
 
-            tagPathToUUID.clear();
+            // Build new map first, then merge — never clear the existing cache
+            // to avoid race conditions with concurrent store calls
+            Map<String, String> fresh = new HashMap<>();
             for (Measurement m : response.getMeasurementsList()) {
-                tagPathToUUID.put(m.getName(), m.getUuid());
+                fresh.put(m.getName(), m.getUuid());
+                logger.debug("Measurement from Factry: name='{}', uuid='{}', status='{}', datatype='{}'",
+                        m.getName(), m.getUuid(), m.getStatus(), m.getDatatype());
             }
-            logger.info("Measurement cache refreshed, {} measurements loaded", tagPathToUUID.size());
+            tagPathToUUID.putAll(fresh);
+            logger.info("Measurement cache refreshed, {} measurements from Factry, {} total in cache",
+                    fresh.size(), tagPathToUUID.size());
         } catch (Exception e) {
             logger.error("Failed to refresh measurement cache", e);
         }
     }
 
-    public String getOrCreateUUID(String tagPath, FactryGrpcClient grpcClient, Object value) {
+    public String getOrCreateUUID(String tagPath, FactryGrpcClient grpcClient, Class<?> valueClass) {
         String uuid = tagPathToUUID.get(tagPath);
         if (uuid != null) {
             return uuid;
         }
 
-        String dataType = toFactryDataType(value);
-        logger.info("Measurement not found in cache for '{}', creating via autoOnboard with dataType={}", tagPath, dataType);
+        String dataType = toFactryDataType(valueClass);
+        logger.info("Measurement not found in cache for '{}', creating via autoOnboard with dataType={}, valueClass={}",
+                tagPath, dataType, valueClass != null ? valueClass.getName() : "null");
+
+        if (dataType == null) {
+            logger.warn("Cannot create measurement for '{}': data type unknown (valueClass=null). "
+                    + "Skipping until a point with a known type arrives.", tagPath);
+            return "";
+        }
+
         try {
-            CreateMeasurement.Builder builder = CreateMeasurement.newBuilder()
+            CreateMeasurement createMeasurement = CreateMeasurement.newBuilder()
                     .setName(tagPath)
-                    .setAutoOnboard(true);
-            if (dataType != null) {
-                builder.setDataType(dataType);
-            }
-            CreateMeasurement createMeasurement = builder.build();
+                    .setAutoOnboard(true)
+                    .setDataType(dataType)
+                    .build();
 
             CreateMeasurementsRequest request = CreateMeasurementsRequest.newBuilder()
                     .addMeasurements(createMeasurement)
                     .build();
 
+            logger.info("Calling createMeasurements for '{}'", tagPath);
             grpcClient.createMeasurements(request);
-            refresh(grpcClient);
+            logger.info("createMeasurements succeeded for '{}'", tagPath);
 
+            // Refresh and check — single attempt, no sleep
+            refresh(grpcClient);
             uuid = tagPathToUUID.get(tagPath);
             if (uuid != null) {
+                logger.info("Measurement UUID resolved for '{}': {}", tagPath, uuid);
                 return uuid;
             }
 
-            logger.warn("Measurement UUID still not found after create+refresh for '{}'", tagPath);
+            logger.warn("Measurement UUID not found after create+refresh for '{}'. "
+                    + "Cache keys: {}", tagPath, tagPathToUUID.keySet());
             return "";
         } catch (Exception e) {
             logger.error("Failed to create measurement for tag path: " + tagPath, e);
@@ -71,12 +90,15 @@ public class MeasurementCache {
         return tagPathToUUID.size();
     }
 
-    private static String toFactryDataType(Object value) {
-        if (value instanceof Boolean) {
+    private static String toFactryDataType(Class<?> valueClass) {
+        if (valueClass == null) {
+            return null;
+        }
+        if (Boolean.class.isAssignableFrom(valueClass)) {
             return "boolean";
-        } else if (value instanceof Number) {
+        } else if (Number.class.isAssignableFrom(valueClass)) {
             return "number";
-        } else if (value instanceof String) {
+        } else if (String.class.isAssignableFrom(valueClass)) {
             return "string";
         }
         return null;

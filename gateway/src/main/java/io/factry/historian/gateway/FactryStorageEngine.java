@@ -12,6 +12,7 @@ import com.google.protobuf.Value;
 import io.factry.historian.proto.Point;
 import io.factry.historian.proto.Points;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class FactryStorageEngine extends AbstractStorageEngine {
@@ -36,38 +37,64 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
     @Override
     protected StorageResult<AtomicPoint<?>> doStoreAtomic(List<AtomicPoint<?>> points) {
-        if (settings.isDebugLogging()) {
-            logger.debug("doStoreAtomic called with " + points.size() + " points");
-        }
+        logger.info("doStoreAtomic called with " + points.size() + " points");
 
         try {
             Points.Builder pointsBuilder = Points.newBuilder();
+            List<AtomicPoint<?>> skipped = new ArrayList<>();
+            int built = 0;
 
             for (AtomicPoint<?> point : points) {
                 String tagPath = point.source().toString();
-                String measurementUUID = measurementCache.getOrCreateUUID(tagPath, grpcClient, point.value());
+                Object value = point.value();
+                Class<?> valueClass = point.valueClass().orElse(null);
+
+                logger.info("Processing point: tagPath=" + tagPath
+                        + ", value=" + value
+                        + ", valueClass=" + (valueClass != null ? valueClass.getName() : "null")
+                        + ", quality=" + point.quality().getCode()
+                        + ", timestamp=" + point.timestamp());
+
+                String measurementUUID = measurementCache.getOrCreateUUID(tagPath, grpcClient, valueClass);
+
+                if (measurementUUID == null || measurementUUID.isEmpty()) {
+                    logger.warn("Skipping point for '" + tagPath + "': no measurement UUID resolved");
+                    skipped.add(point);
+                    continue;
+                }
 
                 Point.Builder pb = Point.newBuilder()
                         .setMeasurementUUID(measurementUUID)
                         .setTimestamp(Timestamps.fromMillis(point.timestamp().toEpochMilli()))
                         .setStatus(qualityToStatus(point.quality().getCode()));
 
-                Object value = point.value();
                 if (value instanceof Boolean) {
                     pb.setValue(Value.newBuilder().setBoolValue((Boolean) value).build());
                 } else if (value instanceof Number) {
                     pb.setValue(Value.newBuilder().setNumberValue(((Number) value).doubleValue()).build());
                 } else if (value != null) {
                     pb.setValue(Value.newBuilder().setStringValue(value.toString()).build());
+                } else {
+                    logger.warn("Point for '" + tagPath + "' has null value, skipping");
+                    skipped.add(point);
+                    continue;
                 }
 
                 pointsBuilder.addPoints(pb.build());
+                built++;
             }
 
-            grpcClient.createPoints(pointsBuilder.build());
+            if (built > 0) {
+                logger.info("Sending " + built + " points via gRPC createPoints");
+                grpcClient.createPoints(pointsBuilder.build());
+                logger.info("gRPC createPoints succeeded for " + built + " points");
+            } else {
+                logger.warn("No valid points to send (all " + points.size() + " were skipped)");
+            }
 
-            if (settings.isDebugLogging()) {
-                logger.debug("gRPC createPoints succeeded for " + points.size() + " points");
+            if (!skipped.isEmpty()) {
+                logger.warn("Returning failure for " + skipped.size() + " skipped points");
+                return StorageResult.failure(skipped);
             }
             return StorageResult.success(points);
 
@@ -85,7 +112,11 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
     @Override
     protected boolean isEngineUnavailable() {
-        return grpcClient.isShutdown();
+        boolean unavailable = grpcClient.isShutdown();
+        if (unavailable) {
+            logger.warn("gRPC client is shutdown — engine unavailable");
+        }
+        return unavailable;
     }
 
     public void shutdown() {
