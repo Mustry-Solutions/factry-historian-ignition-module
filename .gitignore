@@ -113,3 +113,4 @@ ignition/
 
 venv
 build-number.txt
+docs/.design/
