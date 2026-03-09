@@ -24,6 +24,7 @@ if [ -d "$IGNITION_DATA_DIR" ] && [ "$(ls -A $IGNITION_DATA_DIR)" ]; then
     fi
 fi
 
+echo ""
 echo "📦 Step 1: Starting Ignition WITHOUT mounted volumes to initialize..."
 echo ""
 
