@@ -45,7 +45,7 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
             for (AtomicPoint<?> point : points) {
                 String tagPath = point.source().toString();
-                String measurementUUID = measurementCache.getOrCreateUUID(tagPath, grpcClient);
+                String measurementUUID = measurementCache.getOrCreateUUID(tagPath, grpcClient, point.value());
 
                 Point.Builder pb = Point.newBuilder()
                         .setMeasurementUUID(measurementUUID)
@@ -94,11 +94,11 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
     private static String qualityToStatus(int qualityCode) {
         if (qualityCode >= 192) {
-            return "good";
+            return "Good";
         } else if (qualityCode >= 64) {
-            return "uncertain";
+            return "Uncertain";
         } else {
-            return "bad";
+            return "Bad";
         }
     }
 }

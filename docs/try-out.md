@@ -20,7 +20,7 @@ This starts:
 3. Click **Create Collector**
 4. Give it a name (e.g., `ignition-collector`)
 5. Click **Generate Token** and **copy the token** — you'll need it in step 4
-6. Note the **Collector UUID** shown on the collector detail page
+6. Note the **Collector ID** shown on the collector detail page
 
 ## 3. Build and install the module
 
@@ -43,7 +43,7 @@ On first install, go to **Config > System > Modules** and accept the **Mustry So
 
 | Field | Value | Notes |
 |-------|-------|-------|
-| Collector UUID | `<uuid from step 2>` | The UUID shown on the collector page |
+| Collector ID | `<uuid from step 2>` | The UUID shown on the collector page |
 | Token | `<token from step 2>` | The generated bearer token |
 | Host | `historian` | Docker service name (both containers share the same network) |
 | Port | `8001` | Factry Historian gRPC port |
@@ -88,7 +88,7 @@ gRPC store succeeded: stored, count=1
 - Verify the Port is `8001` (gRPC port), not `8000` (web UI port)
 
 ### Historian status shows error
-- Check that the Collector UUID and Token are correct
+- Check that the Collector ID and Token are correct
 - Check the Factry Historian logs: `docker-compose logs historian`
 
 ### Tag history not appearing in Factry

@@ -1,38 +1,49 @@
-# Weekly meetings
+# Weekly Meetings
 
-# 09/03/2026 'Collect Tag Changes (Collector)'
+# 09/03/2026 — Collect Tag Changes (Collector)
 
-This is the first version of sending tag changes to the factry collector.
+First version of sending tag changes to the Factry collector.
 
 Prior work:
-  - scaffolding ignition module
-  - design document
-  - installing module, creating historian, assigning to tag
-   
+  - Scaffolded the Ignition module
+  - Wrote the design document
+  - Installed the module, created a historian, and assigned it to a tag
+
 Recently:
-  - implementing gRPC collector implementation for the module 
-  - tidy up documentation 
-  - some clarification
+  - Implemented gRPC collector integration for the module
+  - Tidied up documentation
+  - Some clarifications
 
-Check try-out.md.
+See [try-out.md](try-out.md) for setup instructions.
 
-> this is in the 'Milestone 1: Proof of Concept' (proposed milestones)
+> This falls under "Milestone 1: Proof of Concept" (proposed milestones).
+> (Milestone 2: Historian Collector Full implementation)
 
-known issue:
-  - store and forward is not yet added (in progress)
-  - edit settings are not possible in ignition, always recreate historian
+Known issues:
+  - Store and forward is not yet implemented (in progress)
+  - Editing settings is not possible in Ignition; the historian must be recreated
 
+> Terminology:
+>  - Store (Ignition) → Collector (Factry) — writing tag data                 
+>  - Query (Ignition) → Provider (Factry) — reading data back
 
 Questions:
-  - for provider we have to wait, but browsing measurements can be done. Only measurements?
-  - docker-compose with everything (ignition + factry historian + dbs )?
-  - how do you want to install the module and ignition (docker?)
-  - documentation
-      design document and other assets there
-      signing the module
-      try-out
+  - tag name: 'prov:default:/tag:Alma' 
+  - The provider query API is not yet available, but browsing measurements can already be done. Only measurements, or also assets/calculations?
+  - Should we set up a docker-compose with everything (Ignition + Factry Historian + databases)?
+  - How should the module and Ignition be installed (Docker)?
+  - Documentation structure:
+      - Design document and related assets
+      - Module signing guide
+      - Try-out guide
 
 
-# 16/03/2026 
+# 16/03/2026
 
-
+Coming:
+ - Store and forward
+ - Editing settings
+ - Browsing variables
+ - preliminary protobuf
+  
+ 
