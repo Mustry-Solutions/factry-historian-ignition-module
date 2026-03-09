@@ -11,11 +11,11 @@ import com.inductiveautomation.ignition.gateway.web.nav.FormFieldType;
 
 public record FactryHistorianConfig(
         @FormCategory("Connection")
-        @Label("Collector UUID*")
+        @Label("Collector ID*")
         @FormField(FormFieldType.TEXT)
         @DefaultValue("")
         @Required
-        @Description("UUID of the collector registered in Factry Historian")
+        @Description("ID of the collector registered in Factry Historian")
         String collectorUUID,
 
         @FormCategory("Connection")

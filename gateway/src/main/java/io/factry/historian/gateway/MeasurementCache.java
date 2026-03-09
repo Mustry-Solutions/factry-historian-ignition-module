@@ -30,18 +30,22 @@ public class MeasurementCache {
         }
     }
 
-    public String getOrCreateUUID(String tagPath, FactryGrpcClient grpcClient) {
+    public String getOrCreateUUID(String tagPath, FactryGrpcClient grpcClient, Object value) {
         String uuid = tagPathToUUID.get(tagPath);
         if (uuid != null) {
             return uuid;
         }
 
-        logger.info("Measurement not found in cache for '{}', creating via autoOnboard", tagPath);
+        String dataType = toFactryDataType(value);
+        logger.info("Measurement not found in cache for '{}', creating via autoOnboard with dataType={}", tagPath, dataType);
         try {
-            CreateMeasurement createMeasurement = CreateMeasurement.newBuilder()
+            CreateMeasurement.Builder builder = CreateMeasurement.newBuilder()
                     .setName(tagPath)
-                    .setAutoOnboard(true)
-                    .build();
+                    .setAutoOnboard(true);
+            if (dataType != null) {
+                builder.setDataType(dataType);
+            }
+            CreateMeasurement createMeasurement = builder.build();
 
             CreateMeasurementsRequest request = CreateMeasurementsRequest.newBuilder()
                     .addMeasurements(createMeasurement)
@@ -65,5 +69,16 @@ public class MeasurementCache {
 
     public int size() {
         return tagPathToUUID.size();
+    }
+
+    private static String toFactryDataType(Object value) {
+        if (value instanceof Boolean) {
+            return "boolean";
+        } else if (value instanceof Number) {
+            return "number";
+        } else if (value instanceof String) {
+            return "string";
+        }
+        return null;
     }
 }
