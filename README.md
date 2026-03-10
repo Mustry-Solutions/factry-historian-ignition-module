@@ -1,6 +1,8 @@
-# Factry Historian Module
+# Factry Historian Ignition Module
 
-An Ignition 8.3+ module that implements a custom historian backed by [Factry Historian](https://factry.io). Tag history data is stored and queried via a Go REST proxy that bridges Ignition with the Factry Historian API.
+An Ignition module that connects Inductive Automation Ignition to Factry Historian for structured, contextualised industrial data integration.
+
+An Ignition 8.3+ module that implements a custom historian backed by [Factry Historian](https://factry.io).
 
 ## Build
 
