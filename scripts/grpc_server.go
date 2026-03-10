@@ -4,14 +4,32 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"sync"
 
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pb "factry-historian-proxy/proto/historianpb"
 )
+
+func main() {
+	port := ":9876"
+	lis, err := net.Listen("tcp", port)
+	if err != nil {
+		log.Fatalf("Failed to listen on %s: %v", port, err)
+	}
+
+	s := grpc.NewServer()
+	pb.RegisterHistorianServer(s, newHistorianServer())
+
+	log.Printf("Fake Factry Historian gRPC server listening on %s", port)
+	if err := s.Serve(lis); err != nil {
+		log.Fatalf("gRPC server failed: %v", err)
+	}
+}
 
 type historianServer struct {
 	pb.UnimplementedHistorianServer
