@@ -18,7 +18,7 @@ dependencies {
     compileOnly("com.inductiveautomation.ignitionsdk:ignition-common:${rootProject.extra["sdk_version"]}")
     compileOnly("com.inductiveautomation.ignitionsdk:gateway-api:${rootProject.extra["sdk_version"]}")
 
-    // Historian API dependencies (as per Paul Griffith's guidance)
+    // Historian API dependencies
     // These are in separate artifacts because historian is now a dedicated module
     // The SDK POMs (com.inductiveautomation.ignitionsdk) reference the real artifacts (com.inductiveautomation.historian)
     // We need to add the real artifacts directly since compileOnly doesn't pull transitive dependencies

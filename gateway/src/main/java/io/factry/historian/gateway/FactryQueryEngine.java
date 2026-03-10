@@ -25,7 +25,6 @@ import java.util.Set;
  */
 public class FactryQueryEngine extends AbstractQueryEngine {
     private final FactryHistorianSettings settings;
-    private final FactryHttpClient httpClient;
 
     public FactryQueryEngine(
         GatewayContext context,
@@ -34,7 +33,6 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     ) {
         super(context, historianName, LoggerEx.newBuilder().build(FactryQueryEngine.class));
         this.settings = settings;
-        this.httpClient = new FactryHttpClient(settings);
         logger.info("Factry Query Engine initialized");
     }
 

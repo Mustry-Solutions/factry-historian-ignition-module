@@ -99,8 +99,8 @@ ignitionModule {
      */
     moduleDependencySpecs {
         // Historian Core module is required for our AbstractHistorian implementation
-        // As per Paul Griffith: "Historian related packages are in a separate artifact,
-        // because the historian is now a dedicated module"
+        // Historian related packages are in a separate artifact,
+        // because the historian is now a dedicated module
         register("com.inductiveautomation.historian") {
             scope = "G"  // Gateway scope only
             required = true  // Module won't load without this dependency

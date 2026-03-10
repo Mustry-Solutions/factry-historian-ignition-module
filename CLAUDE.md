@@ -213,7 +213,6 @@ The project uses Inductive Automation's Maven repository:
 ## Documentation
 
 Development documentation: `docs/content.md`
-Project plan: `docs/plan.md`
 
 ### Ignition SDK Resources (8.3+)
 When implementing features, always reference Ignition 8.3+ documentation:
