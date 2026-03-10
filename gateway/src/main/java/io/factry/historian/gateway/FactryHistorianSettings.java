@@ -13,6 +13,12 @@ public class FactryHistorianSettings implements HistorianSettings {
     private boolean debugLogging = false;
     private SecretConfig token;
 
+    /**
+     * Name of the Store & Forward engine to use for buffering.
+     * If empty, S&F is disabled and writes go directly to the gRPC server.
+     */
+    private String storeAndForwardEngine = "";
+
     public FactryHistorianSettings() {
     }
 
@@ -72,6 +78,14 @@ public class FactryHistorianSettings implements HistorianSettings {
         this.token = token;
     }
 
+    public String getStoreAndForwardEngine() {
+        return storeAndForwardEngine;
+    }
+
+    public void setStoreAndForwardEngine(String storeAndForwardEngine) {
+        this.storeAndForwardEngine = storeAndForwardEngine;
+    }
+
     @Override
     public String toString() {
         return "FactryHistorianSettings{" +
@@ -81,6 +95,7 @@ public class FactryHistorianSettings implements HistorianSettings {
                 ", batchSize=" + batchSize +
                 ", batchIntervalMs=" + batchIntervalMs +
                 ", debugLogging=" + debugLogging +
+                ", storeAndForwardEngine='" + storeAndForwardEngine + '\'' +
                 '}';
     }
 }

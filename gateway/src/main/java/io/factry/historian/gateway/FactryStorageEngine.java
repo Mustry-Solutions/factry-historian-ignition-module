@@ -73,7 +73,9 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
         } catch (Exception e) {
             logger.error("Error storing atomic points via gRPC", e);
-            return StorageResult.failure(points);
+            // Use exception() instead of failure() so the S&F sink bridge
+            // sees the error and throws DataStorageException, triggering retry.
+            return StorageResult.exception(e, points);
         }
     }
 
@@ -85,7 +87,10 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
     @Override
     protected boolean isEngineUnavailable() {
-        return grpcClient.isShutdown();
+        // Always return false so S&F attempts the actual write via doStoreAtomic().
+        // If the gRPC server is unreachable, doStoreAtomic returns StorageResult.exception()
+        // which triggers S&F retry. Returning true here would cause premature quarantine.
+        return false;
     }
 
     public void shutdown() {
