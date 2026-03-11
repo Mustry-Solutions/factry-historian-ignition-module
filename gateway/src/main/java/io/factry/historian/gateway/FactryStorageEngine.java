@@ -1,6 +1,8 @@
 package io.factry.historian.gateway;
 
 import com.inductiveautomation.historian.gateway.api.storage.AbstractStorageEngine;
+import com.inductiveautomation.historian.gateway.api.paths.QualifiedPathAdapter;
+import com.inductiveautomation.historian.gateway.api.storage.strategy.ImmediateStorageStrategy;
 import com.inductiveautomation.historian.common.model.data.AtomicPoint;
 import com.inductiveautomation.historian.common.model.data.SourceChangePoint;
 import com.inductiveautomation.historian.common.model.data.StorageResult;
@@ -26,7 +28,8 @@ public class FactryStorageEngine extends AbstractStorageEngine {
         FactryGrpcClient grpcClient,
         MeasurementCache measurementCache
     ) {
-        super(context, historianName, LoggerEx.newBuilder().build(FactryStorageEngine.class));
+        super(context, historianName, LoggerEx.newBuilder().build(FactryStorageEngine.class),
+                QualifiedPathAdapter.DEFAULT, ImmediateStorageStrategy.create(historianName));
         this.settings = settings;
         this.grpcClient = grpcClient;
         this.measurementCache = measurementCache;
