@@ -45,26 +45,48 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
             for (AtomicPoint<?> point : points) {
                 String tagPath = point.source().toString();
-                String measurementUUID = measurementCache.getOrCreateUUID(tagPath, grpcClient, point.value());
+                Object value = point.value();
+
+                logger.info("Point: tagPath=" + tagPath
+                        + ", value=" + value
+                        + ", valueType=" + (value != null ? value.getClass().getName() : "null"));
+
+                String measurementUUID = measurementCache.getOrCreateUUID(tagPath, grpcClient, value);
+                if (measurementUUID == null || measurementUUID.isEmpty()) {
+                    logger.info("Skipping point for '" + tagPath + "': no measurement UUID");
+                    continue;
+                }
+
+                if (value == null) {
+                    logger.info("Skipping point for '" + tagPath + "': null value");
+                    continue;
+                }
 
                 Point.Builder pb = Point.newBuilder()
                         .setMeasurementUUID(measurementUUID)
                         .setTimestamp(Timestamps.fromMillis(point.timestamp().toEpochMilli()))
                         .setStatus(qualityToStatus(point.quality().getCode()));
 
-                Object value = point.value();
                 if (value instanceof Boolean) {
                     pb.setValue(Value.newBuilder().setBoolValue((Boolean) value).build());
                 } else if (value instanceof Number) {
                     pb.setValue(Value.newBuilder().setNumberValue(((Number) value).doubleValue()).build());
-                } else if (value != null) {
+                } else {
                     pb.setValue(Value.newBuilder().setStringValue(value.toString()).build());
                 }
 
                 pointsBuilder.addPoints(pb.build());
             }
 
+            int pointCount = pointsBuilder.getPointsCount();
+            if (pointCount == 0) {
+                logger.info("No points to send (all skipped)");
+                return StorageResult.success(points);
+            }
+
+            logger.info("Sending " + pointCount + " points via createPoints");
             grpcClient.createPoints(pointsBuilder.build());
+            logger.info("createPoints succeeded for " + pointCount + " points");
 
             if (settings.isDebugLogging()) {
                 logger.debug("gRPC createPoints succeeded for " + points.size() + " points");
