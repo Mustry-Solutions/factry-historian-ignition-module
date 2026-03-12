@@ -11,6 +11,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
 	pb "factry-historian-proxy/proto/historianpb"
@@ -37,6 +38,7 @@ func loadConfig(path string) (*Config, error) {
 
 func main() {
 	configPath := flag.String("config", "config.json", "Path to config.json")
+	plaintext := flag.Bool("plaintext", false, "Use plaintext gRPC (no TLS) for fake server")
 	flag.Parse()
 
 	cfg, err := loadConfig(*configPath)
@@ -50,8 +52,13 @@ func main() {
 	target := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	log.Printf("Connecting to %s", target)
 
-	tlsCreds := credentials.NewTLS(&tls.Config{InsecureSkipVerify: true})
-	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(tlsCreds))
+	var dialOpt grpc.DialOption
+	if *plaintext {
+		dialOpt = grpc.WithTransportCredentials(insecure.NewCredentials())
+	} else {
+		dialOpt = grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{InsecureSkipVerify: true}))
+	}
+	conn, err := grpc.NewClient(target, dialOpt)
 	if err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}

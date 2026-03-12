@@ -37,13 +37,13 @@ Leave this terminal open — you'll see all gRPC calls logged here.
 
 ## 2. Verify with Test Scripts (Optional)
 
-In a **new terminal**, verify the server works:
+In a **new terminal**, verify the server works. Use `config.fake.json` (pre-configured for the fake server on port 9876) and `--plaintext` (the fake server doesn't use TLS):
 
 ```bash
 cd scripts
 
 # List pre-populated measurements
-go run ./query_measurements/
+go run ./query_measurements/ --config config.fake.json --plaintext
 
 # Output:
 # UUID                                      NAME                                      STATUS    DATATYPE
@@ -56,20 +56,22 @@ Query points for a measurement:
 
 ```bash
 # Query last hour of sine wave data (default: 100 points)
-go run ./query_points/ --uuid pre-0001-0001-0001-000000000001
+go run ./query_points/ --config config.fake.json --plaintext --uuid pre-0001-0001-0001-000000000001
 
 # Query with custom time range and limit
-go run ./query_points/ --uuid pre-0001-0001-0001-000000000001 --limit 10
+go run ./query_points/ --config config.fake.json --plaintext --uuid pre-0001-0001-0001-000000000001 --limit 10
 ```
 
 You can also create additional measurements:
 
 ```bash
-go run ./create_measurement/ --name "prov:default:/tag:MyCustomTag" --type number
-go run ./query_measurements/   # verify it appears
+go run ./create_measurement/ --config config.fake.json --plaintext --name "prov:default:/tag:MyCustomTag" --type number
+go run ./query_measurements/ --config config.fake.json --plaintext   # verify it appears
 ```
 
-> **Note**: The test scripts connect via TLS to the port in `config.json` (default `8001`). The fake server runs on `9876` without TLS. The scripts are primarily designed for testing against a real Factry Historian or the proxy. For the fake server, use `query_measurements` and `query_points` which work with the `config.json` settings.
+> **Flags explained**:
+> - `--config config.fake.json` — uses the fake server config (port 9876) instead of the default `config.json` (port 8001 for real Factry Historian)
+> - `--plaintext` — disables TLS (the fake server runs plain TCP, while the real Factry Historian uses TLS)
 
 ## 3. Start Ignition
 
