@@ -4,13 +4,16 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "factry-historian-proxy/proto/historianpb"
 )
@@ -40,9 +43,35 @@ type historianServer struct {
 }
 
 func newHistorianServer() *historianServer {
-	return &historianServer{
-		measurements: make([]*pb.Measurement, 0),
+	now := timestamppb.Now()
+	s := &historianServer{
+		measurements: []*pb.Measurement{
+			{
+				Uuid:      "pre-0001-0001-0001-000000000001",
+				Name:      "prov:default:/tag:Sine_Wave",
+				Status:    "active",
+				Datatype:  "number",
+				CreatedAt: now,
+			},
+			{
+				Uuid:      "pre-0002-0002-0002-000000000002",
+				Name:      "prov:default:/tag:Pump_Running",
+				Status:    "active",
+				Datatype:  "boolean",
+				CreatedAt: now,
+			},
+			{
+				Uuid:      "pre-0003-0003-0003-000000000003",
+				Name:      "prov:default:/tag:Temperature",
+				Status:    "active",
+				Datatype:  "number",
+				CreatedAt: now,
+			},
+		},
+		uuidCounter: 3,
 	}
+	log.Printf("Pre-populated %d measurements", len(s.measurements))
+	return s
 }
 
 func getCollectorUUID(ctx context.Context) string {
@@ -163,4 +192,68 @@ func (s *historianServer) GetInfo(ctx context.Context, _ *emptypb.Empty) (*pb.Hi
 		Version:    "0.1.0-dev",
 		ApiVersion: "1",
 	}, nil
+}
+
+func (s *historianServer) QueryRawPoints(ctx context.Context, req *pb.QueryRawPointsRequest) (*pb.QueryPointsReply, error) {
+	collectorUUID := getCollectorUUID(ctx)
+	log.Printf("[gRPC] QueryRawPoints: collectorUUID=%s, %d measurementUUIDs, limit=%d",
+		collectorUUID, len(req.GetMeasurementUUIDs()), req.GetLimit())
+
+	s.mu.Lock()
+	// Build lookup map: uuid -> measurement
+	measByUUID := make(map[string]*pb.Measurement)
+	for _, m := range s.measurements {
+		measByUUID[m.GetUuid()] = m
+	}
+	s.mu.Unlock()
+
+	startTime := req.GetStartTime().AsTime()
+	endTime := req.GetEndTime().AsTime()
+	limit := int(req.GetLimit())
+	if limit <= 0 {
+		limit = 1000
+	}
+
+	var result []*pb.MeasurementPoints
+	for _, uuid := range req.GetMeasurementUUIDs() {
+		meas := measByUUID[uuid]
+		datatype := "number"
+		if meas != nil {
+			datatype = meas.GetDatatype()
+		}
+
+		var points []*pb.Point
+		t := startTime
+		interval := 1 * time.Minute
+		for t.Before(endTime) && len(points) < limit {
+			pt := &pb.Point{
+				MeasurementUUID: uuid,
+				Timestamp:       timestamppb.New(t),
+				Status:          "Good",
+			}
+
+			switch datatype {
+			case "boolean":
+				// Alternating true/false every minute
+				val := (t.Minute() % 2) == 0
+				pt.Value, _ = structpb.NewValue(val)
+			default:
+				// Sine wave: period = 1 hour, amplitude = 100
+				minutes := t.Sub(startTime).Minutes()
+				v := 50 + 50*math.Sin(2*math.Pi*minutes/60.0)
+				pt.Value, _ = structpb.NewValue(v)
+			}
+
+			points = append(points, pt)
+			t = t.Add(interval)
+		}
+
+		result = append(result, &pb.MeasurementPoints{
+			MeasurementUUID: uuid,
+			Points:          points,
+		})
+		log.Printf("[gRPC]   uuid=%s: generated %d points (%s)", uuid, len(points), datatype)
+	}
+
+	return &pb.QueryPointsReply{MeasurementPoints: result}, nil
 }

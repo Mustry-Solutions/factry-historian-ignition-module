@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.10
 // 	protoc        v5.29.3
-// source: proto/historian.proto
+// source: historian.proto
 
 package historianpb
 
@@ -69,11 +69,11 @@ func (x Log_Level) String() string {
 }
 
 func (Log_Level) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_historian_proto_enumTypes[0].Descriptor()
+	return file_historian_proto_enumTypes[0].Descriptor()
 }
 
 func (Log_Level) Type() protoreflect.EnumType {
-	return &file_proto_historian_proto_enumTypes[0]
+	return &file_historian_proto_enumTypes[0]
 }
 
 func (x Log_Level) Number() protoreflect.EnumNumber {
@@ -82,7 +82,7 @@ func (x Log_Level) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Log_Level.Descriptor instead.
 func (Log_Level) EnumDescriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{10, 0}
+	return file_historian_proto_rawDescGZIP(), []int{10, 0}
 }
 
 type CollectorHA struct {
@@ -98,7 +98,7 @@ type CollectorHA struct {
 
 func (x *CollectorHA) Reset() {
 	*x = CollectorHA{}
-	mi := &file_proto_historian_proto_msgTypes[0]
+	mi := &file_historian_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -110,7 +110,7 @@ func (x *CollectorHA) String() string {
 func (*CollectorHA) ProtoMessage() {}
 
 func (x *CollectorHA) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[0]
+	mi := &file_historian_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -123,7 +123,7 @@ func (x *CollectorHA) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CollectorHA.ProtoReflect.Descriptor instead.
 func (*CollectorHA) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{0}
+	return file_historian_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *CollectorHA) GetMainCollectorUUID() string {
@@ -181,7 +181,7 @@ type Collector struct {
 
 func (x *Collector) Reset() {
 	*x = Collector{}
-	mi := &file_proto_historian_proto_msgTypes[1]
+	mi := &file_historian_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -193,7 +193,7 @@ func (x *Collector) String() string {
 func (*Collector) ProtoMessage() {}
 
 func (x *Collector) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[1]
+	mi := &file_historian_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -206,7 +206,7 @@ func (x *Collector) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Collector.ProtoReflect.Descriptor instead.
 func (*Collector) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{1}
+	return file_historian_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Collector) GetUuid() string {
@@ -307,7 +307,7 @@ type RegisterCollectorSchema struct {
 
 func (x *RegisterCollectorSchema) Reset() {
 	*x = RegisterCollectorSchema{}
-	mi := &file_proto_historian_proto_msgTypes[2]
+	mi := &file_historian_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -319,7 +319,7 @@ func (x *RegisterCollectorSchema) String() string {
 func (*RegisterCollectorSchema) ProtoMessage() {}
 
 func (x *RegisterCollectorSchema) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[2]
+	mi := &file_historian_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -332,7 +332,7 @@ func (x *RegisterCollectorSchema) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterCollectorSchema.ProtoReflect.Descriptor instead.
 func (*RegisterCollectorSchema) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{2}
+	return file_historian_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *RegisterCollectorSchema) GetCollectorType() string {
@@ -390,7 +390,7 @@ type Point struct {
 
 func (x *Point) Reset() {
 	*x = Point{}
-	mi := &file_proto_historian_proto_msgTypes[3]
+	mi := &file_historian_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -402,7 +402,7 @@ func (x *Point) String() string {
 func (*Point) ProtoMessage() {}
 
 func (x *Point) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[3]
+	mi := &file_historian_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -415,7 +415,7 @@ func (x *Point) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Point.ProtoReflect.Descriptor instead.
 func (*Point) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{3}
+	return file_historian_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Point) GetMeasurementUUID() string {
@@ -462,7 +462,7 @@ type Points struct {
 
 func (x *Points) Reset() {
 	*x = Points{}
-	mi := &file_proto_historian_proto_msgTypes[4]
+	mi := &file_historian_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -474,7 +474,7 @@ func (x *Points) String() string {
 func (*Points) ProtoMessage() {}
 
 func (x *Points) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[4]
+	mi := &file_historian_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -487,7 +487,7 @@ func (x *Points) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Points.ProtoReflect.Descriptor instead.
 func (*Points) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{4}
+	return file_historian_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Points) GetPoints() []*Point {
@@ -505,7 +505,7 @@ type CreatePointsReply struct {
 
 func (x *CreatePointsReply) Reset() {
 	*x = CreatePointsReply{}
-	mi := &file_proto_historian_proto_msgTypes[5]
+	mi := &file_historian_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -517,7 +517,7 @@ func (x *CreatePointsReply) String() string {
 func (*CreatePointsReply) ProtoMessage() {}
 
 func (x *CreatePointsReply) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[5]
+	mi := &file_historian_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -530,7 +530,7 @@ func (x *CreatePointsReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreatePointsReply.ProtoReflect.Descriptor instead.
 func (*CreatePointsReply) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{5}
+	return file_historian_proto_rawDescGZIP(), []int{5}
 }
 
 type Measurement struct {
@@ -549,7 +549,7 @@ type Measurement struct {
 
 func (x *Measurement) Reset() {
 	*x = Measurement{}
-	mi := &file_proto_historian_proto_msgTypes[6]
+	mi := &file_historian_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -561,7 +561,7 @@ func (x *Measurement) String() string {
 func (*Measurement) ProtoMessage() {}
 
 func (x *Measurement) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[6]
+	mi := &file_historian_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -574,7 +574,7 @@ func (x *Measurement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Measurement.ProtoReflect.Descriptor instead.
 func (*Measurement) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{6}
+	return file_historian_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Measurement) GetUuid() string {
@@ -646,7 +646,7 @@ type EngineeringSpecs struct {
 
 func (x *EngineeringSpecs) Reset() {
 	*x = EngineeringSpecs{}
-	mi := &file_proto_historian_proto_msgTypes[7]
+	mi := &file_historian_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -658,7 +658,7 @@ func (x *EngineeringSpecs) String() string {
 func (*EngineeringSpecs) ProtoMessage() {}
 
 func (x *EngineeringSpecs) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[7]
+	mi := &file_historian_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -671,7 +671,7 @@ func (x *EngineeringSpecs) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EngineeringSpecs.ProtoReflect.Descriptor instead.
 func (*EngineeringSpecs) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{7}
+	return file_historian_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *EngineeringSpecs) GetUom() string {
@@ -719,7 +719,7 @@ type MeasurementRequest struct {
 
 func (x *MeasurementRequest) Reset() {
 	*x = MeasurementRequest{}
-	mi := &file_proto_historian_proto_msgTypes[8]
+	mi := &file_historian_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -731,7 +731,7 @@ func (x *MeasurementRequest) String() string {
 func (*MeasurementRequest) ProtoMessage() {}
 
 func (x *MeasurementRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[8]
+	mi := &file_historian_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -744,7 +744,7 @@ func (x *MeasurementRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MeasurementRequest.ProtoReflect.Descriptor instead.
 func (*MeasurementRequest) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{8}
+	return file_historian_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *MeasurementRequest) GetSince() *timestamppb.Timestamp {
@@ -770,7 +770,7 @@ type Measurements struct {
 
 func (x *Measurements) Reset() {
 	*x = Measurements{}
-	mi := &file_proto_historian_proto_msgTypes[9]
+	mi := &file_historian_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -782,7 +782,7 @@ func (x *Measurements) String() string {
 func (*Measurements) ProtoMessage() {}
 
 func (x *Measurements) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[9]
+	mi := &file_historian_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -795,7 +795,7 @@ func (x *Measurements) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Measurements.ProtoReflect.Descriptor instead.
 func (*Measurements) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{9}
+	return file_historian_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Measurements) GetMeasurements() []*Measurement {
@@ -810,7 +810,7 @@ type Log struct {
 	Message   *structpb.Struct       `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
 	Level     Log_Level              `protobuf:"varint,2,opt,name=level,proto3,enum=proto.Log_Level" json:"level,omitempty"`
 	Timestamp *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
-	// Deprecated: Marked as deprecated in proto/historian.proto.
+	// Deprecated: Marked as deprecated in historian.proto.
 	Health          string `protobuf:"bytes,4,opt,name=health,proto3" json:"health,omitempty"`
 	MeasurementUUID string `protobuf:"bytes,5,opt,name=measurementUUID,proto3" json:"measurementUUID,omitempty"`
 	unknownFields   protoimpl.UnknownFields
@@ -819,7 +819,7 @@ type Log struct {
 
 func (x *Log) Reset() {
 	*x = Log{}
-	mi := &file_proto_historian_proto_msgTypes[10]
+	mi := &file_historian_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -831,7 +831,7 @@ func (x *Log) String() string {
 func (*Log) ProtoMessage() {}
 
 func (x *Log) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[10]
+	mi := &file_historian_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -844,7 +844,7 @@ func (x *Log) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Log.ProtoReflect.Descriptor instead.
 func (*Log) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{10}
+	return file_historian_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Log) GetMessage() *structpb.Struct {
@@ -868,7 +868,7 @@ func (x *Log) GetTimestamp() *timestamppb.Timestamp {
 	return nil
 }
 
-// Deprecated: Marked as deprecated in proto/historian.proto.
+// Deprecated: Marked as deprecated in historian.proto.
 func (x *Log) GetHealth() string {
 	if x != nil {
 		return x.Health
@@ -892,7 +892,7 @@ type Logs struct {
 
 func (x *Logs) Reset() {
 	*x = Logs{}
-	mi := &file_proto_historian_proto_msgTypes[11]
+	mi := &file_historian_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -904,7 +904,7 @@ func (x *Logs) String() string {
 func (*Logs) ProtoMessage() {}
 
 func (x *Logs) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[11]
+	mi := &file_historian_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -917,7 +917,7 @@ func (x *Logs) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Logs.ProtoReflect.Descriptor instead.
 func (*Logs) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{11}
+	return file_historian_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Logs) GetLogs() []*Log {
@@ -935,7 +935,7 @@ type CreateLogsReply struct {
 
 func (x *CreateLogsReply) Reset() {
 	*x = CreateLogsReply{}
-	mi := &file_proto_historian_proto_msgTypes[12]
+	mi := &file_historian_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -947,7 +947,7 @@ func (x *CreateLogsReply) String() string {
 func (*CreateLogsReply) ProtoMessage() {}
 
 func (x *CreateLogsReply) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[12]
+	mi := &file_historian_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -960,7 +960,7 @@ func (x *CreateLogsReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateLogsReply.ProtoReflect.Descriptor instead.
 func (*CreateLogsReply) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{12}
+	return file_historian_proto_rawDescGZIP(), []int{12}
 }
 
 type Statistics struct {
@@ -987,7 +987,7 @@ type Statistics struct {
 
 func (x *Statistics) Reset() {
 	*x = Statistics{}
-	mi := &file_proto_historian_proto_msgTypes[13]
+	mi := &file_historian_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -999,7 +999,7 @@ func (x *Statistics) String() string {
 func (*Statistics) ProtoMessage() {}
 
 func (x *Statistics) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[13]
+	mi := &file_historian_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1012,7 +1012,7 @@ func (x *Statistics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Statistics.ProtoReflect.Descriptor instead.
 func (*Statistics) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{13}
+	return file_historian_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *Statistics) GetSystemUptime() float64 {
@@ -1135,7 +1135,7 @@ type CreateStatisticsReply struct {
 
 func (x *CreateStatisticsReply) Reset() {
 	*x = CreateStatisticsReply{}
-	mi := &file_proto_historian_proto_msgTypes[14]
+	mi := &file_historian_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1147,7 +1147,7 @@ func (x *CreateStatisticsReply) String() string {
 func (*CreateStatisticsReply) ProtoMessage() {}
 
 func (x *CreateStatisticsReply) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[14]
+	mi := &file_historian_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1160,7 +1160,7 @@ func (x *CreateStatisticsReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateStatisticsReply.ProtoReflect.Descriptor instead.
 func (*CreateStatisticsReply) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{14}
+	return file_historian_proto_rawDescGZIP(), []int{14}
 }
 
 type CreateMeasurementsReply struct {
@@ -1171,7 +1171,7 @@ type CreateMeasurementsReply struct {
 
 func (x *CreateMeasurementsReply) Reset() {
 	*x = CreateMeasurementsReply{}
-	mi := &file_proto_historian_proto_msgTypes[15]
+	mi := &file_historian_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1183,7 +1183,7 @@ func (x *CreateMeasurementsReply) String() string {
 func (*CreateMeasurementsReply) ProtoMessage() {}
 
 func (x *CreateMeasurementsReply) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[15]
+	mi := &file_historian_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1196,7 +1196,7 @@ func (x *CreateMeasurementsReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateMeasurementsReply.ProtoReflect.Descriptor instead.
 func (*CreateMeasurementsReply) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{15}
+	return file_historian_proto_rawDescGZIP(), []int{15}
 }
 
 type CreateMeasurement struct {
@@ -1213,7 +1213,7 @@ type CreateMeasurement struct {
 
 func (x *CreateMeasurement) Reset() {
 	*x = CreateMeasurement{}
-	mi := &file_proto_historian_proto_msgTypes[16]
+	mi := &file_historian_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1225,7 +1225,7 @@ func (x *CreateMeasurement) String() string {
 func (*CreateMeasurement) ProtoMessage() {}
 
 func (x *CreateMeasurement) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[16]
+	mi := &file_historian_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1238,7 +1238,7 @@ func (x *CreateMeasurement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateMeasurement.ProtoReflect.Descriptor instead.
 func (*CreateMeasurement) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{16}
+	return file_historian_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *CreateMeasurement) GetName() string {
@@ -1292,7 +1292,7 @@ type CreateMeasurementsRequest struct {
 
 func (x *CreateMeasurementsRequest) Reset() {
 	*x = CreateMeasurementsRequest{}
-	mi := &file_proto_historian_proto_msgTypes[17]
+	mi := &file_historian_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1304,7 +1304,7 @@ func (x *CreateMeasurementsRequest) String() string {
 func (*CreateMeasurementsRequest) ProtoMessage() {}
 
 func (x *CreateMeasurementsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[17]
+	mi := &file_historian_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1317,7 +1317,7 @@ func (x *CreateMeasurementsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateMeasurementsRequest.ProtoReflect.Descriptor instead.
 func (*CreateMeasurementsRequest) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{17}
+	return file_historian_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *CreateMeasurementsRequest) GetMeasurements() []*CreateMeasurement {
@@ -1339,7 +1339,7 @@ type CollectorUpdateMetadata struct {
 
 func (x *CollectorUpdateMetadata) Reset() {
 	*x = CollectorUpdateMetadata{}
-	mi := &file_proto_historian_proto_msgTypes[18]
+	mi := &file_historian_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1351,7 +1351,7 @@ func (x *CollectorUpdateMetadata) String() string {
 func (*CollectorUpdateMetadata) ProtoMessage() {}
 
 func (x *CollectorUpdateMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[18]
+	mi := &file_historian_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1364,7 +1364,7 @@ func (x *CollectorUpdateMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CollectorUpdateMetadata.ProtoReflect.Descriptor instead.
 func (*CollectorUpdateMetadata) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{18}
+	return file_historian_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *CollectorUpdateMetadata) GetProduct() string {
@@ -1404,7 +1404,7 @@ type File struct {
 
 func (x *File) Reset() {
 	*x = File{}
-	mi := &file_proto_historian_proto_msgTypes[19]
+	mi := &file_historian_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1416,7 +1416,7 @@ func (x *File) String() string {
 func (*File) ProtoMessage() {}
 
 func (x *File) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[19]
+	mi := &file_historian_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1429,7 +1429,7 @@ func (x *File) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use File.ProtoReflect.Descriptor instead.
 func (*File) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{19}
+	return file_historian_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *File) GetChunk() []byte {
@@ -1449,7 +1449,7 @@ type MigrateMeasurementSettings struct {
 
 func (x *MigrateMeasurementSettings) Reset() {
 	*x = MigrateMeasurementSettings{}
-	mi := &file_proto_historian_proto_msgTypes[20]
+	mi := &file_historian_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1461,7 +1461,7 @@ func (x *MigrateMeasurementSettings) String() string {
 func (*MigrateMeasurementSettings) ProtoMessage() {}
 
 func (x *MigrateMeasurementSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[20]
+	mi := &file_historian_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1474,7 +1474,7 @@ func (x *MigrateMeasurementSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MigrateMeasurementSettings.ProtoReflect.Descriptor instead.
 func (*MigrateMeasurementSettings) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{20}
+	return file_historian_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *MigrateMeasurementSettings) GetMeasurementUUID() string {
@@ -1501,7 +1501,7 @@ type MigrationRequest struct {
 
 func (x *MigrationRequest) Reset() {
 	*x = MigrationRequest{}
-	mi := &file_proto_historian_proto_msgTypes[21]
+	mi := &file_historian_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1513,7 +1513,7 @@ func (x *MigrationRequest) String() string {
 func (*MigrationRequest) ProtoMessage() {}
 
 func (x *MigrationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[21]
+	mi := &file_historian_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1526,7 +1526,7 @@ func (x *MigrationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MigrationRequest.ProtoReflect.Descriptor instead.
 func (*MigrationRequest) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{21}
+	return file_historian_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *MigrationRequest) GetSettings() *structpb.Struct {
@@ -1553,7 +1553,7 @@ type HistorianInfo struct {
 
 func (x *HistorianInfo) Reset() {
 	*x = HistorianInfo{}
-	mi := &file_proto_historian_proto_msgTypes[22]
+	mi := &file_historian_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1565,7 +1565,7 @@ func (x *HistorianInfo) String() string {
 func (*HistorianInfo) ProtoMessage() {}
 
 func (x *HistorianInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[22]
+	mi := &file_historian_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1578,7 +1578,7 @@ func (x *HistorianInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistorianInfo.ProtoReflect.Descriptor instead.
 func (*HistorianInfo) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{22}
+	return file_historian_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *HistorianInfo) GetVersion() string {
@@ -1604,7 +1604,7 @@ type HealthUpdates struct {
 
 func (x *HealthUpdates) Reset() {
 	*x = HealthUpdates{}
-	mi := &file_proto_historian_proto_msgTypes[23]
+	mi := &file_historian_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1616,7 +1616,7 @@ func (x *HealthUpdates) String() string {
 func (*HealthUpdates) ProtoMessage() {}
 
 func (x *HealthUpdates) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[23]
+	mi := &file_historian_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1629,7 +1629,7 @@ func (x *HealthUpdates) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthUpdates.ProtoReflect.Descriptor instead.
 func (*HealthUpdates) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{23}
+	return file_historian_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *HealthUpdates) GetHealthUpdates() []*HealthUpdate {
@@ -1649,7 +1649,7 @@ type HealthUpdate struct {
 
 func (x *HealthUpdate) Reset() {
 	*x = HealthUpdate{}
-	mi := &file_proto_historian_proto_msgTypes[24]
+	mi := &file_historian_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1661,7 +1661,7 @@ func (x *HealthUpdate) String() string {
 func (*HealthUpdate) ProtoMessage() {}
 
 func (x *HealthUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[24]
+	mi := &file_historian_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1674,7 +1674,7 @@ func (x *HealthUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthUpdate.ProtoReflect.Descriptor instead.
 func (*HealthUpdate) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{24}
+	return file_historian_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *HealthUpdate) GetHealth() string {
@@ -1699,7 +1699,7 @@ type HealthUpdateReply struct {
 
 func (x *HealthUpdateReply) Reset() {
 	*x = HealthUpdateReply{}
-	mi := &file_proto_historian_proto_msgTypes[25]
+	mi := &file_historian_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1711,7 +1711,7 @@ func (x *HealthUpdateReply) String() string {
 func (*HealthUpdateReply) ProtoMessage() {}
 
 func (x *HealthUpdateReply) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_historian_proto_msgTypes[25]
+	mi := &file_historian_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1724,14 +1724,178 @@ func (x *HealthUpdateReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthUpdateReply.ProtoReflect.Descriptor instead.
 func (*HealthUpdateReply) Descriptor() ([]byte, []int) {
-	return file_proto_historian_proto_rawDescGZIP(), []int{25}
+	return file_historian_proto_rawDescGZIP(), []int{25}
 }
 
-var File_proto_historian_proto protoreflect.FileDescriptor
+type QueryRawPointsRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	MeasurementUUIDs []string               `protobuf:"bytes,1,rep,name=measurementUUIDs,proto3" json:"measurementUUIDs,omitempty"`
+	StartTime        *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=startTime,proto3" json:"startTime,omitempty"`
+	EndTime          *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=endTime,proto3" json:"endTime,omitempty"`
+	Limit            *int32                 `protobuf:"varint,4,opt,name=limit,proto3,oneof" json:"limit,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
 
-const file_proto_historian_proto_rawDesc = "" +
+func (x *QueryRawPointsRequest) Reset() {
+	*x = QueryRawPointsRequest{}
+	mi := &file_historian_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryRawPointsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryRawPointsRequest) ProtoMessage() {}
+
+func (x *QueryRawPointsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_historian_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryRawPointsRequest.ProtoReflect.Descriptor instead.
+func (*QueryRawPointsRequest) Descriptor() ([]byte, []int) {
+	return file_historian_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *QueryRawPointsRequest) GetMeasurementUUIDs() []string {
+	if x != nil {
+		return x.MeasurementUUIDs
+	}
+	return nil
+}
+
+func (x *QueryRawPointsRequest) GetStartTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartTime
+	}
+	return nil
+}
+
+func (x *QueryRawPointsRequest) GetEndTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EndTime
+	}
+	return nil
+}
+
+func (x *QueryRawPointsRequest) GetLimit() int32 {
+	if x != nil && x.Limit != nil {
+		return *x.Limit
+	}
+	return 0
+}
+
+type QueryPointsReply struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	MeasurementPoints []*MeasurementPoints   `protobuf:"bytes,1,rep,name=measurementPoints,proto3" json:"measurementPoints,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *QueryPointsReply) Reset() {
+	*x = QueryPointsReply{}
+	mi := &file_historian_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryPointsReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryPointsReply) ProtoMessage() {}
+
+func (x *QueryPointsReply) ProtoReflect() protoreflect.Message {
+	mi := &file_historian_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryPointsReply.ProtoReflect.Descriptor instead.
+func (*QueryPointsReply) Descriptor() ([]byte, []int) {
+	return file_historian_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *QueryPointsReply) GetMeasurementPoints() []*MeasurementPoints {
+	if x != nil {
+		return x.MeasurementPoints
+	}
+	return nil
+}
+
+type MeasurementPoints struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	MeasurementUUID string                 `protobuf:"bytes,1,opt,name=measurementUUID,proto3" json:"measurementUUID,omitempty"`
+	Points          []*Point               `protobuf:"bytes,2,rep,name=points,proto3" json:"points,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *MeasurementPoints) Reset() {
+	*x = MeasurementPoints{}
+	mi := &file_historian_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MeasurementPoints) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MeasurementPoints) ProtoMessage() {}
+
+func (x *MeasurementPoints) ProtoReflect() protoreflect.Message {
+	mi := &file_historian_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MeasurementPoints.ProtoReflect.Descriptor instead.
+func (*MeasurementPoints) Descriptor() ([]byte, []int) {
+	return file_historian_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *MeasurementPoints) GetMeasurementUUID() string {
+	if x != nil {
+		return x.MeasurementUUID
+	}
+	return ""
+}
+
+func (x *MeasurementPoints) GetPoints() []*Point {
+	if x != nil {
+		return x.Points
+	}
+	return nil
+}
+
+var File_historian_proto protoreflect.FileDescriptor
+
+const file_historian_proto_rawDesc = "" +
 	"\n" +
-	"\x15proto/historian.proto\x12\x05proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xa7\x01\n" +
+	"\x0fhistorian.proto\x12\x05proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xa7\x01\n" +
 	"\vCollectorHA\x12,\n" +
 	"\x11mainCollectorUUID\x18\x01 \x01(\tR\x11mainCollectorUUID\x12\x12\n" +
 	"\x04host\x18\x02 \x01(\tR\x04host\x12\x1e\n" +
@@ -1876,14 +2040,26 @@ const file_proto_historian_proto_rawDesc = "" +
 	"\fHealthUpdate\x12\x16\n" +
 	"\x06health\x18\x01 \x01(\tR\x06health\x128\n" +
 	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\"\x13\n" +
-	"\x11HealthUpdateReply2\xec\a\n" +
+	"\x11HealthUpdateReply\"\xd8\x01\n" +
+	"\x15QueryRawPointsRequest\x12*\n" +
+	"\x10measurementUUIDs\x18\x01 \x03(\tR\x10measurementUUIDs\x128\n" +
+	"\tstartTime\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\tstartTime\x124\n" +
+	"\aendTime\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\aendTime\x12\x19\n" +
+	"\x05limit\x18\x04 \x01(\x05H\x00R\x05limit\x88\x01\x01B\b\n" +
+	"\x06_limit\"Z\n" +
+	"\x10QueryPointsReply\x12F\n" +
+	"\x11measurementPoints\x18\x01 \x03(\v2\x18.proto.MeasurementPointsR\x11measurementPoints\"c\n" +
+	"\x11MeasurementPoints\x12(\n" +
+	"\x0fmeasurementUUID\x18\x01 \x01(\tR\x0fmeasurementUUID\x12$\n" +
+	"\x06points\x18\x02 \x03(\v2\f.proto.PointR\x06points2\xb5\b\n" +
 	"\tHistorian\x128\n" +
 	"\fGetCollector\x12\x16.google.protobuf.Empty\x1a\x10.proto.Collector\x12E\n" +
 	"\x11RegisterCollector\x12\x1e.proto.RegisterCollectorSchema\x1a\x10.proto.Collector\x12?\n" +
 	"\x12CreatePointsStream\x12\r.proto.Points\x1a\x18.proto.CreatePointsReply(\x01\x127\n" +
 	"\fCreatePoints\x12\r.proto.Points\x1a\x18.proto.CreatePointsReply\x12A\n" +
 	"\x0fGetMeasurements\x12\x19.proto.MeasurementRequest\x1a\x13.proto.Measurements\x12V\n" +
-	"\x12CreateMeasurements\x12 .proto.CreateMeasurementsRequest\x1a\x1e.proto.CreateMeasurementsReply\x129\n" +
+	"\x12CreateMeasurements\x12 .proto.CreateMeasurementsRequest\x1a\x1e.proto.CreateMeasurementsReply\x12G\n" +
+	"\x0eQueryRawPoints\x12\x1c.proto.QueryRawPointsRequest\x1a\x17.proto.QueryPointsReply\x129\n" +
 	"\x10CreateLogsStream\x12\v.proto.Logs\x1a\x16.proto.CreateLogsReply(\x01\x121\n" +
 	"\n" +
 	"CreateLogs\x12\v.proto.Logs\x1a\x16.proto.CreateLogsReply\x12K\n" +
@@ -1896,20 +2072,20 @@ const file_proto_historian_proto_rawDesc = "" +
 	"\aGetInfo\x12\x16.google.protobuf.Empty\x1a\x14.proto.HistorianInfoB*Z(factry-historian-proxy/proto/historianpbb\x06proto3"
 
 var (
-	file_proto_historian_proto_rawDescOnce sync.Once
-	file_proto_historian_proto_rawDescData []byte
+	file_historian_proto_rawDescOnce sync.Once
+	file_historian_proto_rawDescData []byte
 )
 
-func file_proto_historian_proto_rawDescGZIP() []byte {
-	file_proto_historian_proto_rawDescOnce.Do(func() {
-		file_proto_historian_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_historian_proto_rawDesc), len(file_proto_historian_proto_rawDesc)))
+func file_historian_proto_rawDescGZIP() []byte {
+	file_historian_proto_rawDescOnce.Do(func() {
+		file_historian_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_historian_proto_rawDesc), len(file_historian_proto_rawDesc)))
 	})
-	return file_proto_historian_proto_rawDescData
+	return file_historian_proto_rawDescData
 }
 
-var file_proto_historian_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_proto_historian_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
-var file_proto_historian_proto_goTypes = []any{
+var file_historian_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_historian_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
+var file_historian_proto_goTypes = []any{
 	(Log_Level)(0),                     // 0: proto.Log.Level
 	(*CollectorHA)(nil),                // 1: proto.CollectorHA
 	(*Collector)(nil),                  // 2: proto.Collector
@@ -1937,101 +2113,111 @@ var file_proto_historian_proto_goTypes = []any{
 	(*HealthUpdates)(nil),              // 24: proto.HealthUpdates
 	(*HealthUpdate)(nil),               // 25: proto.HealthUpdate
 	(*HealthUpdateReply)(nil),          // 26: proto.HealthUpdateReply
-	(*structpb.Struct)(nil),            // 27: google.protobuf.Struct
-	(*timestamppb.Timestamp)(nil),      // 28: google.protobuf.Timestamp
-	(*structpb.Value)(nil),             // 29: google.protobuf.Value
-	(*emptypb.Empty)(nil),              // 30: google.protobuf.Empty
+	(*QueryRawPointsRequest)(nil),      // 27: proto.QueryRawPointsRequest
+	(*QueryPointsReply)(nil),           // 28: proto.QueryPointsReply
+	(*MeasurementPoints)(nil),          // 29: proto.MeasurementPoints
+	(*structpb.Struct)(nil),            // 30: google.protobuf.Struct
+	(*timestamppb.Timestamp)(nil),      // 31: google.protobuf.Timestamp
+	(*structpb.Value)(nil),             // 32: google.protobuf.Value
+	(*emptypb.Empty)(nil),              // 33: google.protobuf.Empty
 }
-var file_proto_historian_proto_depIdxs = []int32{
-	27, // 0: proto.Collector.settings:type_name -> google.protobuf.Struct
+var file_historian_proto_depIdxs = []int32{
+	30, // 0: proto.Collector.settings:type_name -> google.protobuf.Struct
 	1,  // 1: proto.Collector.haSettings:type_name -> proto.CollectorHA
-	27, // 2: proto.Collector.state:type_name -> google.protobuf.Struct
-	27, // 3: proto.RegisterCollectorSchema.measurementSettingsSchema:type_name -> google.protobuf.Struct
-	27, // 4: proto.RegisterCollectorSchema.settingsSchema:type_name -> google.protobuf.Struct
-	28, // 5: proto.Point.timestamp:type_name -> google.protobuf.Timestamp
-	29, // 6: proto.Point.value:type_name -> google.protobuf.Value
-	27, // 7: proto.Point.tags:type_name -> google.protobuf.Struct
+	30, // 2: proto.Collector.state:type_name -> google.protobuf.Struct
+	30, // 3: proto.RegisterCollectorSchema.measurementSettingsSchema:type_name -> google.protobuf.Struct
+	30, // 4: proto.RegisterCollectorSchema.settingsSchema:type_name -> google.protobuf.Struct
+	31, // 5: proto.Point.timestamp:type_name -> google.protobuf.Timestamp
+	32, // 6: proto.Point.value:type_name -> google.protobuf.Value
+	30, // 7: proto.Point.tags:type_name -> google.protobuf.Struct
 	4,  // 8: proto.Points.points:type_name -> proto.Point
-	28, // 9: proto.Measurement.createdAt:type_name -> google.protobuf.Timestamp
-	28, // 10: proto.Measurement.updatedAt:type_name -> google.protobuf.Timestamp
-	27, // 11: proto.Measurement.settings:type_name -> google.protobuf.Struct
+	31, // 9: proto.Measurement.createdAt:type_name -> google.protobuf.Timestamp
+	31, // 10: proto.Measurement.updatedAt:type_name -> google.protobuf.Timestamp
+	30, // 11: proto.Measurement.settings:type_name -> google.protobuf.Struct
 	8,  // 12: proto.Measurement.engineeringSpecs:type_name -> proto.EngineeringSpecs
-	28, // 13: proto.MeasurementRequest.since:type_name -> google.protobuf.Timestamp
+	31, // 13: proto.MeasurementRequest.since:type_name -> google.protobuf.Timestamp
 	7,  // 14: proto.Measurements.measurements:type_name -> proto.Measurement
-	27, // 15: proto.Log.message:type_name -> google.protobuf.Struct
+	30, // 15: proto.Log.message:type_name -> google.protobuf.Struct
 	0,  // 16: proto.Log.level:type_name -> proto.Log.Level
-	28, // 17: proto.Log.timestamp:type_name -> google.protobuf.Timestamp
+	31, // 17: proto.Log.timestamp:type_name -> google.protobuf.Timestamp
 	11, // 18: proto.Logs.logs:type_name -> proto.Log
-	27, // 19: proto.Statistics.other:type_name -> google.protobuf.Struct
-	28, // 20: proto.Statistics.timestamp:type_name -> google.protobuf.Timestamp
-	27, // 21: proto.CreateMeasurement.attributes:type_name -> google.protobuf.Struct
-	27, // 22: proto.CreateMeasurement.settings:type_name -> google.protobuf.Struct
+	30, // 19: proto.Statistics.other:type_name -> google.protobuf.Struct
+	31, // 20: proto.Statistics.timestamp:type_name -> google.protobuf.Timestamp
+	30, // 21: proto.CreateMeasurement.attributes:type_name -> google.protobuf.Struct
+	30, // 22: proto.CreateMeasurement.settings:type_name -> google.protobuf.Struct
 	17, // 23: proto.CreateMeasurementsRequest.measurements:type_name -> proto.CreateMeasurement
-	27, // 24: proto.MigrateMeasurementSettings.settings:type_name -> google.protobuf.Struct
-	27, // 25: proto.MigrationRequest.settings:type_name -> google.protobuf.Struct
+	30, // 24: proto.MigrateMeasurementSettings.settings:type_name -> google.protobuf.Struct
+	30, // 25: proto.MigrationRequest.settings:type_name -> google.protobuf.Struct
 	21, // 26: proto.MigrationRequest.measurementSettings:type_name -> proto.MigrateMeasurementSettings
 	25, // 27: proto.HealthUpdates.healthUpdates:type_name -> proto.HealthUpdate
-	28, // 28: proto.HealthUpdate.timestamp:type_name -> google.protobuf.Timestamp
-	30, // 29: proto.Historian.GetCollector:input_type -> google.protobuf.Empty
-	3,  // 30: proto.Historian.RegisterCollector:input_type -> proto.RegisterCollectorSchema
-	5,  // 31: proto.Historian.CreatePointsStream:input_type -> proto.Points
-	5,  // 32: proto.Historian.CreatePoints:input_type -> proto.Points
-	9,  // 33: proto.Historian.GetMeasurements:input_type -> proto.MeasurementRequest
-	18, // 34: proto.Historian.CreateMeasurements:input_type -> proto.CreateMeasurementsRequest
-	12, // 35: proto.Historian.CreateLogsStream:input_type -> proto.Logs
-	12, // 36: proto.Historian.CreateLogs:input_type -> proto.Logs
-	14, // 37: proto.Historian.CreateStatisticsStream:input_type -> proto.Statistics
-	14, // 38: proto.Historian.CreateStatistics:input_type -> proto.Statistics
-	19, // 39: proto.Historian.GetCollectorUpdate:input_type -> proto.CollectorUpdateMetadata
-	27, // 40: proto.Historian.UpdateCollectorState:input_type -> google.protobuf.Struct
-	24, // 41: proto.Historian.UpdateHealth:input_type -> proto.HealthUpdates
-	22, // 42: proto.Historian.MigrateSettings:input_type -> proto.MigrationRequest
-	30, // 43: proto.Historian.GetInfo:input_type -> google.protobuf.Empty
-	2,  // 44: proto.Historian.GetCollector:output_type -> proto.Collector
-	2,  // 45: proto.Historian.RegisterCollector:output_type -> proto.Collector
-	6,  // 46: proto.Historian.CreatePointsStream:output_type -> proto.CreatePointsReply
-	6,  // 47: proto.Historian.CreatePoints:output_type -> proto.CreatePointsReply
-	10, // 48: proto.Historian.GetMeasurements:output_type -> proto.Measurements
-	16, // 49: proto.Historian.CreateMeasurements:output_type -> proto.CreateMeasurementsReply
-	13, // 50: proto.Historian.CreateLogsStream:output_type -> proto.CreateLogsReply
-	13, // 51: proto.Historian.CreateLogs:output_type -> proto.CreateLogsReply
-	15, // 52: proto.Historian.CreateStatisticsStream:output_type -> proto.CreateStatisticsReply
-	15, // 53: proto.Historian.CreateStatistics:output_type -> proto.CreateStatisticsReply
-	20, // 54: proto.Historian.GetCollectorUpdate:output_type -> proto.File
-	30, // 55: proto.Historian.UpdateCollectorState:output_type -> google.protobuf.Empty
-	26, // 56: proto.Historian.UpdateHealth:output_type -> proto.HealthUpdateReply
-	30, // 57: proto.Historian.MigrateSettings:output_type -> google.protobuf.Empty
-	23, // 58: proto.Historian.GetInfo:output_type -> proto.HistorianInfo
-	44, // [44:59] is the sub-list for method output_type
-	29, // [29:44] is the sub-list for method input_type
-	29, // [29:29] is the sub-list for extension type_name
-	29, // [29:29] is the sub-list for extension extendee
-	0,  // [0:29] is the sub-list for field type_name
+	31, // 28: proto.HealthUpdate.timestamp:type_name -> google.protobuf.Timestamp
+	31, // 29: proto.QueryRawPointsRequest.startTime:type_name -> google.protobuf.Timestamp
+	31, // 30: proto.QueryRawPointsRequest.endTime:type_name -> google.protobuf.Timestamp
+	29, // 31: proto.QueryPointsReply.measurementPoints:type_name -> proto.MeasurementPoints
+	4,  // 32: proto.MeasurementPoints.points:type_name -> proto.Point
+	33, // 33: proto.Historian.GetCollector:input_type -> google.protobuf.Empty
+	3,  // 34: proto.Historian.RegisterCollector:input_type -> proto.RegisterCollectorSchema
+	5,  // 35: proto.Historian.CreatePointsStream:input_type -> proto.Points
+	5,  // 36: proto.Historian.CreatePoints:input_type -> proto.Points
+	9,  // 37: proto.Historian.GetMeasurements:input_type -> proto.MeasurementRequest
+	18, // 38: proto.Historian.CreateMeasurements:input_type -> proto.CreateMeasurementsRequest
+	27, // 39: proto.Historian.QueryRawPoints:input_type -> proto.QueryRawPointsRequest
+	12, // 40: proto.Historian.CreateLogsStream:input_type -> proto.Logs
+	12, // 41: proto.Historian.CreateLogs:input_type -> proto.Logs
+	14, // 42: proto.Historian.CreateStatisticsStream:input_type -> proto.Statistics
+	14, // 43: proto.Historian.CreateStatistics:input_type -> proto.Statistics
+	19, // 44: proto.Historian.GetCollectorUpdate:input_type -> proto.CollectorUpdateMetadata
+	30, // 45: proto.Historian.UpdateCollectorState:input_type -> google.protobuf.Struct
+	24, // 46: proto.Historian.UpdateHealth:input_type -> proto.HealthUpdates
+	22, // 47: proto.Historian.MigrateSettings:input_type -> proto.MigrationRequest
+	33, // 48: proto.Historian.GetInfo:input_type -> google.protobuf.Empty
+	2,  // 49: proto.Historian.GetCollector:output_type -> proto.Collector
+	2,  // 50: proto.Historian.RegisterCollector:output_type -> proto.Collector
+	6,  // 51: proto.Historian.CreatePointsStream:output_type -> proto.CreatePointsReply
+	6,  // 52: proto.Historian.CreatePoints:output_type -> proto.CreatePointsReply
+	10, // 53: proto.Historian.GetMeasurements:output_type -> proto.Measurements
+	16, // 54: proto.Historian.CreateMeasurements:output_type -> proto.CreateMeasurementsReply
+	28, // 55: proto.Historian.QueryRawPoints:output_type -> proto.QueryPointsReply
+	13, // 56: proto.Historian.CreateLogsStream:output_type -> proto.CreateLogsReply
+	13, // 57: proto.Historian.CreateLogs:output_type -> proto.CreateLogsReply
+	15, // 58: proto.Historian.CreateStatisticsStream:output_type -> proto.CreateStatisticsReply
+	15, // 59: proto.Historian.CreateStatistics:output_type -> proto.CreateStatisticsReply
+	20, // 60: proto.Historian.GetCollectorUpdate:output_type -> proto.File
+	33, // 61: proto.Historian.UpdateCollectorState:output_type -> google.protobuf.Empty
+	26, // 62: proto.Historian.UpdateHealth:output_type -> proto.HealthUpdateReply
+	33, // 63: proto.Historian.MigrateSettings:output_type -> google.protobuf.Empty
+	23, // 64: proto.Historian.GetInfo:output_type -> proto.HistorianInfo
+	49, // [49:65] is the sub-list for method output_type
+	33, // [33:49] is the sub-list for method input_type
+	33, // [33:33] is the sub-list for extension type_name
+	33, // [33:33] is the sub-list for extension extendee
+	0,  // [0:33] is the sub-list for field type_name
 }
 
-func init() { file_proto_historian_proto_init() }
-func file_proto_historian_proto_init() {
-	if File_proto_historian_proto != nil {
+func init() { file_historian_proto_init() }
+func file_historian_proto_init() {
+	if File_historian_proto != nil {
 		return
 	}
-	file_proto_historian_proto_msgTypes[7].OneofWrappers = []any{}
-	file_proto_historian_proto_msgTypes[16].OneofWrappers = []any{}
+	file_historian_proto_msgTypes[7].OneofWrappers = []any{}
+	file_historian_proto_msgTypes[16].OneofWrappers = []any{}
+	file_historian_proto_msgTypes[26].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_historian_proto_rawDesc), len(file_proto_historian_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_historian_proto_rawDesc), len(file_historian_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   26,
+			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_proto_historian_proto_goTypes,
-		DependencyIndexes: file_proto_historian_proto_depIdxs,
-		EnumInfos:         file_proto_historian_proto_enumTypes,
-		MessageInfos:      file_proto_historian_proto_msgTypes,
+		GoTypes:           file_historian_proto_goTypes,
+		DependencyIndexes: file_historian_proto_depIdxs,
+		EnumInfos:         file_historian_proto_enumTypes,
+		MessageInfos:      file_historian_proto_msgTypes,
 	}.Build()
-	File_proto_historian_proto = out.File
-	file_proto_historian_proto_goTypes = nil
-	file_proto_historian_proto_depIdxs = nil
+	File_historian_proto = out.File
+	file_historian_proto_goTypes = nil
+	file_historian_proto_depIdxs = nil
 }

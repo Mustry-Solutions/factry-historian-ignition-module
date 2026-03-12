@@ -20,6 +20,8 @@ service Historian {
   rpc GetMeasurements (MeasurementRequest) returns (Measurements);
   rpc CreateMeasurements (CreateMeasurementsRequest) returns (CreateMeasurementsReply);
 
+  rpc QueryRawPoints (QueryRawPointsRequest) returns (QueryPointsReply);
+
   rpc CreateLogsStream (stream Logs) returns (CreateLogsReply);
   rpc CreateLogs (Logs) returns (CreateLogsReply);
 
@@ -205,3 +207,19 @@ message HealthUpdate {
 }
 
 message HealthUpdateReply {}
+
+message QueryRawPointsRequest {
+  repeated string measurementUUIDs = 1;
+  google.protobuf.Timestamp startTime = 2;
+  google.protobuf.Timestamp endTime = 3;
+  optional int32 limit = 4;
+}
+
+message QueryPointsReply {
+  repeated MeasurementPoints measurementPoints = 1;
+}
+
+message MeasurementPoints {
+  string measurementUUID = 1;
+  repeated Point points = 2;
+}

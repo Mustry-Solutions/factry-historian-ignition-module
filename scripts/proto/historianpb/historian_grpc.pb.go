@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v5.29.3
-// source: proto/historian.proto
+// source: historian.proto
 
 package historianpb
 
@@ -27,6 +27,7 @@ const (
 	Historian_CreatePoints_FullMethodName           = "/proto.Historian/CreatePoints"
 	Historian_GetMeasurements_FullMethodName        = "/proto.Historian/GetMeasurements"
 	Historian_CreateMeasurements_FullMethodName     = "/proto.Historian/CreateMeasurements"
+	Historian_QueryRawPoints_FullMethodName         = "/proto.Historian/QueryRawPoints"
 	Historian_CreateLogsStream_FullMethodName       = "/proto.Historian/CreateLogsStream"
 	Historian_CreateLogs_FullMethodName             = "/proto.Historian/CreateLogs"
 	Historian_CreateStatisticsStream_FullMethodName = "/proto.Historian/CreateStatisticsStream"
@@ -51,6 +52,7 @@ type HistorianClient interface {
 	CreatePoints(ctx context.Context, in *Points, opts ...grpc.CallOption) (*CreatePointsReply, error)
 	GetMeasurements(ctx context.Context, in *MeasurementRequest, opts ...grpc.CallOption) (*Measurements, error)
 	CreateMeasurements(ctx context.Context, in *CreateMeasurementsRequest, opts ...grpc.CallOption) (*CreateMeasurementsReply, error)
+	QueryRawPoints(ctx context.Context, in *QueryRawPointsRequest, opts ...grpc.CallOption) (*QueryPointsReply, error)
 	CreateLogsStream(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Logs, CreateLogsReply], error)
 	CreateLogs(ctx context.Context, in *Logs, opts ...grpc.CallOption) (*CreateLogsReply, error)
 	CreateStatisticsStream(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Statistics, CreateStatisticsReply], error)
@@ -127,6 +129,16 @@ func (c *historianClient) CreateMeasurements(ctx context.Context, in *CreateMeas
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateMeasurementsReply)
 	err := c.cc.Invoke(ctx, Historian_CreateMeasurements_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *historianClient) QueryRawPoints(ctx context.Context, in *QueryRawPointsRequest, opts ...grpc.CallOption) (*QueryPointsReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryPointsReply)
+	err := c.cc.Invoke(ctx, Historian_QueryRawPoints_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -251,6 +263,7 @@ type HistorianServer interface {
 	CreatePoints(context.Context, *Points) (*CreatePointsReply, error)
 	GetMeasurements(context.Context, *MeasurementRequest) (*Measurements, error)
 	CreateMeasurements(context.Context, *CreateMeasurementsRequest) (*CreateMeasurementsReply, error)
+	QueryRawPoints(context.Context, *QueryRawPointsRequest) (*QueryPointsReply, error)
 	CreateLogsStream(grpc.ClientStreamingServer[Logs, CreateLogsReply]) error
 	CreateLogs(context.Context, *Logs) (*CreateLogsReply, error)
 	CreateStatisticsStream(grpc.ClientStreamingServer[Statistics, CreateStatisticsReply]) error
@@ -287,6 +300,9 @@ func (UnimplementedHistorianServer) GetMeasurements(context.Context, *Measuremen
 }
 func (UnimplementedHistorianServer) CreateMeasurements(context.Context, *CreateMeasurementsRequest) (*CreateMeasurementsReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateMeasurements not implemented")
+}
+func (UnimplementedHistorianServer) QueryRawPoints(context.Context, *QueryRawPointsRequest) (*QueryPointsReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method QueryRawPoints not implemented")
 }
 func (UnimplementedHistorianServer) CreateLogsStream(grpc.ClientStreamingServer[Logs, CreateLogsReply]) error {
 	return status.Error(codes.Unimplemented, "method CreateLogsStream not implemented")
@@ -429,6 +445,24 @@ func _Historian_CreateMeasurements_Handler(srv interface{}, ctx context.Context,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(HistorianServer).CreateMeasurements(ctx, req.(*CreateMeasurementsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Historian_QueryRawPoints_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryRawPointsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HistorianServer).QueryRawPoints(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Historian_QueryRawPoints_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HistorianServer).QueryRawPoints(ctx, req.(*QueryRawPointsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -594,6 +628,10 @@ var Historian_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Historian_CreateMeasurements_Handler,
 		},
 		{
+			MethodName: "QueryRawPoints",
+			Handler:    _Historian_QueryRawPoints_Handler,
+		},
+		{
 			MethodName: "CreateLogs",
 			Handler:    _Historian_CreateLogs_Handler,
 		},
@@ -640,5 +678,5 @@ var Historian_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "proto/historian.proto",
+	Metadata: "historian.proto",
 }
