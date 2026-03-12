@@ -13,5 +13,3 @@
 ## Meeting Notes
 - [Weekly Meetings](weekly_meeting.md) — Weekly meeting notes and progress updates
 
-## Design Documents
-- [Design Documents](design/) — Research, architecture, and specification documents

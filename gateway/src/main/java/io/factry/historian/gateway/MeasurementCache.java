@@ -8,6 +8,7 @@ import io.factry.historian.proto.Measurements;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -17,6 +18,7 @@ public class MeasurementCache {
     private static final Logger logger = LoggerFactory.getLogger(MeasurementCache.class);
 
     private final ConcurrentHashMap<String, String> tagPathToUUID = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Measurement> uuidToMeasurement = new ConcurrentHashMap<>();
     private final Set<String> pendingCreations = ConcurrentHashMap.newKeySet();
 
     public void refresh(FactryGrpcClient grpcClient) {
@@ -28,8 +30,9 @@ public class MeasurementCache {
             int total = 0;
             for (Measurement m : response.getMeasurementsList()) {
                 total++;
-                if ("Active".equals(m.getStatus())) {
+                if ("active".equalsIgnoreCase(m.getStatus())) {
                     fresh.put(m.getName(), m.getUuid());
+                    uuidToMeasurement.put(m.getUuid(), m);
                 } else {
                     logger.info("Skipping measurement '{}' with status '{}'", m.getName(), m.getStatus());
                 }
@@ -115,6 +118,23 @@ public class MeasurementCache {
 
     public int size() {
         return tagPathToUUID.size();
+    }
+
+    public String getUUID(String tagPath) {
+        return tagPathToUUID.get(tagPath);
+    }
+
+    public Measurement getMeasurementByUUID(String uuid) {
+        return uuidToMeasurement.get(uuid);
+    }
+
+    public Measurement getMeasurementByName(String name) {
+        String uuid = tagPathToUUID.get(name);
+        return uuid != null ? uuidToMeasurement.get(uuid) : null;
+    }
+
+    public Collection<Measurement> getAllMeasurements() {
+        return uuidToMeasurement.values();
     }
 
     private static String toFactryDataType(Object value) {

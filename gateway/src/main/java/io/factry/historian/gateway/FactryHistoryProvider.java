@@ -54,7 +54,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         );
         this.measurementCache = new MeasurementCache();
 
-        this.queryEngine = new FactryQueryEngine(context, historianName, settings);
+        this.queryEngine = new FactryQueryEngine(context, historianName, settings, grpcClient, measurementCache);
         this.storageEngine = new FactryStorageEngine(context, historianName, settings, grpcClient, measurementCache);
 
         logger.info("Factry Historian created: name={}, grpcTarget={}:{}, collectorUUID={}",

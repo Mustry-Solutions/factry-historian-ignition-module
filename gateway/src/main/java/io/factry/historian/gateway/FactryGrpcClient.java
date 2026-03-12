@@ -7,6 +7,8 @@ import io.factry.historian.proto.HistorianGrpc;
 import io.factry.historian.proto.MeasurementRequest;
 import io.factry.historian.proto.Measurements;
 import io.factry.historian.proto.Points;
+import io.factry.historian.proto.QueryPointsReply;
+import io.factry.historian.proto.QueryRawPointsRequest;
 import io.grpc.ManagedChannel;
 import io.grpc.Metadata;
 import io.grpc.netty.shaded.io.grpc.netty.GrpcSslContexts;
@@ -61,6 +63,11 @@ public class FactryGrpcClient {
     public Measurements getMeasurements(MeasurementRequest request) {
         logger.debug("Sending GetMeasurements");
         return blockingStub.getMeasurements(request);
+    }
+
+    public QueryPointsReply queryRawPoints(QueryRawPointsRequest request) {
+        logger.debug("Sending QueryRawPoints for {} measurements", request.getMeasurementUUIDsCount());
+        return blockingStub.queryRawPoints(request);
     }
 
     public CreateMeasurementsReply createMeasurements(CreateMeasurementsRequest request) {
