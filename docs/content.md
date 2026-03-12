@@ -5,6 +5,7 @@
 
 ## Architecture
 - [Query gRPC Proposal](query.md) — Proposed protobuf additions for querying data from Factry (for Factry team review)
+- [Components and Data Flow](data_flow.md) - Low level explanation of the SDK and inheritence
 
 ## Development
 - [Module Update Workflow](module_update_workflow.md) — How to build, deploy, and update the module during development
