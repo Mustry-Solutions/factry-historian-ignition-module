@@ -153,7 +153,7 @@ And in the fake server terminal:
 [gRPC] GetMeasurements: collectorUUID=test-collector-001
 ```
 
-## 6. Create a Vision Project with Power Chart
+## 6. Create a Perspective Project with Power Chart
 
 ### 6a. Open the Designer
 
@@ -165,42 +165,49 @@ And in the fake server terminal:
 
 1. In the Designer, click **New Project**
 2. Name it (e.g., `QueryTest`)
-3. Click **Create**
+3. Make sure **Perspective** is enabled
+4. Click **Create**
 
 ### 6c. Add a Power Chart
 
-1. In the project, open the **Main Window** (or create a new window)
-2. From the component palette on the right, find **Power Chart** (under Reporting or Charts)
-3. Drag it onto the window and resize it to fill most of the space
+1. In the Perspective project, open the default **Page** (or create a new view)
+2. In the **Component Palette** on the left, search for **Power Chart** (under Charts)
+3. Drag it onto the view and resize it to fill most of the space
 
-### 6d. Add Tags to the Power Chart
+### 6d. Configure the Power Chart
 
-1. Click the **Power Chart** to select it
-2. In the **Property Editor** on the left, find the `pens` property
-3. Click the **pencil icon** (or right-click > Customizer) to open the Power Chart Customizer
+The Power Chart in Perspective uses tag history bindings. You can add pens in two ways:
 
-Alternatively, **at runtime** (see step 7):
+**Option A — Add pens at runtime** (easiest for testing):
 
-1. Click the **Add Tag** button (+ icon) in the Power Chart toolbar
-2. In the tag browser dialog, expand your Factry Historian
-3. You should see the pre-populated measurements:
+1. Open the project in a browser: http://localhost:8088/data/perspective/client/QueryTest
+2. In the Power Chart toolbar, click the **tag browse** icon
+3. Expand your Factry Historian provider
+4. You should see the pre-populated measurements:
    - `Sine_Wave`
    - `Pump_Running`
    - `Temperature`
-4. Select one or more tags and click **OK**
+5. Select one or more tags and confirm
+
+**Option B — Configure pens in the Designer**:
+
+1. Select the Power Chart component
+2. In the **Property Editor**, expand `props.pens`
+3. Add a new pen and configure:
+   - **name**: `Sine_Wave`
+   - **source**: set the tag path pointing to your Factry Historian
+4. Repeat for additional measurements
 
 ### 6e. Configure the Time Range
 
 The fake server generates data at 1-minute intervals within whatever time range you request. By default, Power Chart shows the last 8 hours, which gives ~480 data points per measurement.
 
-## 7. Run the Project and View Data
+## 7. View the Data in a Browser
 
-1. In the Designer, click **Project > Launch**  (or press the play button)
-2. The Vision Client window opens with your Power Chart
-3. Click the **+** (Add Tag) button in the Power Chart toolbar
-4. Browse into the Factry Historian → you should see the measurements
-5. Select `Sine_Wave` and click **OK**
-6. The chart should display a sine wave pattern
+1. Open the Perspective session in your browser: http://localhost:8088/data/perspective/client/QueryTest
+2. The Power Chart should load and show the tag browser
+3. Browse into the Factry Historian → select a measurement
+4. The chart should display historical data
 
 ### What You Should See
 

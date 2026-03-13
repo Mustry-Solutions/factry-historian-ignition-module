@@ -3,5 +3,5 @@
   "port": 9876,
   "collectorUUID": "test-collector-001",
   "token": "fake-token",
-  "measurementUUID": "pre-0001-0001-0001-000000000001"
+  "measurementUUID": "meas-000004"
 }

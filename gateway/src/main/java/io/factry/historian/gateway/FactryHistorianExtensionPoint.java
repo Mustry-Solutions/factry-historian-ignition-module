@@ -68,13 +68,25 @@ public class FactryHistorianExtensionPoint extends HistorianExtensionPoint<Factr
     }
 
     /**
-     * Provides the default settings instance for the historian.
-     * This is required for Ignition to know the concrete settings type
-     * when decoding config JSON. Without this, "Unable to decode config: no settings type" occurs.
+     * Provide the settings type explicitly so the framework can decode config JSON.
+     * This is separate from defaultSettings() so we can return empty defaults
+     * without losing the type information.
+     */
+    @Override
+    public Optional<Class<FactryHistorianSettings>> settingsType() {
+        return Optional.of(FactryHistorianSettings.class);
+    }
+
+    /**
+     * Return empty so the frontend's ExtensionPointResourceForm does not call
+     * form.reset(defaultSettings) on mount — that reset wipes config.profile.type
+     * from the form state, causing the edit sidebar to show
+     * "Extension Point Form Not Found".  Schema-level defaults still populate
+     * the create form fields correctly.
      */
     @Override
     public Optional<FactryHistorianSettings> defaultSettings() {
-        return Optional.of(new FactryHistorianSettings());
+        return Optional.empty();
     }
 
     /**
