@@ -28,6 +28,8 @@ const (
 	Historian_GetMeasurements_FullMethodName        = "/proto.Historian/GetMeasurements"
 	Historian_CreateMeasurements_FullMethodName     = "/proto.Historian/CreateMeasurements"
 	Historian_QueryRawPoints_FullMethodName         = "/proto.Historian/QueryRawPoints"
+	Historian_GetCalculations_FullMethodName        = "/proto.Historian/GetCalculations"
+	Historian_GetAssets_FullMethodName              = "/proto.Historian/GetAssets"
 	Historian_CreateLogsStream_FullMethodName       = "/proto.Historian/CreateLogsStream"
 	Historian_CreateLogs_FullMethodName             = "/proto.Historian/CreateLogs"
 	Historian_CreateStatisticsStream_FullMethodName = "/proto.Historian/CreateStatisticsStream"
@@ -53,6 +55,8 @@ type HistorianClient interface {
 	GetMeasurements(ctx context.Context, in *MeasurementRequest, opts ...grpc.CallOption) (*Measurements, error)
 	CreateMeasurements(ctx context.Context, in *CreateMeasurementsRequest, opts ...grpc.CallOption) (*CreateMeasurementsReply, error)
 	QueryRawPoints(ctx context.Context, in *QueryRawPointsRequest, opts ...grpc.CallOption) (*QueryPointsReply, error)
+	GetCalculations(ctx context.Context, in *CalculationRequest, opts ...grpc.CallOption) (*Calculations, error)
+	GetAssets(ctx context.Context, in *AssetRequest, opts ...grpc.CallOption) (*Assets, error)
 	CreateLogsStream(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Logs, CreateLogsReply], error)
 	CreateLogs(ctx context.Context, in *Logs, opts ...grpc.CallOption) (*CreateLogsReply, error)
 	CreateStatisticsStream(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Statistics, CreateStatisticsReply], error)
@@ -139,6 +143,26 @@ func (c *historianClient) QueryRawPoints(ctx context.Context, in *QueryRawPoints
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(QueryPointsReply)
 	err := c.cc.Invoke(ctx, Historian_QueryRawPoints_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *historianClient) GetCalculations(ctx context.Context, in *CalculationRequest, opts ...grpc.CallOption) (*Calculations, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Calculations)
+	err := c.cc.Invoke(ctx, Historian_GetCalculations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *historianClient) GetAssets(ctx context.Context, in *AssetRequest, opts ...grpc.CallOption) (*Assets, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Assets)
+	err := c.cc.Invoke(ctx, Historian_GetAssets_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -264,6 +288,8 @@ type HistorianServer interface {
 	GetMeasurements(context.Context, *MeasurementRequest) (*Measurements, error)
 	CreateMeasurements(context.Context, *CreateMeasurementsRequest) (*CreateMeasurementsReply, error)
 	QueryRawPoints(context.Context, *QueryRawPointsRequest) (*QueryPointsReply, error)
+	GetCalculations(context.Context, *CalculationRequest) (*Calculations, error)
+	GetAssets(context.Context, *AssetRequest) (*Assets, error)
 	CreateLogsStream(grpc.ClientStreamingServer[Logs, CreateLogsReply]) error
 	CreateLogs(context.Context, *Logs) (*CreateLogsReply, error)
 	CreateStatisticsStream(grpc.ClientStreamingServer[Statistics, CreateStatisticsReply]) error
@@ -303,6 +329,12 @@ func (UnimplementedHistorianServer) CreateMeasurements(context.Context, *CreateM
 }
 func (UnimplementedHistorianServer) QueryRawPoints(context.Context, *QueryRawPointsRequest) (*QueryPointsReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method QueryRawPoints not implemented")
+}
+func (UnimplementedHistorianServer) GetCalculations(context.Context, *CalculationRequest) (*Calculations, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetCalculations not implemented")
+}
+func (UnimplementedHistorianServer) GetAssets(context.Context, *AssetRequest) (*Assets, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAssets not implemented")
 }
 func (UnimplementedHistorianServer) CreateLogsStream(grpc.ClientStreamingServer[Logs, CreateLogsReply]) error {
 	return status.Error(codes.Unimplemented, "method CreateLogsStream not implemented")
@@ -463,6 +495,42 @@ func _Historian_QueryRawPoints_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(HistorianServer).QueryRawPoints(ctx, req.(*QueryRawPointsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Historian_GetCalculations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CalculationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HistorianServer).GetCalculations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Historian_GetCalculations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HistorianServer).GetCalculations(ctx, req.(*CalculationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Historian_GetAssets_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AssetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HistorianServer).GetAssets(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Historian_GetAssets_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HistorianServer).GetAssets(ctx, req.(*AssetRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -630,6 +698,14 @@ var Historian_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "QueryRawPoints",
 			Handler:    _Historian_QueryRawPoints_Handler,
+		},
+		{
+			MethodName: "GetCalculations",
+			Handler:    _Historian_GetCalculations_Handler,
+		},
+		{
+			MethodName: "GetAssets",
+			Handler:    _Historian_GetAssets_Handler,
 		},
 		{
 			MethodName: "CreateLogs",

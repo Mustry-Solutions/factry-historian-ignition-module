@@ -39,6 +39,8 @@ type historianServer struct {
 
 	mu           sync.Mutex
 	measurements []*pb.Measurement
+	calculations []*pb.Calculation
+	assets       []*pb.Asset
 	uuidCounter  int
 }
 
@@ -69,8 +71,50 @@ func newHistorianServer() *historianServer {
 			},
 		},
 		uuidCounter: 3,
+		calculations: []*pb.Calculation{
+			{
+				Uuid:       "calc-0001-0001-0001-000000000001",
+				Name:       "Avg_Temperature",
+				Status:     "active",
+				Datatype:   "number",
+				CreatedAt:  now,
+				Expression: "avg(Temperature, 1h)",
+			},
+			{
+				Uuid:       "calc-0002-0002-0002-000000000002",
+				Name:       "Max_Pressure",
+				Status:     "active",
+				Datatype:   "number",
+				CreatedAt:  now,
+				Expression: "max(Pressure, 1h)",
+			},
+		},
+		assets: []*pb.Asset{
+			{
+				Uuid:      "asset-0001-0001-0001-000000000001",
+				Name:      "Plant/Line1/Motor1",
+				Status:    "active",
+				Datatype:  "number",
+				CreatedAt: now,
+			},
+			{
+				Uuid:      "asset-0002-0002-0002-000000000002",
+				Name:      "Plant/Line1/Motor2",
+				Status:    "active",
+				Datatype:  "boolean",
+				CreatedAt: now,
+			},
+			{
+				Uuid:      "asset-0003-0003-0003-000000000003",
+				Name:      "Plant/Line2/Pump1",
+				Status:    "active",
+				Datatype:  "number",
+				CreatedAt: now,
+			},
+		},
 	}
-	log.Printf("Pre-populated %d measurements", len(s.measurements))
+	log.Printf("Pre-populated %d measurements, %d calculations, %d assets",
+		len(s.measurements), len(s.calculations), len(s.assets))
 	return s
 }
 
@@ -194,16 +238,49 @@ func (s *historianServer) GetInfo(ctx context.Context, _ *emptypb.Empty) (*pb.Hi
 	}, nil
 }
 
+func (s *historianServer) GetCalculations(ctx context.Context, req *pb.CalculationRequest) (*pb.Calculations, error) {
+	collectorUUID := getCollectorUUID(ctx)
+	log.Printf("[gRPC] GetCalculations: collectorUUID=%s", collectorUUID)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return &pb.Calculations{
+		Calculations: s.calculations,
+	}, nil
+}
+
+func (s *historianServer) GetAssets(ctx context.Context, req *pb.AssetRequest) (*pb.Assets, error) {
+	collectorUUID := getCollectorUUID(ctx)
+	log.Printf("[gRPC] GetAssets: collectorUUID=%s", collectorUUID)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return &pb.Assets{
+		Assets: s.assets,
+	}, nil
+}
+
 func (s *historianServer) QueryRawPoints(ctx context.Context, req *pb.QueryRawPointsRequest) (*pb.QueryPointsReply, error) {
 	collectorUUID := getCollectorUUID(ctx)
 	log.Printf("[gRPC] QueryRawPoints: collectorUUID=%s, %d measurementUUIDs, limit=%d",
 		collectorUUID, len(req.GetMeasurementUUIDs()), req.GetLimit())
 
 	s.mu.Lock()
-	// Build lookup map: uuid -> measurement
+	// Build lookup map: uuid -> datatype (from measurements, calculations, and assets)
 	measByUUID := make(map[string]*pb.Measurement)
 	for _, m := range s.measurements {
 		measByUUID[m.GetUuid()] = m
+	}
+	// Also index calculations and assets by UUID for datatype lookup
+	calcByUUID := make(map[string]string)
+	for _, c := range s.calculations {
+		calcByUUID[c.GetUuid()] = c.GetDatatype()
+	}
+	assetByUUID := make(map[string]string)
+	for _, a := range s.assets {
+		assetByUUID[a.GetUuid()] = a.GetDatatype()
 	}
 	s.mu.Unlock()
 
@@ -216,10 +293,13 @@ func (s *historianServer) QueryRawPoints(ctx context.Context, req *pb.QueryRawPo
 
 	var result []*pb.MeasurementPoints
 	for _, uuid := range req.GetMeasurementUUIDs() {
-		meas := measByUUID[uuid]
 		datatype := "number"
-		if meas != nil {
+		if meas := measByUUID[uuid]; meas != nil {
 			datatype = meas.GetDatatype()
+		} else if dt, ok := calcByUUID[uuid]; ok {
+			datatype = dt
+		} else if dt, ok := assetByUUID[uuid]; ok {
+			datatype = dt
 		}
 
 		var points []*pb.Point
