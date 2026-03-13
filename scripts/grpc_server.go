@@ -48,21 +48,21 @@ func newHistorianServer() *historianServer {
 		measurements: []*pb.Measurement{
 			{
 				Uuid:      "pre-0001-0001-0001-000000000001",
-				Name:      "FakeGateway:[default]Sine_Wave",
+				Name:      "Ignition-296a8ca4b6cd:[default]Sine_Wave",
 				Status:    "active",
 				Datatype:  "number",
 				CreatedAt: now,
 			},
 			{
 				Uuid:      "pre-0002-0002-0002-000000000002",
-				Name:      "FakeGateway:[default]Pump_Running",
+				Name:      "Ignition-296a8ca4b6cd:[default]Pump_Running",
 				Status:    "active",
 				Datatype:  "boolean",
 				CreatedAt: now,
 			},
 			{
 				Uuid:      "pre-0003-0003-0003-000000000003",
-				Name:      "FakeGateway:[default]Temperature",
+				Name:      "Ignition-296a8ca4b6cd:[default]Temperature",
 				Status:    "active",
 				Datatype:  "number",
 				CreatedAt: now,
