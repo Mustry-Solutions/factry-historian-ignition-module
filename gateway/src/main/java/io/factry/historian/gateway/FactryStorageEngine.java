@@ -47,7 +47,7 @@ public class FactryStorageEngine extends AbstractStorageEngine {
             Points.Builder pointsBuilder = Points.newBuilder();
 
             for (AtomicPoint<?> point : points) {
-                String tagPath = point.source().toString();
+                String tagPath = TagPathUtil.qualifiedPathToStoredPath(point.source().toString());
                 Object value = point.value();
 
                 logger.info("Point: tagPath=" + tagPath

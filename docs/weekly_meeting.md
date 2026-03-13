@@ -40,10 +40,17 @@ Questions:
 
 # 16/03/2026
 
-Coming:
- - Store and forward
- - Editing settings
- - Browsing variables
- - preliminary protobuf
-  
+Done:
+ [+] Editing settings
+ [+] Store and forward
+ [+] bug: creating two measurements, because it didn't wait for the first
  
+> (Milestone 2: Historian Collector Full implementation < is this enough?)
+
+ [+] preliminary protobuf + emulator
+ [+] Browsing measurements from the emulator
+ 
+
+
+
+# 23/03/2026

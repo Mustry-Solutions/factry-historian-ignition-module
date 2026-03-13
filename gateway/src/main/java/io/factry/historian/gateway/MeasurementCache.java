@@ -26,20 +26,25 @@ public class MeasurementCache {
             MeasurementRequest request = MeasurementRequest.newBuilder().build();
             Measurements response = grpcClient.getMeasurements(request);
 
-            Map<String, String> fresh = new HashMap<>();
+            Map<String, String> freshPaths = new HashMap<>();
+            Map<String, Measurement> freshMeasurements = new HashMap<>();
             int total = 0;
             for (Measurement m : response.getMeasurementsList()) {
                 total++;
                 if ("active".equalsIgnoreCase(m.getStatus())) {
-                    fresh.put(m.getName(), m.getUuid());
-                    uuidToMeasurement.put(m.getUuid(), m);
+                    freshPaths.put(m.getName(), m.getUuid());
+                    freshMeasurements.put(m.getUuid(), m);
                 } else {
                     logger.info("Skipping measurement '{}' with status '{}'", m.getName(), m.getStatus());
                 }
             }
-            tagPathToUUID.putAll(fresh);
+            // Replace maps entirely so deleted measurements don't linger
+            tagPathToUUID.clear();
+            tagPathToUUID.putAll(freshPaths);
+            uuidToMeasurement.clear();
+            uuidToMeasurement.putAll(freshMeasurements);
             logger.info("Measurement cache refreshed, {} active of {} total from Factry, {} in cache",
-                    fresh.size(), total, tagPathToUUID.size());
+                    freshPaths.size(), total, tagPathToUUID.size());
         } catch (Exception e) {
             logger.error("Failed to refresh measurement cache", e);
         }

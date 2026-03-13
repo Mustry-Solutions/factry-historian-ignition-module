@@ -29,6 +29,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -55,38 +56,85 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
     @Override
     protected void doBrowse(QualifiedPath root, BrowseFilter filter, BrowsePublisher publisher) {
-        logger.info("Browse request for root: " + root);
-
         try {
             measurementCache.refresh(grpcClient);
 
+            // Convert measurement names (stored format: "Ignition-xxx:[default]Tag")
+            // to slash-separated display paths for hierarchical browsing
+            List<String> displayPaths = new ArrayList<>();
             for (Measurement m : measurementCache.getAllMeasurements()) {
-                if (publisher.isCanceled()) {
-                    return;
+                displayPaths.add(TagPathUtil.storedPathToDisplayPath(m.getName()));
+            }
+
+            // Extract browse prefix from root (AdaptedQualifiedPath)
+            String prefix = extractBrowsePrefix(root);
+
+            logger.info("Browse: prefix='" + prefix + "', total measurements=" + displayPaths.size());
+
+            Set<String> folders = new LinkedHashSet<>();
+            List<String> leafTags = new ArrayList<>();
+
+            for (String path : displayPaths) {
+                if (!path.startsWith(prefix)) {
+                    continue;
                 }
-
-                String name = m.getName();
-                // Strip the prov:default:/tag: prefix for display if present
-                String displayName = name;
-                int tagIdx = name.lastIndexOf("tag:");
-                if (tagIdx >= 0) {
-                    displayName = name.substring(tagIdx + 4);
+                String remaining = path.substring(prefix.length());
+                int slashPos = remaining.indexOf('/');
+                if (slashPos >= 0) {
+                    folders.add(remaining.substring(0, slashPos));
+                } else {
+                    leafTags.add(remaining);
                 }
+            }
 
-                Instant createdTime = m.hasCreatedAt()
-                        ? Instant.ofEpochSecond(m.getCreatedAt().getSeconds(), m.getCreatedAt().getNanos())
-                        : Instant.now();
+            for (String folder : folders) {
+                publisher.newNode("folder", folder)
+                        .hasChildren(true)
+                        .add();
+            }
 
-                publisher.newNode(displayName, "Leaf")
-                        .creationTime(createdTime)
+            for (String leaf : leafTags) {
+                publisher.newNode("tag", leaf)
                         .hasChildren(false)
                         .add();
             }
 
-            publisher.setTotalResultsAvailable(measurementCache.size());
+            logger.info("Browse: published " + folders.size() + " folders, "
+                    + leafTags.size() + " tags");
+
         } catch (Exception e) {
             logger.error("Error browsing measurements", e);
         }
+    }
+
+    /**
+     * Extract the browse prefix from the root QualifiedPath.
+     * Uses AdaptedQualifiedPath.getOriginalPath() via reflection to access
+     * the full path including folder: components.
+     */
+    private String extractBrowsePrefix(QualifiedPath root) {
+        if (root == null) {
+            return "";
+        }
+
+        try {
+            Object original = root.getClass().getMethod("getOriginalPath").invoke(root);
+            if (original != null) {
+                String fullPath = original.toString();
+                if (fullPath != null && !fullPath.isEmpty()) {
+                    return TagPathUtil.parseFolderPrefix(fullPath);
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("getOriginalPath() not available: " + e.getMessage());
+        }
+
+        String rootStr = root.toString();
+        if (rootStr != null && !rootStr.isEmpty()) {
+            return TagPathUtil.parseFolderPrefix(rootStr);
+        }
+
+        return "";
     }
 
     @Override
@@ -229,27 +277,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         return Optional.of(new FactryHistoricalNode(m.getUuid(), path, m.getDatatype(), createdTime));
     }
 
-    /**
-     * Converts a QualifiedPath from Ignition's internal format to the stored tag path format
-     * used as measurement names in Factry.
-     *
-     * Ignition paths look like: sys:gateway:/histprov:HistorianName:/tag:prov:default:/tag:TagName
-     * We need: prov:default:/tag:TagName
-     */
     private String toStoredTagPath(QualifiedPath path) {
-        String pathStr = path.toString();
-
-        // Strip everything up to and including the histprov segment's /tag: prefix
-        int histprovIdx = pathStr.indexOf("histprov:");
-        if (histprovIdx >= 0) {
-            int tagStart = pathStr.indexOf(":/tag:", histprovIdx);
-            if (tagStart >= 0) {
-                return pathStr.substring(tagStart + 5); // skip ":/tag:"
-            }
-        }
-
-        // Fallback: return as-is
-        return pathStr;
+        return TagPathUtil.qualifiedPathToStoredPath(path.toString());
     }
 
     private static QualityCode statusToQuality(String status) {

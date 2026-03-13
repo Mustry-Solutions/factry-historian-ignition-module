@@ -44,6 +44,19 @@ dependencies {
     modlImplementation("com.google.protobuf:protobuf-java:$protobufVersion")
     modlImplementation("com.google.protobuf:protobuf-java-util:$protobufVersion")
     modlImplementation("javax.annotation:javax.annotation-api:1.3.2")
+
+    // Test dependencies
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.test {
+    useJUnitPlatform()
+}
+
+// Ensure compileTestJava sees test sources (protobuf plugin can interfere)
+tasks.named<JavaCompile>("compileTestJava") {
+    dependsOn(tasks.named("compileJava"))
 }
 
 protobuf {
