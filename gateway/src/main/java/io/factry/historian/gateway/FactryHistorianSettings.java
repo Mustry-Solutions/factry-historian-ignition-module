@@ -11,6 +11,7 @@ public class FactryHistorianSettings implements HistorianSettings {
     private String grpcHost = "localhost";
     private int grpcPort = 9876;
     private boolean debugLogging = false;
+    private boolean useTls = false;
     private SecretConfig token;
 
     /**
@@ -70,6 +71,14 @@ public class FactryHistorianSettings implements HistorianSettings {
         this.debugLogging = debugLogging;
     }
 
+    public boolean isUseTls() {
+        return useTls;
+    }
+
+    public void setUseTls(boolean useTls) {
+        this.useTls = useTls;
+    }
+
     public SecretConfig getToken() {
         return token;
     }
@@ -95,6 +104,7 @@ public class FactryHistorianSettings implements HistorianSettings {
                 ", batchSize=" + batchSize +
                 ", batchIntervalMs=" + batchIntervalMs +
                 ", debugLogging=" + debugLogging +
+                ", useTls=" + useTls +
                 ", storeAndForwardEngine='" + storeAndForwardEngine + '\'' +
                 '}';
     }

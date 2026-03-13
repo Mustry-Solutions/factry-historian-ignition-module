@@ -54,6 +54,13 @@ public record FactryHistorianConfig(
         @Description("Time interval in milliseconds between batch sends")
         int batchIntervalMs,
 
+        @FormCategory("Connection")
+        @Label("Use TLS")
+        @FormField(FormFieldType.CHECKBOX)
+        @DefaultValue("true")
+        @Description("Use TLS for gRPC connection. Disable for plaintext connections (e.g. local test servers).")
+        boolean useTls,
+
         @FormCategory("Advanced")
         @Label("Debug Logging")
         @FormField(FormFieldType.CHECKBOX)
@@ -74,6 +81,7 @@ public record FactryHistorianConfig(
         settings.setToken(token);
         settings.setGrpcHost(grpcHost);
         settings.setGrpcPort(grpcPort);
+        settings.setUseTls(useTls);
         settings.setBatchSize(batchSize);
         settings.setBatchIntervalMs(batchIntervalMs);
         settings.setDebugLogging(debugLogging);
@@ -89,6 +97,7 @@ public record FactryHistorianConfig(
                 settings.getGrpcPort(),
                 settings.getBatchSize(),
                 settings.getBatchIntervalMs(),
+                settings.isUseTls(),
                 settings.isDebugLogging(),
                 settings.getStoreAndForwardEngine()
         );

@@ -32,17 +32,23 @@ public class FactryGrpcClient {
     private final ManagedChannel channel;
     private final HistorianGrpc.HistorianBlockingStub blockingStub;
 
-    public FactryGrpcClient(String host, int port, String collectorUUID, String token) {
-        try {
-            SslContext sslContext = GrpcSslContexts.forClient()
-                    .trustManager(InsecureTrustManagerFactory.INSTANCE)
-                    .build();
+    public FactryGrpcClient(String host, int port, String collectorUUID, String token, boolean useTls) {
+        if (useTls) {
+            try {
+                SslContext sslContext = GrpcSslContexts.forClient()
+                        .trustManager(InsecureTrustManagerFactory.INSTANCE)
+                        .build();
 
+                this.channel = NettyChannelBuilder.forAddress(host, port)
+                        .sslContext(sslContext)
+                        .build();
+            } catch (SSLException e) {
+                throw new RuntimeException("Failed to create TLS-enabled gRPC channel", e);
+            }
+        } else {
             this.channel = NettyChannelBuilder.forAddress(host, port)
-                    .sslContext(sslContext)
+                    .usePlaintext()
                     .build();
-        } catch (SSLException e) {
-            throw new RuntimeException("Failed to create TLS-enabled gRPC channel", e);
         }
 
         Metadata headers = new Metadata();
@@ -52,7 +58,8 @@ public class FactryGrpcClient {
         this.blockingStub = HistorianGrpc.newBlockingStub(channel)
                 .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers));
 
-        logger.info("gRPC client created (TLS), target={}:{}, collectorUUID={}", host, port, collectorUUID);
+        logger.info("gRPC client created ({}), target={}:{}, collectorUUID={}",
+                useTls ? "TLS" : "plaintext", host, port, collectorUUID);
     }
 
     public CreatePointsReply createPoints(Points points) {

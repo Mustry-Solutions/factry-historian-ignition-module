@@ -50,7 +50,8 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
                 settings.getGrpcHost(),
                 settings.getGrpcPort(),
                 settings.getCollectorUUID(),
-                resolveToken(context, settings.getToken())
+                resolveToken(context, settings.getToken()),
+                settings.isUseTls()
         );
         this.measurementCache = new MeasurementCache();
 
