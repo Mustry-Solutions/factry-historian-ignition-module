@@ -11,6 +11,10 @@ package io.factry.historian.gateway;
  */
 final class TagPathUtil {
 
+    static final String CATEGORY_MEASUREMENTS = "Measurements";
+    static final String CATEGORY_CALCULATIONS = "Calculations";
+    static final String CATEGORY_ASSETS = "Assets";
+
     private TagPathUtil() {}
 
     /**
@@ -67,8 +71,19 @@ final class TagPathUtil {
             return buildStoredPath(sys, prov, tag);
         }
 
-        // Browse-originated: "histprov:xxx:/tag:SysName/ProvName/TagPath"
+        // Browse-originated: "histprov:xxx:/tag:Category/..."
         if (tag != null) {
+            String category = extractCategory(tag);
+            if (category != null) {
+                String stripped = stripCategory(tag);
+                if (CATEGORY_CALCULATIONS.equals(category) || CATEGORY_ASSETS.equals(category)) {
+                    // Calculations and Assets use their name directly (no sys:[prov] conversion)
+                    return stripped;
+                }
+                // Measurements: strip category prefix, then apply existing sys/prov/tag conversion
+                tag = stripped;
+            }
+
             int firstSlash = tag.indexOf('/');
             if (firstSlash >= 0) {
                 String sysName = tag.substring(0, firstSlash);
@@ -103,6 +118,37 @@ final class TagPathUtil {
             }
         }
         return storedPath;
+    }
+
+    /**
+     * Extract the category prefix from a display/browse path.
+     * Returns "Measurements", "Calculations", "Assets", or null if no category prefix.
+     */
+    static String extractCategory(String displayPath) {
+        if (displayPath == null) return null;
+        if (displayPath.startsWith(CATEGORY_MEASUREMENTS + "/") || displayPath.equals(CATEGORY_MEASUREMENTS)) {
+            return CATEGORY_MEASUREMENTS;
+        }
+        if (displayPath.startsWith(CATEGORY_CALCULATIONS + "/") || displayPath.equals(CATEGORY_CALCULATIONS)) {
+            return CATEGORY_CALCULATIONS;
+        }
+        if (displayPath.startsWith(CATEGORY_ASSETS + "/") || displayPath.equals(CATEGORY_ASSETS)) {
+            return CATEGORY_ASSETS;
+        }
+        return null;
+    }
+
+    /**
+     * Strip the category prefix from a display/browse path.
+     * {@code "Measurements/Ignition-xxx/default/Tag"} → {@code "Ignition-xxx/default/Tag"}
+     * {@code "Calculations/Avg_Temperature"} → {@code "Avg_Temperature"}
+     */
+    static String stripCategory(String displayPath) {
+        if (displayPath == null) return null;
+        String category = extractCategory(displayPath);
+        if (category == null) return displayPath;
+        if (displayPath.length() == category.length()) return "";
+        return displayPath.substring(category.length() + 1); // +1 for the "/"
     }
 
     /**

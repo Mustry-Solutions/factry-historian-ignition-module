@@ -25,6 +25,9 @@ service Historian {
 
   rpc QueryRawPoints (QueryRawPointsRequest) returns (QueryPointsReply);
 
+  rpc GetCalculations (CalculationRequest) returns (Calculations);
+  rpc GetAssets (AssetRequest) returns (Assets);
+
   rpc CreateLogsStream (stream Logs) returns (CreateLogsReply);
   rpc CreateLogs (Logs) returns (CreateLogsReply);
 
@@ -107,6 +110,35 @@ message EngineeringSpecs {
   optional double valueMax = 3;
   optional double limitLo = 4;
   optional double limitHi = 5;
+}
+
+message Calculation {
+  string uuid = 1;
+  string name = 2;
+  string status = 3;
+  google.protobuf.Timestamp createdAt = 4;
+  string datatype = 5;
+  string expression = 6;
+}
+
+message CalculationRequest {}
+
+message Calculations {
+  repeated Calculation calculations = 1;
+}
+
+message Asset {
+  string uuid = 1;
+  string name = 2;
+  string status = 3;
+  google.protobuf.Timestamp createdAt = 4;
+  string datatype = 5;
+}
+
+message AssetRequest {}
+
+message Assets {
+  repeated Asset assets = 1;
 }
 
 message MeasurementRequest {

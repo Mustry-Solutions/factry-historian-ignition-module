@@ -1,5 +1,9 @@
 package io.factry.historian.gateway;
 
+import io.factry.historian.proto.Asset;
+import io.factry.historian.proto.Assets;
+import io.factry.historian.proto.Calculation;
+import io.factry.historian.proto.Calculations;
 import io.factry.historian.proto.CreateMeasurement;
 import io.factry.historian.proto.CreateMeasurementsRequest;
 import io.factry.historian.proto.Measurement;
@@ -20,6 +24,12 @@ public class MeasurementCache {
     private final ConcurrentHashMap<String, String> tagPathToUUID = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Measurement> uuidToMeasurement = new ConcurrentHashMap<>();
     private final Set<String> pendingCreations = ConcurrentHashMap.newKeySet();
+
+    private final ConcurrentHashMap<String, String> calcNameToUUID = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Calculation> uuidToCalculation = new ConcurrentHashMap<>();
+
+    private final ConcurrentHashMap<String, String> assetNameToUUID = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Asset> uuidToAsset = new ConcurrentHashMap<>();
 
     public void refresh(FactryGrpcClient grpcClient) {
         try {
@@ -45,6 +55,47 @@ public class MeasurementCache {
             uuidToMeasurement.putAll(freshMeasurements);
             logger.info("Measurement cache refreshed, {} active of {} total from Factry, {} in cache",
                     freshPaths.size(), total, tagPathToUUID.size());
+
+            // Fetch calculations
+            try {
+                Calculations calcsResponse = grpcClient.getCalculations();
+                Map<String, String> freshCalcNames = new HashMap<>();
+                Map<String, Calculation> freshCalcs = new HashMap<>();
+                for (Calculation c : calcsResponse.getCalculationsList()) {
+                    if ("active".equalsIgnoreCase(c.getStatus())) {
+                        freshCalcNames.put(c.getName(), c.getUuid());
+                        freshCalcs.put(c.getUuid(), c);
+                    }
+                }
+                calcNameToUUID.clear();
+                calcNameToUUID.putAll(freshCalcNames);
+                uuidToCalculation.clear();
+                uuidToCalculation.putAll(freshCalcs);
+                logger.info("Calculation cache refreshed, {} active", freshCalcNames.size());
+            } catch (Exception ce) {
+                logger.error("Failed to refresh calculation cache", ce);
+            }
+
+            // Fetch assets
+            try {
+                Assets assetsResponse = grpcClient.getAssets();
+                Map<String, String> freshAssetNames = new HashMap<>();
+                Map<String, Asset> freshAssets = new HashMap<>();
+                for (Asset a : assetsResponse.getAssetsList()) {
+                    if ("active".equalsIgnoreCase(a.getStatus())) {
+                        freshAssetNames.put(a.getName(), a.getUuid());
+                        freshAssets.put(a.getUuid(), a);
+                    }
+                }
+                assetNameToUUID.clear();
+                assetNameToUUID.putAll(freshAssetNames);
+                uuidToAsset.clear();
+                uuidToAsset.putAll(freshAssets);
+                logger.info("Asset cache refreshed, {} active", freshAssetNames.size());
+            } catch (Exception ae) {
+                logger.error("Failed to refresh asset cache", ae);
+            }
+
         } catch (Exception e) {
             logger.error("Failed to refresh measurement cache", e);
         }
@@ -140,6 +191,36 @@ public class MeasurementCache {
 
     public Collection<Measurement> getAllMeasurements() {
         return uuidToMeasurement.values();
+    }
+
+    // --- Calculation accessors ---
+
+    public String getCalculationUUID(String name) {
+        return calcNameToUUID.get(name);
+    }
+
+    public Calculation getCalculationByName(String name) {
+        String uuid = calcNameToUUID.get(name);
+        return uuid != null ? uuidToCalculation.get(uuid) : null;
+    }
+
+    public Collection<Calculation> getAllCalculations() {
+        return uuidToCalculation.values();
+    }
+
+    // --- Asset accessors ---
+
+    public String getAssetUUID(String name) {
+        return assetNameToUUID.get(name);
+    }
+
+    public Asset getAssetByName(String name) {
+        String uuid = assetNameToUUID.get(name);
+        return uuid != null ? uuidToAsset.get(uuid) : null;
+    }
+
+    public Collection<Asset> getAllAssets() {
+        return uuidToAsset.values();
     }
 
     private static String toFactryDataType(Object value) {

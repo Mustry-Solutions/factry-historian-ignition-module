@@ -1,5 +1,9 @@
 package io.factry.historian.gateway;
 
+import io.factry.historian.proto.AssetRequest;
+import io.factry.historian.proto.Assets;
+import io.factry.historian.proto.CalculationRequest;
+import io.factry.historian.proto.Calculations;
 import io.factry.historian.proto.CreateMeasurementsReply;
 import io.factry.historian.proto.CreateMeasurementsRequest;
 import io.factry.historian.proto.CreatePointsReply;
@@ -75,6 +79,16 @@ public class FactryGrpcClient {
     public QueryPointsReply queryRawPoints(QueryRawPointsRequest request) {
         logger.debug("Sending QueryRawPoints for {} measurements", request.getMeasurementUUIDsCount());
         return blockingStub.queryRawPoints(request);
+    }
+
+    public Calculations getCalculations() {
+        logger.debug("Sending GetCalculations");
+        return blockingStub.getCalculations(CalculationRequest.newBuilder().build());
+    }
+
+    public Assets getAssets() {
+        logger.debug("Sending GetAssets");
+        return blockingStub.getAssets(AssetRequest.newBuilder().build());
     }
 
     public CreateMeasurementsReply createMeasurements(CreateMeasurementsRequest request) {

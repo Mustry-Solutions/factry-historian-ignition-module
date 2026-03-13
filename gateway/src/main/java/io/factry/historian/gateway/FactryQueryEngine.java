@@ -18,6 +18,8 @@ import com.inductiveautomation.ignition.common.model.values.QualityCode;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 
+import io.factry.historian.proto.Asset;
+import io.factry.historian.proto.Calculation;
 import io.factry.historian.proto.Measurement;
 import io.factry.historian.proto.MeasurementPoints;
 import io.factry.historian.proto.QueryPointsReply;
@@ -59,52 +61,94 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         try {
             measurementCache.refresh(grpcClient);
 
-            // Convert measurement names (stored format: "Ignition-xxx:[default]Tag")
-            // to slash-separated display paths for hierarchical browsing
-            List<String> displayPaths = new ArrayList<>();
-            for (Measurement m : measurementCache.getAllMeasurements()) {
-                displayPaths.add(TagPathUtil.storedPathToDisplayPath(m.getName()));
-            }
-
             // Extract browse prefix from root (AdaptedQualifiedPath)
             String prefix = extractBrowsePrefix(root);
 
-            logger.info("Browse: prefix='" + prefix + "', total measurements=" + displayPaths.size());
+            logger.info("Browse: prefix='" + prefix + "'");
 
-            Set<String> folders = new LinkedHashSet<>();
-            List<String> leafTags = new ArrayList<>();
+            String category = TagPathUtil.extractCategory(prefix);
 
-            for (String path : displayPaths) {
-                if (!path.startsWith(prefix)) {
-                    continue;
+            if (prefix.isEmpty()) {
+                // Root level: show three category folders
+                publisher.newNode("folder", TagPathUtil.CATEGORY_MEASUREMENTS).hasChildren(true).add();
+                publisher.newNode("folder", TagPathUtil.CATEGORY_CALCULATIONS).hasChildren(true).add();
+                publisher.newNode("folder", TagPathUtil.CATEGORY_ASSETS).hasChildren(true).add();
+                logger.info("Browse: published 3 category folders at root");
+                return;
+            }
+
+            if (TagPathUtil.CATEGORY_MEASUREMENTS.equals(category)) {
+                // Measurements: existing hierarchical browse with sys/prov/tag structure
+                String measPrefix = TagPathUtil.stripCategory(prefix);
+                if (!measPrefix.isEmpty() && !measPrefix.endsWith("/")) {
+                    measPrefix += "/";
                 }
-                String remaining = path.substring(prefix.length());
-                int slashPos = remaining.indexOf('/');
-                if (slashPos >= 0) {
-                    folders.add(remaining.substring(0, slashPos));
-                } else {
-                    leafTags.add(remaining);
+                browsePaths(collectMeasurementDisplayPaths(), measPrefix, publisher);
+            } else if (TagPathUtil.CATEGORY_CALCULATIONS.equals(category)) {
+                // Calculations: flat list of names
+                String calcPrefix = TagPathUtil.stripCategory(prefix);
+                if (!calcPrefix.isEmpty() && !calcPrefix.endsWith("/")) {
+                    calcPrefix += "/";
                 }
+                List<String> calcNames = new ArrayList<>();
+                for (Calculation c : measurementCache.getAllCalculations()) {
+                    calcNames.add(c.getName());
+                }
+                browsePaths(calcNames, calcPrefix, publisher);
+            } else if (TagPathUtil.CATEGORY_ASSETS.equals(category)) {
+                // Assets: hierarchical by "/" in name
+                String assetPrefix = TagPathUtil.stripCategory(prefix);
+                if (!assetPrefix.isEmpty() && !assetPrefix.endsWith("/")) {
+                    assetPrefix += "/";
+                }
+                List<String> assetNames = new ArrayList<>();
+                for (Asset a : measurementCache.getAllAssets()) {
+                    assetNames.add(a.getName());
+                }
+                browsePaths(assetNames, assetPrefix, publisher);
+            } else {
+                // Legacy fallback: browse measurements without category prefix
+                browsePaths(collectMeasurementDisplayPaths(), prefix, publisher);
             }
-
-            for (String folder : folders) {
-                publisher.newNode("folder", folder)
-                        .hasChildren(true)
-                        .add();
-            }
-
-            for (String leaf : leafTags) {
-                publisher.newNode("tag", leaf)
-                        .hasChildren(false)
-                        .add();
-            }
-
-            logger.info("Browse: published " + folders.size() + " folders, "
-                    + leafTags.size() + " tags");
 
         } catch (Exception e) {
-            logger.error("Error browsing measurements", e);
+            logger.error("Error browsing", e);
         }
+    }
+
+    private List<String> collectMeasurementDisplayPaths() {
+        List<String> displayPaths = new ArrayList<>();
+        for (Measurement m : measurementCache.getAllMeasurements()) {
+            displayPaths.add(TagPathUtil.storedPathToDisplayPath(m.getName()));
+        }
+        return displayPaths;
+    }
+
+    private void browsePaths(List<String> paths, String prefix, BrowsePublisher publisher) {
+        Set<String> folders = new LinkedHashSet<>();
+        List<String> leafTags = new ArrayList<>();
+
+        for (String path : paths) {
+            if (!path.startsWith(prefix)) {
+                continue;
+            }
+            String remaining = path.substring(prefix.length());
+            int slashPos = remaining.indexOf('/');
+            if (slashPos >= 0) {
+                folders.add(remaining.substring(0, slashPos));
+            } else if (!remaining.isEmpty()) {
+                leafTags.add(remaining);
+            }
+        }
+
+        for (String folder : folders) {
+            publisher.newNode("folder", folder).hasChildren(true).add();
+        }
+        for (String leaf : leafTags) {
+            publisher.newNode("tag", leaf).hasChildren(false).add();
+        }
+
+        logger.info("Browse: published " + folders.size() + " folders, " + leafTags.size() + " tags");
     }
 
     /**
@@ -158,13 +202,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             for (RawQueryKey key : queryKeys) {
                 QualifiedPath source = key.source();
                 String tagPath = toStoredTagPath(source);
-                String uuid = measurementCache.getUUID(tagPath);
-
-                if (uuid == null) {
-                    // Try refresh and lookup again
-                    measurementCache.refresh(grpcClient);
-                    uuid = measurementCache.getUUID(tagPath);
-                }
+                String uuid = lookupUUID(tagPath);
 
                 if (uuid != null) {
                     measurementUUIDs.add(uuid);
@@ -261,20 +299,61 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     }
 
     private Optional<FactryHistoricalNode> findNode(String tagPath, QualifiedPath path) {
+        // Try measurement
         Measurement m = measurementCache.getMeasurementByName(tagPath);
         if (m == null) {
             measurementCache.refresh(grpcClient);
             m = measurementCache.getMeasurementByName(tagPath);
         }
-        if (m == null) {
-            return Optional.empty();
+        if (m != null) {
+            Instant createdTime = m.hasCreatedAt()
+                    ? Instant.ofEpochSecond(m.getCreatedAt().getSeconds(), m.getCreatedAt().getNanos())
+                    : Instant.EPOCH;
+            return Optional.of(new FactryHistoricalNode(m.getUuid(), path, m.getDatatype(), createdTime));
         }
 
-        Instant createdTime = m.hasCreatedAt()
-                ? Instant.ofEpochSecond(m.getCreatedAt().getSeconds(), m.getCreatedAt().getNanos())
-                : Instant.EPOCH;
+        // Try calculation
+        Calculation c = measurementCache.getCalculationByName(tagPath);
+        if (c != null) {
+            Instant createdTime = c.hasCreatedAt()
+                    ? Instant.ofEpochSecond(c.getCreatedAt().getSeconds(), c.getCreatedAt().getNanos())
+                    : Instant.EPOCH;
+            return Optional.of(new FactryHistoricalNode(c.getUuid(), path, c.getDatatype(), createdTime));
+        }
 
-        return Optional.of(new FactryHistoricalNode(m.getUuid(), path, m.getDatatype(), createdTime));
+        // Try asset
+        Asset a = measurementCache.getAssetByName(tagPath);
+        if (a != null) {
+            Instant createdTime = a.hasCreatedAt()
+                    ? Instant.ofEpochSecond(a.getCreatedAt().getSeconds(), a.getCreatedAt().getNanos())
+                    : Instant.EPOCH;
+            return Optional.of(new FactryHistoricalNode(a.getUuid(), path, a.getDatatype(), createdTime));
+        }
+
+        return Optional.empty();
+    }
+
+    private String lookupUUID(String tagPath) {
+        // Try measurement
+        String uuid = measurementCache.getUUID(tagPath);
+        if (uuid != null) return uuid;
+
+        // Try calculation
+        uuid = measurementCache.getCalculationUUID(tagPath);
+        if (uuid != null) return uuid;
+
+        // Try asset
+        uuid = measurementCache.getAssetUUID(tagPath);
+        if (uuid != null) return uuid;
+
+        // Refresh and retry
+        measurementCache.refresh(grpcClient);
+        uuid = measurementCache.getUUID(tagPath);
+        if (uuid != null) return uuid;
+        uuid = measurementCache.getCalculationUUID(tagPath);
+        if (uuid != null) return uuid;
+        uuid = measurementCache.getAssetUUID(tagPath);
+        return uuid;
     }
 
     private String toStoredTagPath(QualifiedPath path) {

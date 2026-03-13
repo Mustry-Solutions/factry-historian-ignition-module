@@ -166,6 +166,92 @@ class TagPathUtilTest {
                 TagPathUtil.parseFolderPrefix("histprov:test:/folder:my-gateway-01"));
     }
 
+    // --- extractCategory ---
+
+    @Test
+    void extractCategory_measurements() {
+        assertEquals("Measurements", TagPathUtil.extractCategory("Measurements/Ignition-abc/default/Temp"));
+    }
+
+    @Test
+    void extractCategory_calculations() {
+        assertEquals("Calculations", TagPathUtil.extractCategory("Calculations/Avg_Temperature"));
+    }
+
+    @Test
+    void extractCategory_assets() {
+        assertEquals("Assets", TagPathUtil.extractCategory("Assets/Plant/Line1/Motor1"));
+    }
+
+    @Test
+    void extractCategory_noCategory() {
+        assertNull(TagPathUtil.extractCategory("Ignition-abc/default/Temp"));
+    }
+
+    @Test
+    void extractCategory_null() {
+        assertNull(TagPathUtil.extractCategory(null));
+    }
+
+    @Test
+    void extractCategory_exactMatch() {
+        assertEquals("Measurements", TagPathUtil.extractCategory("Measurements"));
+    }
+
+    // --- stripCategory ---
+
+    @Test
+    void stripCategory_measurements() {
+        assertEquals("Ignition-abc/default/Temp",
+                TagPathUtil.stripCategory("Measurements/Ignition-abc/default/Temp"));
+    }
+
+    @Test
+    void stripCategory_calculations() {
+        assertEquals("Avg_Temperature",
+                TagPathUtil.stripCategory("Calculations/Avg_Temperature"));
+    }
+
+    @Test
+    void stripCategory_assets() {
+        assertEquals("Plant/Line1/Motor1",
+                TagPathUtil.stripCategory("Assets/Plant/Line1/Motor1"));
+    }
+
+    @Test
+    void stripCategory_noCategory() {
+        assertEquals("Ignition-abc/default/Temp",
+                TagPathUtil.stripCategory("Ignition-abc/default/Temp"));
+    }
+
+    @Test
+    void stripCategory_exactMatch() {
+        assertEquals("", TagPathUtil.stripCategory("Measurements"));
+    }
+
+    // --- qualifiedPathToStoredPath with category prefixes ---
+
+    @Test
+    void qualifiedPathToStoredPath_measurementCategory() {
+        assertEquals("Ignition-abc:[default]Temperature",
+                TagPathUtil.qualifiedPathToStoredPath(
+                        "histprov:test:/tag:Measurements/Ignition-abc/default/Temperature"));
+    }
+
+    @Test
+    void qualifiedPathToStoredPath_calculationCategory() {
+        assertEquals("Avg_Temperature",
+                TagPathUtil.qualifiedPathToStoredPath(
+                        "histprov:test:/tag:Calculations/Avg_Temperature"));
+    }
+
+    @Test
+    void qualifiedPathToStoredPath_assetCategory() {
+        assertEquals("Plant/Line1/Motor1",
+                TagPathUtil.qualifiedPathToStoredPath(
+                        "histprov:test:/tag:Assets/Plant/Line1/Motor1"));
+    }
+
     // --- roundtrip: store → display → browse query → stored ---
 
     @Test
