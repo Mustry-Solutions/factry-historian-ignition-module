@@ -41,9 +41,9 @@ Questions:
 # 16/03/2026
 
 Done:
+ [+] bug: creating two measurements for one tag, because it didn't wait for the first
  [+] Editing settings
  [+] Store and forward
- [+] bug: creating two measurements, because it didn't wait for the first
  
 > (Milestone 2: Historian Collector Full implementation < is this enough?)
 
@@ -51,6 +51,17 @@ Done:
  [+] Browsing measurements from the emulator
  
 
+ 
+known issue:
+  - new point is not always flushed
+  - if the requests fails for measuremnts -> shows old instead of empty
+  - missing point in store and forward
 
+> remark: one 'store and forward' object can serve several historian (or anything else), the pathtag includes the provider
+
+Questions:
+  - measurements | calculation | assets in separate folder?
+> the protobuf with the new query data is welcome as soon as possible
+  - wait for the protobuf or go further? 
 
 # 23/03/2026
