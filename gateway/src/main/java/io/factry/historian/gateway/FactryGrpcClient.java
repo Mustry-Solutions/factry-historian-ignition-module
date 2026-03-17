@@ -33,8 +33,8 @@ public class FactryGrpcClient {
     private static final Metadata.Key<String> AUTHORIZATION_KEY =
             Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER);
 
-    private final ManagedChannel channel;
-    private final HistorianGrpc.HistorianBlockingStub blockingStub;
+    private volatile ManagedChannel channel;
+    private volatile HistorianGrpc.HistorianBlockingStub blockingStub;
 
     public FactryGrpcClient(String host, int port, String collectorUUID, String token, boolean useTls) {
         if (useTls) {
@@ -94,6 +94,42 @@ public class FactryGrpcClient {
     public CreateMeasurementsReply createMeasurements(CreateMeasurementsRequest request) {
         logger.debug("Sending CreateMeasurements with {} measurements", request.getMeasurementsCount());
         return blockingStub.createMeasurements(request);
+    }
+
+    /**
+     * Reconfigure the client with new connection settings. Shuts down the old
+     * gRPC channel and creates a new one.
+     */
+    public void reconfigure(String host, int port, String collectorUUID, String token, boolean useTls) {
+        logger.info("Reconfiguring gRPC client: {}:{}", host, port);
+        shutdown();
+
+        if (useTls) {
+            try {
+                SslContext sslContext = GrpcSslContexts.forClient()
+                        .trustManager(InsecureTrustManagerFactory.INSTANCE)
+                        .build();
+                this.channel = NettyChannelBuilder.forAddress(host, port)
+                        .sslContext(sslContext)
+                        .build();
+            } catch (SSLException e) {
+                throw new RuntimeException("Failed to create TLS-enabled gRPC channel", e);
+            }
+        } else {
+            this.channel = NettyChannelBuilder.forAddress(host, port)
+                    .usePlaintext()
+                    .build();
+        }
+
+        Metadata headers = new Metadata();
+        headers.put(COLLECTOR_UUID_KEY, collectorUUID);
+        headers.put(AUTHORIZATION_KEY, "Bearer " + token);
+
+        this.blockingStub = HistorianGrpc.newBlockingStub(channel)
+                .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers));
+
+        logger.info("gRPC client reconfigured ({}), target={}:{}, collectorUUID={}",
+                useTls ? "TLS" : "plaintext", host, port, collectorUUID);
     }
 
     public void shutdown() {

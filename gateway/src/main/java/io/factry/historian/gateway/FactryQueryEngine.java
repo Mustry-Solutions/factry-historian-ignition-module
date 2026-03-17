@@ -38,7 +38,7 @@ import java.util.Optional;
 import java.util.Set;
 
 public class FactryQueryEngine extends AbstractQueryEngine {
-    private final FactryHistorianSettings settings;
+    private volatile FactryHistorianSettings settings;
     private final FactryGrpcClient grpcClient;
     private final MeasurementCache measurementCache;
 
@@ -354,6 +354,10 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         if (uuid != null) return uuid;
         uuid = measurementCache.getAssetUUID(tagPath);
         return uuid;
+    }
+
+    void updateSettings(FactryHistorianSettings newSettings) {
+        this.settings = newSettings;
     }
 
     private String toStoredTagPath(QualifiedPath path) {

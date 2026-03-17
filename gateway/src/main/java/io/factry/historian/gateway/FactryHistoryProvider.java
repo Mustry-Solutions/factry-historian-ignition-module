@@ -33,7 +33,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
     private final GatewayContext context;
     private final FactryQueryEngine queryEngine;
     private final FactryStorageEngine storageEngine;
-    private final FactryHistorianSettings settings;
+    private volatile FactryHistorianSettings settings;
     private final FactryGrpcClient grpcClient;
     private final MeasurementCache measurementCache;
 
@@ -171,8 +171,32 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
 
     @Override
     public boolean handleSettingsChange(FactryHistorianSettings newSettings) {
-        logger.info("Historian settings change requested: {} -> {}", settings, newSettings);
-        return true;
+        logger.info("Historian settings change: {}", newSettings);
+
+        try {
+            // Reconfigure the gRPC client (shuts down old channel, creates new one)
+            grpcClient.reconfigure(
+                    newSettings.getGrpcHost(),
+                    newSettings.getGrpcPort(),
+                    newSettings.getCollectorUUID(),
+                    resolveToken(context, newSettings.getToken()),
+                    newSettings.isUseTls()
+            );
+
+            // Refresh measurement cache from the new endpoint
+            measurementCache.refresh(grpcClient);
+
+            // Update settings references in the engines
+            queryEngine.updateSettings(newSettings);
+            storageEngine.updateSettings(newSettings);
+            this.settings = newSettings;
+
+            logger.info("Settings change applied successfully");
+            return true;
+        } catch (Exception e) {
+            logger.error("Failed to apply settings change", e);
+            return false;
+        }
     }
 
     @Override
