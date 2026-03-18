@@ -41,6 +41,11 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
     private TagHistoryDataSinkBridge dataSinkBridge;
     private ScheduledExecutorService quarantineRetryExecutor;
 
+    /** Cached status to avoid hitting gRPC on every gateway UI poll. */
+    private volatile ProfileStatus cachedStatus = ProfileStatus.UNKNOWN;
+    private volatile long statusCheckedAt = 0;
+    private static final long STATUS_CACHE_MS = 30_000; // 30 seconds
+
     public FactryHistoryProvider(GatewayContext context, String historianName, FactryHistorianSettings settings) {
         super(context, historianName);
         this.context = context;
@@ -204,7 +209,20 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
 
     @Override
     public ProfileStatus getStatus() {
-        return started ? ProfileStatus.RUNNING : ProfileStatus.UNKNOWN;
+        if (!started) {
+            return ProfileStatus.UNKNOWN;
+        }
+
+        long now = System.currentTimeMillis();
+        if (now - statusCheckedAt < STATUS_CACHE_MS) {
+            return cachedStatus;
+        }
+
+        statusCheckedAt = now;
+        cachedStatus = grpcClient.testConnection()
+                ? ProfileStatus.RUNNING
+                : ProfileStatus.ERRORED;
+        return cachedStatus;
     }
 
     private void retryQuarantinedData(String engineName) {

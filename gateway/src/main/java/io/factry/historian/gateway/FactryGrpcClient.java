@@ -146,4 +146,20 @@ public class FactryGrpcClient {
     public boolean isShutdown() {
         return channel.isShutdown();
     }
+
+    /**
+     * Test connectivity by making a lightweight gRPC call.
+     *
+     * @return true if the server responds
+     */
+    public boolean testConnection() {
+        try {
+            blockingStub.withDeadlineAfter(5, TimeUnit.SECONDS)
+                    .getMeasurements(MeasurementRequest.newBuilder().build());
+            return true;
+        } catch (Exception e) {
+            logger.debug("Connection test failed: {}", e.getMessage());
+            return false;
+        }
+    }
 }
