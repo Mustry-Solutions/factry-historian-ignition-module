@@ -165,7 +165,10 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
 
     @Override
     public boolean handleNameChange(String newName) {
-        logger.info("Historian name change requested: {} -> {}", historianName, newName);
+        logger.info("Historian name changed: {} -> {}", historianName, newName);
+        // Measurement names in Factry don't contain the historian profile name,
+        // so no data migration is needed.
+        // The framework updates the historianName field in AbstractHistorian.
         return true;
     }
 
