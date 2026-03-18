@@ -106,7 +106,9 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
     @Override
     protected StorageResult<SourceChangePoint> applySourceChanges(List<SourceChangePoint> changes) {
-        logger.debug("applySourceChanges called with " + changes.size() + " changes");
+        // Measurement lifecycle is managed by the Factry platform, not by this collector.
+        // No retirement action needed — just acknowledge the changes.
+        logger.debug("applySourceChanges called with " + changes.size() + " changes (no-op for Factry)");
         return StorageResult.success(changes);
     }
 
