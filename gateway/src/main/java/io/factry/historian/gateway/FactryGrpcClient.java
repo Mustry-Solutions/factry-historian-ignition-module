@@ -33,8 +33,11 @@ public class FactryGrpcClient {
     private static final Metadata.Key<String> AUTHORIZATION_KEY =
             Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER);
 
+    private static final long WRITE_DEADLINE_SECONDS = 3;
+
     private volatile ManagedChannel channel;
     private volatile HistorianGrpc.HistorianBlockingStub blockingStub;
+    private volatile boolean connected = true;
 
     public FactryGrpcClient(String host, int port, String collectorUUID, String token, boolean useTls) {
         if (useTls) {
@@ -68,7 +71,16 @@ public class FactryGrpcClient {
 
     public CreatePointsReply createPoints(Points points) {
         logger.debug("Sending CreatePoints with {} points", points.getPointsCount());
-        return blockingStub.createPoints(points);
+        try {
+            CreatePointsReply reply = blockingStub
+                    .withDeadlineAfter(WRITE_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .createPoints(points);
+            connected = true;
+            return reply;
+        } catch (Exception e) {
+            connected = false;
+            throw e;
+        }
     }
 
     public Measurements getMeasurements(MeasurementRequest request) {
@@ -147,6 +159,14 @@ public class FactryGrpcClient {
         return channel.isShutdown();
     }
 
+    public boolean isConnected() {
+        return connected;
+    }
+
+    public void markConnected() {
+        connected = true;
+    }
+
     /**
      * Test connectivity by making a lightweight gRPC call.
      *
@@ -156,8 +176,10 @@ public class FactryGrpcClient {
         try {
             blockingStub.withDeadlineAfter(5, TimeUnit.SECONDS)
                     .getMeasurements(MeasurementRequest.newBuilder().build());
+            connected = true;
             return true;
         } catch (Exception e) {
+            connected = false;
             logger.debug("Connection test failed: {}", e.getMessage());
             return false;
         }
