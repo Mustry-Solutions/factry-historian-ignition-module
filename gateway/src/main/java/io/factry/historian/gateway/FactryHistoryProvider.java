@@ -33,13 +33,14 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
     private final GatewayContext context;
     private final FactryQueryEngine queryEngine;
     private final FactryStorageEngine storageEngine;
+    private final HistorianMetrics metrics;
     private volatile FactryHistorianSettings settings;
     private final FactryGrpcClient grpcClient;
     private final MeasurementCache measurementCache;
 
     private TagHistoryStorageEngineBridge storageBridge;
     private TagHistoryDataSinkBridge dataSinkBridge;
-    private ScheduledExecutorService quarantineRetryExecutor;
+    private ScheduledExecutorService scheduledExecutor;
 
     /** Cached status to avoid hitting gRPC on every gateway UI poll. */
     private volatile ProfileStatus cachedStatus = ProfileStatus.UNKNOWN;
@@ -50,6 +51,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         super(context, historianName);
         this.context = context;
         this.settings = settings;
+        this.metrics = new HistorianMetrics();
 
         this.grpcClient = new FactryGrpcClient(
                 settings.getGrpcHost(),
@@ -60,8 +62,8 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         );
         this.measurementCache = new MeasurementCache();
 
-        this.queryEngine = new FactryQueryEngine(context, historianName, settings, grpcClient, measurementCache);
-        this.storageEngine = new FactryStorageEngine(context, historianName, settings, grpcClient, measurementCache);
+        this.queryEngine = new FactryQueryEngine(context, historianName, settings, grpcClient, measurementCache, metrics);
+        this.storageEngine = new FactryStorageEngine(context, historianName, settings, grpcClient, measurementCache, metrics);
 
         logger.info("Factry Historian created: name={}, grpcTarget={}:{}, collectorUUID={}",
                 historianName, settings.getGrpcHost(), settings.getGrpcPort(), settings.getCollectorUUID());
@@ -114,16 +116,29 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
             // Schedule automatic quarantine retry every 30 seconds.
             // Quarantined data is never retried automatically by S&F,
             // so we periodically move it back to pending for re-forwarding.
-            quarantineRetryExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "factry-quarantine-retry");
+            scheduledExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "factry-historian-scheduler");
                 t.setDaemon(true);
                 return t;
             });
-            quarantineRetryExecutor.scheduleWithFixedDelay(
+            scheduledExecutor.scheduleWithFixedDelay(
                     () -> retryQuarantinedData(sfEngine), 30, 30, TimeUnit.SECONDS);
+
+            // Log metrics summary every 30 seconds
+            scheduledExecutor.scheduleWithFixedDelay(
+                    metrics::logSummary, 30, 30, TimeUnit.SECONDS);
 
             logger.info("Store-and-forward enabled via engine '{}', sink accepting: {}",
                     sfEngine, dataSinkBridge.isAccepting());
+        } else {
+            // Even without S&F, schedule metrics logging
+            scheduledExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "factry-historian-scheduler");
+                t.setDaemon(true);
+                return t;
+            });
+            scheduledExecutor.scheduleWithFixedDelay(
+                    metrics::logSummary, 30, 30, TimeUnit.SECONDS);
         }
 
         logger.info("Factry Historian - Startup Complete");
@@ -136,9 +151,9 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         logger.info("========================================");
         logger.info("Name: {}", historianName);
 
-        if (quarantineRetryExecutor != null) {
-            quarantineRetryExecutor.shutdownNow();
-            quarantineRetryExecutor = null;
+        if (scheduledExecutor != null) {
+            scheduledExecutor.shutdownNow();
+            scheduledExecutor = null;
         }
 
         if (dataSinkBridge != null) {

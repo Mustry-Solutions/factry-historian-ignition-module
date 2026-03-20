@@ -66,18 +66,21 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     private volatile FactryHistorianSettings settings;
     private final FactryGrpcClient grpcClient;
     private final MeasurementCache measurementCache;
+    private final HistorianMetrics metrics;
 
     public FactryQueryEngine(
         GatewayContext context,
         String historianName,
         FactryHistorianSettings settings,
         FactryGrpcClient grpcClient,
-        MeasurementCache measurementCache
+        MeasurementCache measurementCache,
+        HistorianMetrics metrics
     ) {
         super(context, historianName, LoggerEx.newBuilder().build(FactryQueryEngine.class));
         this.settings = settings;
         this.grpcClient = grpcClient;
         this.measurementCache = measurementCache;
+        this.metrics = metrics;
         logger.info("Factry Query Engine initialized");
     }
 
@@ -209,6 +212,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     @Override
     protected Optional<Integer> doQueryRaw(RawQueryOptions options, RawPointProcessor processor) {
         logger.info("Raw query request: " + options);
+        long startMs = System.currentTimeMillis();
 
         try {
             // Build the processing context and initialize
@@ -287,6 +291,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             }
 
             processor.onComplete();
+            metrics.recordRawQuery(totalPoints, System.currentTimeMillis() - startMs);
             logger.info("Query completed with " + totalPoints + " total points");
             return Optional.of(totalPoints);
 
@@ -305,6 +310,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     @Override
     protected Optional<Integer> doQueryAggregated(AggregatedQueryOptions options, AggregatedPointProcessor processor) {
         logger.info("Aggregated query request: " + options);
+        long startMs = System.currentTimeMillis();
 
         try {
             ProcessingContext context =
@@ -380,6 +386,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             }
 
             processor.onComplete();
+            metrics.recordAggregatedQuery(pointCount, System.currentTimeMillis() - startMs);
             logger.info("Aggregated query completed with " + pointCount + " points");
             return Optional.of(pointCount);
 

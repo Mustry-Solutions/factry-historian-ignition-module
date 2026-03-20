@@ -20,19 +20,22 @@ public class FactryStorageEngine extends AbstractStorageEngine {
     private volatile FactryHistorianSettings settings;
     private final FactryGrpcClient grpcClient;
     private final MeasurementCache measurementCache;
+    private final HistorianMetrics metrics;
 
     public FactryStorageEngine(
         GatewayContext context,
         String historianName,
         FactryHistorianSettings settings,
         FactryGrpcClient grpcClient,
-        MeasurementCache measurementCache
+        MeasurementCache measurementCache,
+        HistorianMetrics metrics
     ) {
         super(context, historianName, LoggerEx.newBuilder().build(FactryStorageEngine.class),
                 QualifiedPathAdapter.DEFAULT, ImmediateStorageStrategy.create(historianName));
         this.settings = settings;
         this.grpcClient = grpcClient;
         this.measurementCache = measurementCache;
+        this.metrics = metrics;
         logger.info("Factry Storage Engine initialized with gRPC target: " +
                 settings.getGrpcHost() + ":" + settings.getGrpcPort());
     }
@@ -43,6 +46,7 @@ public class FactryStorageEngine extends AbstractStorageEngine {
             logger.debug("doStoreAtomic called with " + points.size() + " points");
         }
 
+        long startMs = System.currentTimeMillis();
         try {
             Points.Builder pointsBuilder = Points.newBuilder();
 
@@ -89,6 +93,8 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
             logger.info("Sending " + pointCount + " points via createPoints");
             grpcClient.createPoints(pointsBuilder.build());
+            long elapsedMs = System.currentTimeMillis() - startMs;
+            metrics.recordStore(pointCount, elapsedMs);
             logger.info("createPoints succeeded for " + pointCount + " points");
 
             if (settings.isDebugLogging()) {
@@ -97,9 +103,8 @@ public class FactryStorageEngine extends AbstractStorageEngine {
             return StorageResult.success(points);
 
         } catch (Exception e) {
+            metrics.recordStoreError();
             logger.error("Error storing atomic points via gRPC", e);
-            // Use exception() instead of failure() so the S&F sink bridge
-            // sees the error and throws DataStorageException, triggering retry.
             return StorageResult.exception(e, points);
         }
     }
