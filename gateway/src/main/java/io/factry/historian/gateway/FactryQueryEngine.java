@@ -1,34 +1,45 @@
 package io.factry.historian.gateway;
 
 import com.inductiveautomation.historian.common.model.TimeRange;
+import com.inductiveautomation.historian.common.model.AggregationType;
+import com.inductiveautomation.historian.common.model.LegacyAggregateAdapter;
+import com.inductiveautomation.historian.common.model.TimeWindow;
+import com.inductiveautomation.historian.common.model.data.AggregatedDataPoint;
 import com.inductiveautomation.historian.common.model.data.AtomicPoint;
 import com.inductiveautomation.historian.common.model.data.DataPointFactory;
 import com.inductiveautomation.historian.common.model.data.DataPointType;
+import com.inductiveautomation.historian.common.model.options.AggregatedQueryKey;
+import com.inductiveautomation.historian.common.model.options.AggregatedQueryOptions;
 import com.inductiveautomation.historian.common.model.options.RawQueryKey;
 import com.inductiveautomation.historian.common.model.options.RawQueryOptions;
 import com.inductiveautomation.historian.gateway.api.query.AbstractQueryEngine;
 import com.inductiveautomation.historian.gateway.api.query.HistoricalNode;
 import com.inductiveautomation.historian.gateway.api.query.browsing.BrowsePublisher;
+import com.inductiveautomation.historian.gateway.api.query.processor.AggregatedPointProcessor;
 import com.inductiveautomation.historian.gateway.api.query.processor.DefaultProcessingContext;
 import com.inductiveautomation.historian.gateway.api.query.processor.ProcessingContext;
 import com.inductiveautomation.historian.gateway.api.query.processor.RawPointProcessor;
 import com.inductiveautomation.ignition.common.QualifiedPath;
 import com.inductiveautomation.ignition.common.browsing.BrowseFilter;
 import com.inductiveautomation.ignition.common.model.values.QualityCode;
+import com.inductiveautomation.ignition.common.sqltags.history.AggregationMode;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 
+import io.factry.historian.proto.Aggregation;
 import io.factry.historian.proto.Asset;
 import io.factry.historian.proto.Calculation;
 import io.factry.historian.proto.Measurement;
 import io.factry.historian.proto.MeasurementPoints;
 import io.factry.historian.proto.QueryPointsReply;
 import io.factry.historian.proto.QueryRawPointsRequest;
+import io.factry.historian.proto.QueryTimeSeriesRequest;
 
 import com.google.protobuf.util.Timestamps;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -38,6 +49,20 @@ import java.util.Optional;
 import java.util.Set;
 
 public class FactryQueryEngine extends AbstractQueryEngine {
+
+    private static final List<AggregationType> SUPPORTED_AGGREGATES = List.of(
+            LegacyAggregateAdapter.of(AggregationMode.Average),
+            LegacyAggregateAdapter.of(AggregationMode.SimpleAverage),
+            LegacyAggregateAdapter.of(AggregationMode.Minimum),
+            LegacyAggregateAdapter.of(AggregationMode.Maximum),
+            LegacyAggregateAdapter.of(AggregationMode.Sum),
+            LegacyAggregateAdapter.of(AggregationMode.Count),
+            LegacyAggregateAdapter.of(AggregationMode.LastValue),
+            LegacyAggregateAdapter.of(AggregationMode.Range),
+            LegacyAggregateAdapter.of(AggregationMode.Variance),
+            LegacyAggregateAdapter.of(AggregationMode.StdDev)
+    );
+
     private volatile FactryHistorianSettings settings;
     private final FactryGrpcClient grpcClient;
     private final MeasurementCache measurementCache;
@@ -270,6 +295,142 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             processor.onError(e);
             return Optional.empty();
         }
+    }
+
+    @Override
+    public Collection<AggregationType> getNativeAggregates() {
+        return SUPPORTED_AGGREGATES;
+    }
+
+    @Override
+    protected Optional<Integer> doQueryAggregated(AggregatedQueryOptions options, AggregatedPointProcessor processor) {
+        logger.info("Aggregated query request: " + options);
+
+        try {
+            ProcessingContext context =
+                    DefaultProcessingContext.builder().build();
+            if (!processor.onInitialize(context)) {
+                logger.warn("Processor rejected initialization for aggregated query");
+                return Optional.of(0);
+            }
+
+            TimeWindow timeWindow = options.getTimeWindow();
+            String period = timeWindowToPeriod(timeWindow);
+
+            var queryKeys = options.getQueryKeys();
+            int pointCount = 0;
+
+            for (AggregatedQueryKey key : queryKeys) {
+                QualifiedPath source = key.source();
+                String tagPath = toStoredTagPath(source);
+                String uuid = lookupUUID(tagPath);
+
+                if (uuid == null) {
+                    logger.warn("No measurement UUID found for aggregated query: " + tagPath);
+                    processor.onKeyFailure(key, QualityCode.Bad_NotFound);
+                    continue;
+                }
+
+                String factryFunction = toFactryAggregateFunction(key.aggregationType().name());
+
+                Aggregation aggregation = Aggregation.newBuilder()
+                        .setFunction(factryFunction)
+                        .setPeriod(period)
+                        .setFill("none")
+                        .build();
+
+                QueryTimeSeriesRequest.Builder reqBuilder = QueryTimeSeriesRequest.newBuilder()
+                        .addMeasurementUUIDs(uuid)
+                        .setAggregation(aggregation);
+
+                options.getTimeRange().ifPresent(tr -> {
+                    reqBuilder.setStartTime(Timestamps.fromMillis(tr.startTime().toEpochMilli()));
+                    reqBuilder.setEndTime(Timestamps.fromMillis(tr.endTime().toEpochMilli()));
+                });
+
+                try {
+                    QueryPointsReply reply = grpcClient.queryTimeSeries(reqBuilder.build());
+
+                    for (MeasurementPoints mp : reply.getMeasurementPointsList()) {
+                        for (var pt : mp.getPointsList()) {
+                            Instant timestamp = Instant.ofEpochSecond(
+                                    pt.getTimestamp().getSeconds(),
+                                    pt.getTimestamp().getNanos()
+                            );
+
+                            QualityCode quality = statusToQuality(pt.getStatus());
+                            Object value = protoValueToJava(pt.getValue());
+
+                            AggregatedDataPoint<Object, AggregationType> point =
+                                    AggregatedDataPoint.<Object, AggregationType>builder(
+                                            source, key.aggregationType())
+                                    .value(value)
+                                    .quality(quality)
+                                    .timestamp(timestamp)
+                                    .build();
+
+                            processor.onPointAvailable(key, point);
+                            pointCount++;
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.error("Error querying aggregated data for: " + tagPath, e);
+                    processor.onKeyFailure(key, QualityCode.Bad);
+                }
+            }
+
+            processor.onComplete();
+            logger.info("Aggregated query completed with " + pointCount + " points");
+            return Optional.of(pointCount);
+
+        } catch (Exception e) {
+            logger.error("Error in aggregated query", e);
+            processor.onError(e);
+            return Optional.empty();
+        }
+    }
+
+    private static String toFactryAggregateFunction(String name) {
+        switch (name) {
+            case "Average":
+            case "SimpleAverage":
+                return "mean";
+            case "Minimum":
+                return "min";
+            case "Maximum":
+                return "max";
+            case "Sum":
+                return "sum";
+            case "Count":
+                return "count";
+            case "LastValue":
+                return "last";
+            case "Range":
+                return "spread";
+            case "Variance":
+                return "variance";
+            case "StdDev":
+                return "stddev";
+            default:
+                return "mean";
+        }
+    }
+
+    private static String timeWindowToPeriod(TimeWindow tw) {
+        long totalSeconds = tw.toSeconds();
+        if (totalSeconds <= 0) {
+            return "PT1M";
+        }
+        if (totalSeconds % 86400 == 0) {
+            return "P" + (totalSeconds / 86400) + "D";
+        }
+        if (totalSeconds % 3600 == 0) {
+            return "PT" + (totalSeconds / 3600) + "H";
+        }
+        if (totalSeconds % 60 == 0) {
+            return "PT" + (totalSeconds / 60) + "M";
+        }
+        return "PT" + totalSeconds + "S";
     }
 
     @Override

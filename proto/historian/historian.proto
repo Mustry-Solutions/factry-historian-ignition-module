@@ -24,6 +24,7 @@ service Historian {
   rpc CreateMeasurements (CreateMeasurementsRequest) returns (CreateMeasurementsReply);
 
   rpc QueryRawPoints (QueryRawPointsRequest) returns (QueryPointsReply);
+  rpc QueryTimeSeries (QueryTimeSeriesRequest) returns (QueryPointsReply);
 
   rpc GetCalculations (CalculationRequest) returns (Calculations);
   rpc GetAssets (AssetRequest) returns (Assets);
@@ -261,6 +262,20 @@ message QueryRawPointsRequest {
   google.protobuf.Timestamp startTime = 2;
   google.protobuf.Timestamp endTime = 3;
   optional int32 limit = 4;
+}
+
+message Aggregation {
+  string function = 1;    // "mean", "min", "max", "sum", "count", "median", "integral"
+  string period = 2;      // ISO 8601 duration: "PT1H", "PT5M", "P1D"
+  string fill = 3;        // "none", "null", "previous", "linear", "zero"
+}
+
+message QueryTimeSeriesRequest {
+  repeated string measurementUUIDs = 1;
+  google.protobuf.Timestamp startTime = 2;
+  google.protobuf.Timestamp endTime = 3;
+  optional Aggregation aggregation = 4;
+  optional int32 limit = 5;
 }
 
 message QueryPointsReply {
