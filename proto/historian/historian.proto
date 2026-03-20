@@ -7,13 +7,17 @@ import "google/protobuf/struct.proto";
 option java_multiple_files = true;
 option java_package = "io.factry.historian.proto";
 option java_outer_classname = "HistorianProto";
-option go_package = "factry-historian-proxy/proto/historianpb";
+option go_package = "github.com/factrylabs/historian-proto/historian;historian";
 
 package proto;
+
+// https://developers.google.com/protocol-buffers/docs/proto3
 
 // The historian service definition.
 // CollectorUUID gets passed in the header
 service Historian {
+  // core collector functions
+
   rpc GetCollector (google.protobuf.Empty) returns (Collector);
   rpc RegisterCollector (RegisterCollectorSchema) returns (Collector);
 
@@ -22,12 +26,6 @@ service Historian {
 
   rpc GetMeasurements (MeasurementRequest) returns (Measurements);
   rpc CreateMeasurements (CreateMeasurementsRequest) returns (CreateMeasurementsReply);
-
-  rpc QueryRawPoints (QueryRawPointsRequest) returns (QueryPointsReply);
-  rpc QueryTimeSeries (QueryTimeSeriesRequest) returns (QueryPointsReply);
-
-  rpc GetCalculations (CalculationRequest) returns (Calculations);
-  rpc GetAssets (AssetRequest) returns (Assets);
 
   rpc CreateLogsStream (stream Logs) returns (CreateLogsReply);
   rpc CreateLogs (Logs) returns (CreateLogsReply);
@@ -43,6 +41,15 @@ service Historian {
   rpc MigrateSettings(MigrationRequest) returns (google.protobuf.Empty);
 
   rpc GetInfo (google.protobuf.Empty) returns (HistorianInfo);
+
+  // additional functions
+
+  rpc QueryTimeseries (QueryTimeseriesRequest) returns (QueryTimeseriesResponse);
+  rpc GetAssets (GetAssetsRequest) returns (Assets);
+  rpc GetAssetProperties (GetAssetPropertiesRequest) returns (AssetProperties);
+  rpc GetMeasurementsByFilter (GetMeasurementsByFilterRequest) returns (Measurements);
+  rpc GetCollectors (GetCollectorsRequest) returns (Collectors);
+  rpc GetTimeseriesDatabases (GetTimeseriesDatabasesRequest) returns (TimeseriesDatabases);
 }
 
 message CollectorHA {
@@ -111,35 +118,6 @@ message EngineeringSpecs {
   optional double valueMax = 3;
   optional double limitLo = 4;
   optional double limitHi = 5;
-}
-
-message Calculation {
-  string uuid = 1;
-  string name = 2;
-  string status = 3;
-  google.protobuf.Timestamp createdAt = 4;
-  string datatype = 5;
-  string expression = 6;
-}
-
-message CalculationRequest {}
-
-message Calculations {
-  repeated Calculation calculations = 1;
-}
-
-message Asset {
-  string uuid = 1;
-  string name = 2;
-  string status = 3;
-  google.protobuf.Timestamp createdAt = 4;
-  string datatype = 5;
-}
-
-message AssetRequest {}
-
-message Assets {
-  repeated Asset assets = 1;
 }
 
 message MeasurementRequest {
@@ -257,32 +235,146 @@ message HealthUpdate {
 
 message HealthUpdateReply {}
 
-message QueryRawPointsRequest {
-  repeated string measurementUUIDs = 1;
-  google.protobuf.Timestamp startTime = 2;
-  google.protobuf.Timestamp endTime = 3;
-  optional int32 limit = 4;
+message MeasurementByName {
+  string database = 1;
+  string measurement = 2;
+}
+
+message ValueFilter {
+  google.protobuf.Value value = 1;
+  string operator = 2; // see Factry Historian documentation for supported operators
+  optional string condition = 3; // see Factry Historian documentation for supported conditions
 }
 
 message Aggregation {
-  string function = 1;    // "mean", "min", "max", "sum", "count", "median", "integral"
-  string period = 2;      // ISO 8601 duration: "PT1H", "PT5M", "P1D"
-  string fill = 3;        // "none", "null", "previous", "linear", "zero"
+  string name = 1; // see Factry Historian documentation for supported aggregations
+  string period = 2;
+  string fillType = 3; // see Factry Historian documentation for supported fill types
+  repeated google.protobuf.Value arguments = 4;
 }
 
-message QueryTimeSeriesRequest {
-  repeated string measurementUUIDs = 1;
-  google.protobuf.Timestamp startTime = 2;
-  google.protobuf.Timestamp endTime = 3;
-  optional Aggregation aggregation = 4;
-  optional int32 limit = 5;
+message QueryTimeseriesRequest {
+  optional Aggregation aggregation = 1;
+  repeated string measurementUUIDs = 2;
+  repeated string assetPropertyUUIDs = 3;
+  repeated MeasurementByName measurements = 4;
+  google.protobuf.Timestamp start = 5;
+  optional google.protobuf.Timestamp end = 6;
+  optional google.protobuf.Struct tags = 7;
+  repeated string groupBy = 8;
+  optional int64 limit = 9;
+  optional int64 offset = 10;
+  optional bool desc = 11;
+  optional bool join = 12;
+  repeated ValueFilter valueFilters = 13;
+  optional bool onlyChanges = 14;
 }
 
-message QueryPointsReply {
-  repeated MeasurementPoints measurementPoints = 1;
+message SeriesPoint {
+  int64 timestamp = 1; // Unix timestamp in milliseconds since epoch (UTC)
+  google.protobuf.Value value = 2;
 }
 
-message MeasurementPoints {
-  string measurementUUID = 1;
-  repeated Point points = 2;
+message Series {
+  google.protobuf.Struct tags = 1;
+  string measurement = 2;
+  optional string measurementUUID = 3;
+  string datatype = 4;
+  string database = 5;
+  repeated string fields = 6;
+  repeated SeriesPoint dataPoints = 7;
+}
+
+message QueryTimeseriesResponse {
+  repeated Series series = 1;
+  optional google.protobuf.Struct attributes = 2;
+}
+
+message GetAssetsRequest {
+  optional string keyword = 1;
+  optional string path = 2;
+  repeated string parentUUIDs = 3;
+  repeated string uuids = 4;
+}
+
+message Asset {
+  string uuid = 1;
+  string name = 2;
+  string description = 3;
+  string parentUUID = 4;
+  string assetPath = 5;
+  google.protobuf.Struct attributes = 6;
+  google.protobuf.Struct metadata = 7;
+  google.protobuf.Timestamp createdAt = 8;
+  google.protobuf.Timestamp updatedAt = 9;
+}
+
+message Assets {
+  repeated Asset assets = 1;
+}
+
+message GetAssetPropertiesRequest {
+  repeated string assetUUIDs = 1;
+  bool recursive = 2;
+  optional string keyword = 3;
+  repeated string datatypes = 4;
+  repeated string uuids = 5;
+}
+
+message AssetProperty {
+  string uuid = 1;
+  string assetUUID = 2;
+  string measurementUUID = 3;
+  string name = 4;
+  string description = 5;
+  string datatype = 6;
+  google.protobuf.Struct attributes = 7;
+  google.protobuf.Struct metadata = 8;
+  google.protobuf.Timestamp createdAt = 9;
+  google.protobuf.Timestamp updatedAt = 10;
+}
+
+message AssetProperties {
+  repeated AssetProperty assetProperties = 1;
+}
+
+message GetMeasurementsByFilterRequest {
+  optional string keyword = 1;
+  optional string quality = 2;
+  repeated string statuses = 3;
+  repeated string labels = 4;
+  repeated string databaseUUIDs = 5;
+  repeated string collectorUUIDs = 6;
+  optional string assetUUID = 7;
+  repeated string datatypes = 8;
+  optional bool excludeCalculations = 9;
+  optional bool includeDependencies = 10;
+}
+
+message GetCollectorsRequest {
+  optional string keyword = 1;
+  repeated string statuses = 2;
+}
+
+message Collectors {
+  repeated Collector collectors = 1;
+}
+
+message GetTimeseriesDatabasesRequest {
+  optional string keyword = 1;
+}
+
+message TimeseriesDatabase {
+  string uuid = 1;
+  string name = 2;
+  string description = 3;
+  string status = 4;
+  google.protobuf.Struct attributes = 5;
+  google.protobuf.Struct metadata = 6;
+  google.protobuf.Timestamp createdAt = 7;
+  google.protobuf.Timestamp updatedAt = 8;
+}
+
+message TimeseriesDatabases {
+  repeated TimeseriesDatabase timeseriesDatabases = 1;
 }
