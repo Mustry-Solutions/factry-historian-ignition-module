@@ -44,7 +44,7 @@ func main() {
 	configPath := flag.String("config", "config.json", "Path to config.json")
 	startStr := flag.String("start", "", "Start time (RFC3339, default: 1 hour ago)")
 	endStr := flag.String("end", "", "End time (RFC3339, default: now)")
-	limit := flag.Int("limit", 100, "Max points per measurement")
+	limit := flag.Int64("limit", 100, "Max points per measurement")
 	uuid := flag.String("uuid", "", "Measurement UUID (overrides config)")
 	plaintext := flag.Bool("plaintext", false, "Use plaintext gRPC (no TLS) for fake server")
 	flag.Parse()
@@ -106,22 +106,24 @@ func main() {
 	log.Printf("Querying: uuid=%s, start=%s, end=%s, limit=%d",
 		measUUID, startTime.UTC().Format(time.RFC3339), endTime.UTC().Format(time.RFC3339), *limit)
 
-	resp, err := client.QueryRawPoints(ctx, &pb.QueryRawPointsRequest{
+	endTs := timestamppb.New(endTime)
+	resp, err := client.QueryTimeseries(ctx, &pb.QueryTimeseriesRequest{
 		MeasurementUUIDs: []string{measUUID},
-		StartTime:        timestamppb.New(startTime),
-		EndTime:          timestamppb.New(endTime),
-		Limit:            int32Ptr(int32(*limit)),
+		Start:            timestamppb.New(startTime),
+		End:              endTs,
+		Limit:            limit,
 	})
 	if err != nil {
-		log.Fatalf("QueryRawPoints failed: %v", err)
+		log.Fatalf("QueryTimeseries failed: %v", err)
 	}
 
-	for _, mp := range resp.GetMeasurementPoints() {
-		fmt.Printf("\nMeasurement: %s (%d points)\n", mp.GetMeasurementUUID(), len(mp.GetPoints()))
-		fmt.Printf("%-30s  %-20s  %s\n", "TIMESTAMP", "VALUE", "STATUS")
-		fmt.Println("------------------------------  --------------------  ------")
-		for _, pt := range mp.GetPoints() {
-			ts := pt.GetTimestamp().AsTime().UTC().Format("2006-01-02 15:04:05.000")
+	for _, series := range resp.GetSeries() {
+		fmt.Printf("\nMeasurement: %s (uuid=%s, %d points)\n",
+			series.GetMeasurement(), series.GetMeasurementUUID(), len(series.GetDataPoints()))
+		fmt.Printf("%-30s  %s\n", "TIMESTAMP", "VALUE")
+		fmt.Println("------------------------------  --------------------")
+		for _, pt := range series.GetDataPoints() {
+			ts := time.UnixMilli(pt.GetTimestamp()).UTC().Format("2006-01-02 15:04:05.000")
 			val := "<null>"
 			if pt.GetValue() != nil {
 				switch pt.GetValue().GetKind().(type) {
@@ -133,11 +135,7 @@ func main() {
 					val = pt.GetValue().GetStringValue()
 				}
 			}
-			fmt.Printf("%-30s  %-20s  %s\n", ts, val, pt.GetStatus())
+			fmt.Printf("%-30s  %s\n", ts, val)
 		}
 	}
-}
-
-func int32Ptr(v int32) *int32 {
-	return &v
 }
