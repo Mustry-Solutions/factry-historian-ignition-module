@@ -58,7 +58,8 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
                 settings.getGrpcPort(),
                 settings.getCollectorUUID(),
                 resolveToken(context, settings.getToken()),
-                settings.isUseTls()
+                settings.isUseTls(),
+                settings.isSkipTlsVerification()
         );
         this.measurementCache = new MeasurementCache();
 
@@ -203,7 +204,8 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
                     newSettings.getGrpcPort(),
                     newSettings.getCollectorUUID(),
                     resolveToken(context, newSettings.getToken()),
-                    newSettings.isUseTls()
+                    newSettings.isUseTls(),
+                    newSettings.isSkipTlsVerification()
             );
 
             // Refresh measurement cache from the new endpoint

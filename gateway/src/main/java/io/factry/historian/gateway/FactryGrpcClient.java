@@ -39,34 +39,11 @@ public class FactryGrpcClient {
     private volatile HistorianGrpc.HistorianBlockingStub blockingStub;
     private volatile boolean connected = true;
 
-    public FactryGrpcClient(String host, int port, String collectorUUID, String token, boolean useTls) {
-        if (useTls) {
-            try {
-                SslContext sslContext = GrpcSslContexts.forClient()
-                        .trustManager(InsecureTrustManagerFactory.INSTANCE)
-                        .build();
-
-                this.channel = NettyChannelBuilder.forAddress(host, port)
-                        .sslContext(sslContext)
-                        .build();
-            } catch (SSLException e) {
-                throw new RuntimeException("Failed to create TLS-enabled gRPC channel", e);
-            }
-        } else {
-            this.channel = NettyChannelBuilder.forAddress(host, port)
-                    .usePlaintext()
-                    .build();
-        }
-
-        Metadata headers = new Metadata();
-        headers.put(COLLECTOR_UUID_KEY, collectorUUID);
-        headers.put(AUTHORIZATION_KEY, "Bearer " + token);
-
-        this.blockingStub = HistorianGrpc.newBlockingStub(channel)
-                .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers));
-
+    public FactryGrpcClient(String host, int port, String collectorUUID, String token,
+                            boolean useTls, boolean skipTlsVerification) {
+        buildChannel(host, port, collectorUUID, token, useTls, skipTlsVerification);
         logger.info("gRPC client created ({}), target={}:{}, collectorUUID={}",
-                useTls ? "TLS" : "plaintext", host, port, collectorUUID);
+                tlsLabel(useTls, skipTlsVerification), host, port, collectorUUID);
     }
 
     public CreatePointsReply createPoints(Points points) {
@@ -110,17 +87,25 @@ public class FactryGrpcClient {
      * Reconfigure the client with new connection settings. Shuts down the old
      * gRPC channel and creates a new one.
      */
-    public void reconfigure(String host, int port, String collectorUUID, String token, boolean useTls) {
+    public void reconfigure(String host, int port, String collectorUUID, String token,
+                            boolean useTls, boolean skipTlsVerification) {
         logger.info("Reconfiguring gRPC client: {}:{}", host, port);
         shutdown();
+        buildChannel(host, port, collectorUUID, token, useTls, skipTlsVerification);
+        logger.info("gRPC client reconfigured ({}), target={}:{}, collectorUUID={}",
+                tlsLabel(useTls, skipTlsVerification), host, port, collectorUUID);
+    }
 
+    private void buildChannel(String host, int port, String collectorUUID, String token,
+                              boolean useTls, boolean skipTlsVerification) {
         if (useTls) {
             try {
-                SslContext sslContext = GrpcSslContexts.forClient()
-                        .trustManager(InsecureTrustManagerFactory.INSTANCE)
-                        .build();
+                var sslBuilder = GrpcSslContexts.forClient();
+                if (skipTlsVerification) {
+                    sslBuilder.trustManager(InsecureTrustManagerFactory.INSTANCE);
+                }
                 this.channel = NettyChannelBuilder.forAddress(host, port)
-                        .sslContext(sslContext)
+                        .sslContext(sslBuilder.build())
                         .build();
             } catch (SSLException e) {
                 throw new RuntimeException("Failed to create TLS-enabled gRPC channel", e);
@@ -137,9 +122,11 @@ public class FactryGrpcClient {
 
         this.blockingStub = HistorianGrpc.newBlockingStub(channel)
                 .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers));
+    }
 
-        logger.info("gRPC client reconfigured ({}), target={}:{}, collectorUUID={}",
-                useTls ? "TLS" : "plaintext", host, port, collectorUUID);
+    private static String tlsLabel(boolean useTls, boolean skipTlsVerification) {
+        if (!useTls) return "plaintext";
+        return skipTlsVerification ? "TLS (insecure)" : "TLS";
     }
 
     public void shutdown() {

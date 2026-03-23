@@ -12,6 +12,7 @@ public class FactryHistorianSettings implements HistorianSettings {
     private int grpcPort = 9876;
     private boolean debugLogging = false;
     private boolean useTls = false;
+    private boolean skipTlsVerification = false;
     private SecretConfig token;
 
     /**
@@ -79,6 +80,14 @@ public class FactryHistorianSettings implements HistorianSettings {
         this.useTls = useTls;
     }
 
+    public boolean isSkipTlsVerification() {
+        return skipTlsVerification;
+    }
+
+    public void setSkipTlsVerification(boolean skipTlsVerification) {
+        this.skipTlsVerification = skipTlsVerification;
+    }
+
     public SecretConfig getToken() {
         return token;
     }
@@ -105,6 +114,7 @@ public class FactryHistorianSettings implements HistorianSettings {
                 ", batchIntervalMs=" + batchIntervalMs +
                 ", debugLogging=" + debugLogging +
                 ", useTls=" + useTls +
+                ", skipTlsVerification=" + skipTlsVerification +
                 ", storeAndForwardEngine='" + storeAndForwardEngine + '\'' +
                 '}';
     }

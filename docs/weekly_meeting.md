@@ -129,3 +129,13 @@ Other questions
       - send integer first, try to send float
       - change to discrete, is the last point immediatly send
     -   
+
+30/03/2026
+
+Question:
+
+  - tsl certificatie 
+     If publicly-signed: nothing to do
+     If self-signed/internal CA: we'd need a setting for the user to provide a CA  
+  certificate path.
+                     

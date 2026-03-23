@@ -61,6 +61,13 @@ public record FactryHistorianConfig(
         @Description("Use TLS for gRPC connection. Disable for plaintext connections (e.g. local test servers).")
         boolean useTls,
 
+        @FormCategory("Connection")
+        @Label("Skip TLS Verification")
+        @FormField(FormFieldType.CHECKBOX)
+        @DefaultValue("false")
+        @Description("Disable TLS certificate verification. Use only for testing with self-signed certificates.")
+        boolean skipTlsVerification,
+
         @FormCategory("Advanced")
         @Label("Debug Logging")
         @FormField(FormFieldType.CHECKBOX)
@@ -82,6 +89,7 @@ public record FactryHistorianConfig(
         settings.setGrpcHost(grpcHost);
         settings.setGrpcPort(grpcPort);
         settings.setUseTls(useTls);
+        settings.setSkipTlsVerification(skipTlsVerification);
         settings.setBatchSize(batchSize);
         settings.setBatchIntervalMs(batchIntervalMs);
         settings.setDebugLogging(debugLogging);
@@ -98,6 +106,7 @@ public record FactryHistorianConfig(
                 settings.getBatchSize(),
                 settings.getBatchIntervalMs(),
                 settings.isUseTls(),
+                settings.isSkipTlsVerification(),
                 settings.isDebugLogging(),
                 settings.getStoreAndForwardEngine()
         );
