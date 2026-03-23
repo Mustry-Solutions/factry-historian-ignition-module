@@ -227,6 +227,16 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
 
     private void retryQuarantinedData(String engineName) {
         try {
+            // Test connection and re-enable forwarding if the server is back
+            if (!grpcClient.isConnected()) {
+                if (grpcClient.testConnection()) {
+                    logger.info("Factry server is reachable again, re-enabling S&F forwarding");
+                } else {
+                    logger.debug("Factry server still unreachable, S&F will keep buffering");
+                    return;
+                }
+            }
+
             Optional<QuarantineInterface<?>> qi =
                     context.getStoreAndForwardManager().getQuarantineInterface(engineName);
             if (qi.isPresent()) {

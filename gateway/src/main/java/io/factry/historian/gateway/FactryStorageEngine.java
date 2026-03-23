@@ -114,10 +114,12 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
     @Override
     protected boolean isEngineUnavailable() {
-        // Always return false so S&F attempts the actual write via doStoreAtomic().
-        // If the gRPC server is unreachable, doStoreAtomic returns StorageResult.exception()
-        // which triggers S&F retry. Returning true here would cause premature quarantine.
-        return false;
+        // When the gRPC connection is down, return true so S&F buffers points
+        // in the pending queue without attempting the call. This prevents data loss
+        // during the timeout window and avoids unnecessary quarantine.
+        // The connection is marked as available again on the next successful gRPC call
+        // or via the periodic connection test in FactryHistoryProvider.getStatus().
+        return !grpcClient.isConnected();
     }
 
     void updateSettings(FactryHistorianSettings newSettings) {
