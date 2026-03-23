@@ -22,15 +22,18 @@ This starts:
 5. Click **Generate Token** and **copy the token** — you'll need it in step 4
 6. Note the **Collector ID** shown on the collector detail page
 
-## 3. Build and install the module
+## 3. Download and install the module
+
+1. Go to the **Releases** page of the GitHub repository
+2. Download the latest `Factry-Historian.modl` file
+3. Copy the module into the Ignition modules directory and restart:
 
 ```bash
-./gradlew clean build
-cp build/Factry-Historian.modl ignition/data/modules/
+cp Factry-Historian.modl ignition/data/modules/
 docker-compose restart ignition
 ```
 
-On first install, go to **Config > System > Modules** and accept the **Mustry Solution** certificate.
+4. On first install, go to **Config > System > Modules** and accept the **Mustry Solution** certificate.
 
 ## 4. Create a Historian in Ignition
 
