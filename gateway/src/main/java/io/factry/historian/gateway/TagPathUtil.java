@@ -12,7 +12,6 @@ package io.factry.historian.gateway;
 final class TagPathUtil {
 
     static final String CATEGORY_MEASUREMENTS = "Measurements";
-    static final String CATEGORY_CALCULATIONS = "Calculations";
     static final String CATEGORY_ASSETS = "Assets";
 
     private TagPathUtil() {}
@@ -55,35 +54,58 @@ final class TagPathUtil {
 
     /**
      * Convert a QualifiedPath string to the stored tag_path format.
-     * Handles both direct paths ({@code sys:/prov:/tag:}) and browse-originated
-     * paths ({@code histprov:xxx:/tag:SysName/ProvName/TagPath}).
+     * Handles multiple input formats:
+     * <ul>
+     *   <li>Direct query: {@code sys:X:/prov:Y:/tag:Z} → {@code X:[Y]Z}</li>
+     *   <li>Browse with folders: {@code histprov:xxx:/folder:A:/folder:B:/tag:C} → {@code A/B/C}</li>
+     *   <li>Browse without folders (legacy): {@code histprov:xxx:/tag:Sys/Prov/Tag} → {@code Sys:[Prov]Tag}</li>
+     *   <li>Category-prefixed: {@code histprov:xxx:/tag:Measurements/...} or {@code /folder:Measurements:/...}</li>
+     * </ul>
      *
      * @param qualifiedPathStr the QualifiedPath.toString() result
-     * @return the stored path, e.g. {@code "Ignition-abc:[default]Temperature"}
+     * @return the stored path or its normalized display-form equivalent
      */
     static String qualifiedPathToStoredPath(String qualifiedPathStr) {
         String sys = extractComponent(qualifiedPathStr, "sys:");
         String prov = extractComponent(qualifiedPathStr, "prov:");
         String tag = extractComponent(qualifiedPathStr, "tag:");
 
-        // Direct query with sys/prov/tag components
+        // 1. Direct query with explicit sys/prov/tag components
         if (sys != null && tag != null) {
             return buildStoredPath(sys, prov, tag);
         }
 
-        // Browse-originated: "histprov:xxx:/tag:Category/..."
         if (tag != null) {
+            // 2. Browse-originated with folder: components
+            //    Reconstruct the display-form path from folders + tag leaf.
+            String folderPrefix = parseFolderPrefix(qualifiedPathStr);
+            if (!folderPrefix.isEmpty()) {
+                // Strip category prefix from folders if present
+                // (e.g. "Measurements/Ignition-abc/default/" → "Ignition-abc/default/")
+                String strippedPrefix = stripCategory(folderPrefix);
+                if (strippedPrefix.length() < folderPrefix.length()) {
+                    // Category was present in folders
+                    String category = extractCategory(folderPrefix);
+                    if (CATEGORY_ASSETS.equals(category)) {
+                        return strippedPrefix + tag;
+                    }
+                    folderPrefix = strippedPrefix;
+                }
+                return folderPrefix + tag;
+            }
+
+            // 3. Browse-originated without folders (legacy format)
+            //    Handle category prefixes in the tag component
             String category = extractCategory(tag);
             if (category != null) {
                 String stripped = stripCategory(tag);
-                if (CATEGORY_CALCULATIONS.equals(category) || CATEGORY_ASSETS.equals(category)) {
-                    // Calculations and Assets use their name directly (no sys:[prov] conversion)
+                if (CATEGORY_ASSETS.equals(category)) {
                     return stripped;
                 }
-                // Measurements: strip category prefix, then apply existing sys/prov/tag conversion
                 tag = stripped;
             }
 
+            // 4. Legacy: infer sys/prov from first two path levels
             int firstSlash = tag.indexOf('/');
             if (firstSlash >= 0) {
                 String sysName = tag.substring(0, firstSlash);
@@ -102,11 +124,15 @@ final class TagPathUtil {
 
     /**
      * Convert a stored path to a slash-separated display path for the browse tree.
-     * <p>
-     * {@code "Ignition-xxx:[default]FactrySim/ii2"}
-     * → {@code "Ignition-xxx/default/FactrySim/ii2"}
+     * Handles multiple formats:
+     * <ul>
+     *   <li>Standard: {@code "Ignition-xxx:[default]FactrySim/ii2"} → {@code "Ignition-xxx/default/FactrySim/ii2"}</li>
+     *   <li>QualifiedPath: {@code "prov:default:/tag:Simulation/Pressure"} → {@code "default/Simulation/Pressure"}</li>
+     *   <li>Plain slash-separated: {@code "a/b/c/d"} → {@code "a/b/c/d"} (passthrough)</li>
+     * </ul>
      */
     static String storedPathToDisplayPath(String storedPath) {
+        // 1. Standard format: sys:[prov]tag
         int colonIdx = storedPath.indexOf(":[");
         if (colonIdx >= 0) {
             String sys = storedPath.substring(0, colonIdx);
@@ -117,6 +143,24 @@ final class TagPathUtil {
                 return sys + "/" + prov + "/" + tag;
             }
         }
+
+        // 2. QualifiedPath component format: contains ":/" separators
+        //    e.g. "prov:default:/tag:Simulation/Pressure" → "default/Simulation/Pressure"
+        //    Strips component type prefixes (sys:, prov:, tag:, etc.) and joins values.
+        if (storedPath.contains(":/")) {
+            StringBuilder display = new StringBuilder();
+            for (String segment : storedPath.split(":/")) {
+                int colonPos = segment.indexOf(':');
+                String value = colonPos >= 0 ? segment.substring(colonPos + 1) : segment;
+                if (!value.isEmpty()) {
+                    if (display.length() > 0) display.append("/");
+                    display.append(value);
+                }
+            }
+            if (display.length() > 0) return display.toString();
+        }
+
+        // 3. Fallback: already /-separated or plain text
         return storedPath;
     }
 
@@ -128,9 +172,6 @@ final class TagPathUtil {
         if (displayPath == null) return null;
         if (displayPath.startsWith(CATEGORY_MEASUREMENTS + "/") || displayPath.equals(CATEGORY_MEASUREMENTS)) {
             return CATEGORY_MEASUREMENTS;
-        }
-        if (displayPath.startsWith(CATEGORY_CALCULATIONS + "/") || displayPath.equals(CATEGORY_CALCULATIONS)) {
-            return CATEGORY_CALCULATIONS;
         }
         if (displayPath.startsWith(CATEGORY_ASSETS + "/") || displayPath.equals(CATEGORY_ASSETS)) {
             return CATEGORY_ASSETS;

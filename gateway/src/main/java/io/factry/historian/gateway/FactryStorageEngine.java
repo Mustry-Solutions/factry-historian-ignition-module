@@ -4,6 +4,7 @@ import com.inductiveautomation.historian.gateway.api.storage.AbstractStorageEngi
 import com.inductiveautomation.historian.gateway.api.paths.QualifiedPathAdapter;
 import com.inductiveautomation.historian.gateway.api.storage.strategy.ImmediateStorageStrategy;
 import com.inductiveautomation.historian.common.model.data.AtomicPoint;
+import com.inductiveautomation.historian.common.model.data.MetadataPoint;
 import com.inductiveautomation.historian.common.model.data.SourceChangePoint;
 import com.inductiveautomation.historian.common.model.data.StorageResult;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
@@ -107,6 +108,14 @@ public class FactryStorageEngine extends AbstractStorageEngine {
             logger.error("Error storing atomic points via gRPC", e);
             return StorageResult.exception(e, points);
         }
+    }
+
+    @Override
+    protected StorageResult<MetadataPoint> doStoreMetadata(List<MetadataPoint> metadataPoints) {
+        // Metadata is managed by the Factry platform, not by this collector.
+        // Acknowledge the points without storing — metadata lives in Factry's database.
+        logger.debug("doStoreMetadata called with " + metadataPoints.size() + " points (no-op for Factry)");
+        return StorageResult.success(metadataPoints);
     }
 
     @Override
