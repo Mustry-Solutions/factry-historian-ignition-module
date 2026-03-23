@@ -13,6 +13,8 @@ import io.factry.historian.proto.QueryTimeseriesRequest;
 import io.factry.historian.proto.QueryTimeseriesResponse;
 import io.grpc.ManagedChannel;
 import io.grpc.Metadata;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import io.grpc.netty.shaded.io.grpc.netty.GrpcSslContexts;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext;
@@ -75,8 +77,11 @@ public class FactryGrpcClient {
                     .createPoints(points);
             connected = true;
             return reply;
-        } catch (Exception e) {
-            connected = false;
+        } catch (StatusRuntimeException e) {
+            Status.Code code = e.getStatus().getCode();
+            if (code == Status.Code.UNAVAILABLE || code == Status.Code.DEADLINE_EXCEEDED) {
+                connected = false;
+            }
             throw e;
         }
     }
