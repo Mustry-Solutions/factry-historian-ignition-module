@@ -65,3 +65,8 @@ Questions:
   - wait for the protobuf or go further? 
 
 # 23/03/2026
+
+
+Question:
+  - what should happen if the tag is removed? should we remove the measurements? 
+  - what does the calculation collector mean

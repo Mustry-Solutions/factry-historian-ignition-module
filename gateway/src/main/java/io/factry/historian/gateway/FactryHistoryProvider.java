@@ -33,13 +33,18 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
     private final GatewayContext context;
     private final FactryQueryEngine queryEngine;
     private final FactryStorageEngine storageEngine;
-    private final FactryHistorianSettings settings;
+    private volatile FactryHistorianSettings settings;
     private final FactryGrpcClient grpcClient;
     private final MeasurementCache measurementCache;
 
     private TagHistoryStorageEngineBridge storageBridge;
     private TagHistoryDataSinkBridge dataSinkBridge;
     private ScheduledExecutorService quarantineRetryExecutor;
+
+    /** Cached status to avoid hitting gRPC on every gateway UI poll. */
+    private volatile ProfileStatus cachedStatus = ProfileStatus.UNKNOWN;
+    private volatile long statusCheckedAt = 0;
+    private static final long STATUS_CACHE_MS = 30_000; // 30 seconds
 
     public FactryHistoryProvider(GatewayContext context, String historianName, FactryHistorianSettings settings) {
         super(context, historianName);
@@ -165,19 +170,59 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
 
     @Override
     public boolean handleNameChange(String newName) {
-        logger.info("Historian name change requested: {} -> {}", historianName, newName);
+        logger.info("Historian name changed: {} -> {}", historianName, newName);
+        // Measurement names in Factry don't contain the historian profile name,
+        // so no data migration is needed.
+        // The framework updates the historianName field in AbstractHistorian.
         return true;
     }
 
     @Override
     public boolean handleSettingsChange(FactryHistorianSettings newSettings) {
-        logger.info("Historian settings change requested: {} -> {}", settings, newSettings);
-        return true;
+        logger.info("Historian settings change: {}", newSettings);
+
+        try {
+            // Reconfigure the gRPC client (shuts down old channel, creates new one)
+            grpcClient.reconfigure(
+                    newSettings.getGrpcHost(),
+                    newSettings.getGrpcPort(),
+                    newSettings.getCollectorUUID(),
+                    resolveToken(context, newSettings.getToken()),
+                    newSettings.isUseTls()
+            );
+
+            // Refresh measurement cache from the new endpoint
+            measurementCache.refresh(grpcClient);
+
+            // Update settings references in the engines
+            queryEngine.updateSettings(newSettings);
+            storageEngine.updateSettings(newSettings);
+            this.settings = newSettings;
+
+            logger.info("Settings change applied successfully");
+            return true;
+        } catch (Exception e) {
+            logger.error("Failed to apply settings change", e);
+            return false;
+        }
     }
 
     @Override
     public ProfileStatus getStatus() {
-        return started ? ProfileStatus.RUNNING : ProfileStatus.UNKNOWN;
+        if (!started) {
+            return ProfileStatus.UNKNOWN;
+        }
+
+        long now = System.currentTimeMillis();
+        if (now - statusCheckedAt < STATUS_CACHE_MS) {
+            return cachedStatus;
+        }
+
+        statusCheckedAt = now;
+        cachedStatus = grpcClient.testConnection()
+                ? ProfileStatus.RUNNING
+                : ProfileStatus.ERRORED;
+        return cachedStatus;
     }
 
     private void retryQuarantinedData(String engineName) {

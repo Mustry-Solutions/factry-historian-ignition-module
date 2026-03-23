@@ -17,7 +17,7 @@ import io.factry.historian.proto.Points;
 import java.util.List;
 
 public class FactryStorageEngine extends AbstractStorageEngine {
-    private final FactryHistorianSettings settings;
+    private volatile FactryHistorianSettings settings;
     private final FactryGrpcClient grpcClient;
     private final MeasurementCache measurementCache;
 
@@ -106,7 +106,9 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
     @Override
     protected StorageResult<SourceChangePoint> applySourceChanges(List<SourceChangePoint> changes) {
-        logger.debug("applySourceChanges called with " + changes.size() + " changes");
+        // Measurement lifecycle is managed by the Factry platform, not by this collector.
+        // No retirement action needed — just acknowledge the changes.
+        logger.debug("applySourceChanges called with " + changes.size() + " changes (no-op for Factry)");
         return StorageResult.success(changes);
     }
 
@@ -116,6 +118,10 @@ public class FactryStorageEngine extends AbstractStorageEngine {
         // If the gRPC server is unreachable, doStoreAtomic returns StorageResult.exception()
         // which triggers S&F retry. Returning true here would cause premature quarantine.
         return false;
+    }
+
+    void updateSettings(FactryHistorianSettings newSettings) {
+        this.settings = newSettings;
     }
 
     public void shutdown() {
