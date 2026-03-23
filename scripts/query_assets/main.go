@@ -70,16 +70,16 @@ func main() {
 		"authorization", "Bearer "+cfg.Token,
 	)
 
-	resp, err := client.GetAssets(ctx, &pb.AssetRequest{})
+	resp, err := client.GetAssets(ctx, &pb.GetAssetsRequest{})
 	if err != nil {
 		log.Fatalf("GetAssets failed: %v", err)
 	}
 
-	fmt.Printf("%-40s  %-30s  %-8s  %s\n", "UUID", "NAME", "STATUS", "DATATYPE")
-	fmt.Println("----------------------------------------  ------------------------------  --------  --------")
+	fmt.Printf("%-40s  %-30s  %-40s  %s\n", "UUID", "NAME", "PATH", "DESCRIPTION")
+	fmt.Println("----------------------------------------  ------------------------------  ----------------------------------------  -----------")
 	for _, a := range resp.GetAssets() {
-		fmt.Printf("%-40s  %-30s  %-8s  %s\n",
-			a.GetUuid(), a.GetName(), a.GetStatus(), a.GetDatatype())
+		fmt.Printf("%-40s  %-30s  %-40s  %s\n",
+			a.GetUuid(), a.GetName(), a.GetAssetPath(), a.GetDescription())
 	}
 	fmt.Printf("\nTotal: %d assets\n", len(resp.GetAssets()))
 }

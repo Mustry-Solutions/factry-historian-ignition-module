@@ -4,12 +4,15 @@ import com.inductiveautomation.historian.gateway.api.storage.AbstractStorageEngi
 import com.inductiveautomation.historian.gateway.api.paths.QualifiedPathAdapter;
 import com.inductiveautomation.historian.gateway.api.storage.strategy.ImmediateStorageStrategy;
 import com.inductiveautomation.historian.common.model.data.AtomicPoint;
+import com.inductiveautomation.historian.common.model.data.MetadataPoint;
 import com.inductiveautomation.historian.common.model.data.SourceChangePoint;
 import com.inductiveautomation.historian.common.model.data.StorageResult;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 
 import com.google.protobuf.util.Timestamps;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import com.google.protobuf.Value;
 import io.factry.historian.proto.Point;
 import io.factry.historian.proto.Points;
@@ -102,11 +105,29 @@ public class FactryStorageEngine extends AbstractStorageEngine {
             }
             return StorageResult.success(points);
 
+        } catch (StatusRuntimeException e) {
+            metrics.recordStoreError();
+            Status.Code code = e.getStatus().getCode();
+            if (code == Status.Code.UNAVAILABLE || code == Status.Code.DEADLINE_EXCEEDED) {
+                logger.warn("Connection error storing points, S&F will retry: " + e.getMessage());
+                return StorageResult.exception(e, points);
+            }
+            // Server rejected the data (e.g. INVALID_ARGUMENT) — quarantine, don't retry
+            logger.error("Server rejected points (" + code + "): " + e.getMessage());
+            return StorageResult.failure(points);
         } catch (Exception e) {
             metrics.recordStoreError();
-            logger.error("Error storing atomic points via gRPC", e);
+            logger.error("Unexpected error storing points via gRPC", e);
             return StorageResult.exception(e, points);
         }
+    }
+
+    @Override
+    protected StorageResult<MetadataPoint> doStoreMetadata(List<MetadataPoint> metadataPoints) {
+        // Metadata is managed by the Factry platform, not by this collector.
+        // Acknowledge the points without storing — metadata lives in Factry's database.
+        logger.debug("doStoreMetadata called with " + metadataPoints.size() + " points (no-op for Factry)");
+        return StorageResult.success(metadataPoints);
     }
 
     @Override

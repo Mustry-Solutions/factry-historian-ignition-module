@@ -1,21 +1,20 @@
 package io.factry.historian.gateway;
 
-import io.factry.historian.proto.AssetRequest;
 import io.factry.historian.proto.Assets;
-import io.factry.historian.proto.CalculationRequest;
-import io.factry.historian.proto.Calculations;
 import io.factry.historian.proto.CreateMeasurementsReply;
 import io.factry.historian.proto.CreateMeasurementsRequest;
 import io.factry.historian.proto.CreatePointsReply;
+import io.factry.historian.proto.GetAssetsRequest;
 import io.factry.historian.proto.HistorianGrpc;
 import io.factry.historian.proto.MeasurementRequest;
 import io.factry.historian.proto.Measurements;
 import io.factry.historian.proto.Points;
-import io.factry.historian.proto.QueryPointsReply;
-import io.factry.historian.proto.QueryRawPointsRequest;
-import io.factry.historian.proto.QueryTimeSeriesRequest;
+import io.factry.historian.proto.QueryTimeseriesRequest;
+import io.factry.historian.proto.QueryTimeseriesResponse;
 import io.grpc.ManagedChannel;
 import io.grpc.Metadata;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import io.grpc.netty.shaded.io.grpc.netty.GrpcSslContexts;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext;
@@ -78,8 +77,11 @@ public class FactryGrpcClient {
                     .createPoints(points);
             connected = true;
             return reply;
-        } catch (Exception e) {
-            connected = false;
+        } catch (StatusRuntimeException e) {
+            Status.Code code = e.getStatus().getCode();
+            if (code == Status.Code.UNAVAILABLE || code == Status.Code.DEADLINE_EXCEEDED) {
+                connected = false;
+            }
             throw e;
         }
     }
@@ -89,24 +91,14 @@ public class FactryGrpcClient {
         return blockingStub.getMeasurements(request);
     }
 
-    public QueryPointsReply queryRawPoints(QueryRawPointsRequest request) {
-        logger.debug("Sending QueryRawPoints for {} measurements", request.getMeasurementUUIDsCount());
-        return blockingStub.queryRawPoints(request);
-    }
-
-    public QueryPointsReply queryTimeSeries(QueryTimeSeriesRequest request) {
-        logger.debug("Sending QueryTimeSeries for {} measurements", request.getMeasurementUUIDsCount());
-        return blockingStub.queryTimeSeries(request);
-    }
-
-    public Calculations getCalculations() {
-        logger.debug("Sending GetCalculations");
-        return blockingStub.getCalculations(CalculationRequest.newBuilder().build());
+    public QueryTimeseriesResponse queryTimeseries(QueryTimeseriesRequest request) {
+        logger.debug("Sending QueryTimeseries for {} measurements", request.getMeasurementUUIDsCount());
+        return blockingStub.queryTimeseries(request);
     }
 
     public Assets getAssets() {
         logger.debug("Sending GetAssets");
-        return blockingStub.getAssets(AssetRequest.newBuilder().build());
+        return blockingStub.getAssets(GetAssetsRequest.newBuilder().build());
     }
 
     public CreateMeasurementsReply createMeasurements(CreateMeasurementsRequest request) {

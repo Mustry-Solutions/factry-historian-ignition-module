@@ -8,8 +8,11 @@ import com.inductiveautomation.historian.common.model.data.AggregatedDataPoint;
 import com.inductiveautomation.historian.common.model.data.AtomicPoint;
 import com.inductiveautomation.historian.common.model.data.DataPointFactory;
 import com.inductiveautomation.historian.common.model.data.DataPointType;
+import com.inductiveautomation.historian.common.model.data.MetadataPoint;
 import com.inductiveautomation.historian.common.model.options.AggregatedQueryKey;
 import com.inductiveautomation.historian.common.model.options.AggregatedQueryOptions;
+import com.inductiveautomation.historian.common.model.options.MetadataQueryKey;
+import com.inductiveautomation.historian.common.model.options.MetadataQueryOptions;
 import com.inductiveautomation.historian.common.model.options.RawQueryKey;
 import com.inductiveautomation.historian.common.model.options.RawQueryOptions;
 import com.inductiveautomation.historian.gateway.api.query.AbstractQueryEngine;
@@ -17,10 +20,14 @@ import com.inductiveautomation.historian.gateway.api.query.HistoricalNode;
 import com.inductiveautomation.historian.gateway.api.query.browsing.BrowsePublisher;
 import com.inductiveautomation.historian.gateway.api.query.processor.AggregatedPointProcessor;
 import com.inductiveautomation.historian.gateway.api.query.processor.DefaultProcessingContext;
+import com.inductiveautomation.historian.gateway.api.query.processor.MetadataPointProcessor;
 import com.inductiveautomation.historian.gateway.api.query.processor.ProcessingContext;
 import com.inductiveautomation.historian.gateway.api.query.processor.RawPointProcessor;
 import com.inductiveautomation.ignition.common.QualifiedPath;
 import com.inductiveautomation.ignition.common.browsing.BrowseFilter;
+import com.inductiveautomation.ignition.common.config.BasicProperty;
+import com.inductiveautomation.ignition.common.config.BasicPropertySet;
+import com.inductiveautomation.ignition.common.config.PropertySet;
 import com.inductiveautomation.ignition.common.model.values.QualityCode;
 import com.inductiveautomation.ignition.common.sqltags.history.AggregationMode;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
@@ -28,12 +35,11 @@ import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 
 import io.factry.historian.proto.Aggregation;
 import io.factry.historian.proto.Asset;
-import io.factry.historian.proto.Calculation;
 import io.factry.historian.proto.Measurement;
-import io.factry.historian.proto.MeasurementPoints;
-import io.factry.historian.proto.QueryPointsReply;
-import io.factry.historian.proto.QueryRawPointsRequest;
-import io.factry.historian.proto.QueryTimeSeriesRequest;
+import io.factry.historian.proto.QueryTimeseriesRequest;
+import io.factry.historian.proto.QueryTimeseriesResponse;
+import io.factry.historian.proto.Series;
+import io.factry.historian.proto.SeriesPoint;
 
 import com.google.protobuf.util.Timestamps;
 
@@ -97,11 +103,10 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             String category = TagPathUtil.extractCategory(prefix);
 
             if (prefix.isEmpty()) {
-                // Root level: show three category folders
+                // Root level: show two category folders
                 publisher.newNode("folder", TagPathUtil.CATEGORY_MEASUREMENTS).hasChildren(true).add();
-                publisher.newNode("folder", TagPathUtil.CATEGORY_CALCULATIONS).hasChildren(true).add();
                 publisher.newNode("folder", TagPathUtil.CATEGORY_ASSETS).hasChildren(true).add();
-                logger.info("Browse: published 3 category folders at root");
+                logger.info("Browse: published 2 category folders at root");
                 return;
             }
 
@@ -112,17 +117,6 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     measPrefix += "/";
                 }
                 browsePaths(collectMeasurementDisplayPaths(), measPrefix, publisher);
-            } else if (TagPathUtil.CATEGORY_CALCULATIONS.equals(category)) {
-                // Calculations: flat list of names
-                String calcPrefix = TagPathUtil.stripCategory(prefix);
-                if (!calcPrefix.isEmpty() && !calcPrefix.endsWith("/")) {
-                    calcPrefix += "/";
-                }
-                List<String> calcNames = new ArrayList<>();
-                for (Calculation c : measurementCache.getAllCalculations()) {
-                    calcNames.add(c.getName());
-                }
-                browsePaths(calcNames, calcPrefix, publisher);
             } else if (TagPathUtil.CATEGORY_ASSETS.equals(category)) {
                 // Assets: hierarchical by "/" in name
                 String assetPrefix = TagPathUtil.stripCategory(prefix);
@@ -250,37 +244,33 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 return Optional.of(0);
             }
 
-            // Build gRPC request
-            QueryRawPointsRequest.Builder reqBuilder = QueryRawPointsRequest.newBuilder()
+            // Build gRPC request using QueryTimeseries (no aggregation = raw)
+            QueryTimeseriesRequest.Builder reqBuilder = QueryTimeseriesRequest.newBuilder()
                     .addAllMeasurementUUIDs(measurementUUIDs);
 
             options.getTimeRange().ifPresent(tr -> {
-                reqBuilder.setStartTime(Timestamps.fromMillis(tr.startTime().toEpochMilli()));
-                reqBuilder.setEndTime(Timestamps.fromMillis(tr.endTime().toEpochMilli()));
+                reqBuilder.setStart(Timestamps.fromMillis(tr.startTime().toEpochMilli()));
+                reqBuilder.setEnd(Timestamps.fromMillis(tr.endTime().toEpochMilli()));
             });
 
-            QueryPointsReply reply = grpcClient.queryRawPoints(reqBuilder.build());
+            QueryTimeseriesResponse reply = grpcClient.queryTimeseries(reqBuilder.build());
 
             int totalPoints = 0;
-            for (MeasurementPoints mp : reply.getMeasurementPointsList()) {
-                RawQueryKey key = uuidToKeyMap.get(mp.getMeasurementUUID());
+            for (Series series : reply.getSeriesList()) {
+                String uuid = series.hasMeasurementUUID() ? series.getMeasurementUUID() : "";
+                RawQueryKey key = uuidToKeyMap.get(uuid);
                 if (key == null) {
                     continue;
                 }
 
                 QualifiedPath path = key.source();
 
-                for (var pt : mp.getPointsList()) {
-                    Instant timestamp = Instant.ofEpochSecond(
-                            pt.getTimestamp().getSeconds(),
-                            pt.getTimestamp().getNanos()
-                    );
-
-                    QualityCode quality = statusToQuality(pt.getStatus());
+                for (SeriesPoint pt : series.getDataPointsList()) {
+                    Instant timestamp = Instant.ofEpochMilli(pt.getTimestamp());
                     Object value = protoValueToJava(pt.getValue());
 
                     AtomicPoint<?> atomicPoint = DataPointFactory.createAtomicPoint(
-                            value, quality, timestamp, path);
+                            value, QualityCode.Good, timestamp, path);
 
                     if (!processor.onPointAvailable(key, atomicPoint)) {
                         processor.onComplete();
@@ -340,31 +330,28 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 String factryFunction = toFactryAggregateFunction(key.aggregationType().name());
 
                 Aggregation aggregation = Aggregation.newBuilder()
-                        .setFunction(factryFunction)
+                        .setName(factryFunction)
                         .setPeriod(period)
-                        .setFill("none")
+                        .setFillType("none")
                         .build();
 
-                QueryTimeSeriesRequest.Builder reqBuilder = QueryTimeSeriesRequest.newBuilder()
+                QueryTimeseriesRequest.Builder reqBuilder = QueryTimeseriesRequest.newBuilder()
                         .addMeasurementUUIDs(uuid)
                         .setAggregation(aggregation);
 
                 options.getTimeRange().ifPresent(tr -> {
-                    reqBuilder.setStartTime(Timestamps.fromMillis(tr.startTime().toEpochMilli()));
-                    reqBuilder.setEndTime(Timestamps.fromMillis(tr.endTime().toEpochMilli()));
+                    reqBuilder.setStart(Timestamps.fromMillis(tr.startTime().toEpochMilli()));
+                    reqBuilder.setEnd(Timestamps.fromMillis(tr.endTime().toEpochMilli()));
                 });
 
                 try {
-                    QueryPointsReply reply = grpcClient.queryTimeSeries(reqBuilder.build());
+                    QueryTimeseriesResponse reply = grpcClient.queryTimeseries(reqBuilder.build());
 
-                    for (MeasurementPoints mp : reply.getMeasurementPointsList()) {
-                        for (var pt : mp.getPointsList()) {
-                            Instant timestamp = Instant.ofEpochSecond(
-                                    pt.getTimestamp().getSeconds(),
-                                    pt.getTimestamp().getNanos()
-                            );
+                    for (Series series : reply.getSeriesList()) {
+                        for (SeriesPoint pt : series.getDataPointsList()) {
+                            Instant timestamp = Instant.ofEpochMilli(pt.getTimestamp());
 
-                            QualityCode quality = statusToQuality(pt.getStatus());
+                            QualityCode quality = QualityCode.Good;
                             Object value = protoValueToJava(pt.getValue());
 
                             AggregatedDataPoint<Object, AggregationType> point =
@@ -395,6 +382,84 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             processor.onError(e);
             return Optional.empty();
         }
+    }
+
+    @Override
+    protected Optional<Integer> doQueryMetadata(MetadataQueryOptions options, MetadataPointProcessor processor) {
+        logger.info("Metadata query request with " + options.getQueryKeys().size() + " keys");
+
+        try {
+            ProcessingContext context = DefaultProcessingContext.builder().build();
+            if (!processor.onInitialize(context)) {
+                logger.info("Processor declined initialization for metadata query");
+                processor.onComplete();
+                return Optional.of(0);
+            }
+
+            int pointCount = 0;
+            for (MetadataQueryKey key : options.getQueryKeys()) {
+                String tagPath = toStoredTagPath(key.identifier());
+                Measurement m = measurementCache.getMeasurementByName(tagPath);
+
+                if (m == null) {
+                    measurementCache.refresh(grpcClient);
+                    m = measurementCache.getMeasurementByName(tagPath);
+                }
+
+                if (m == null) {
+                    processor.onKeyFailure(key, QualityCode.Bad_NotFound);
+                    continue;
+                }
+
+                PropertySet ps = measurementToPropertySet(m);
+                MetadataPoint point = MetadataPoint.from(ps, key.identifier());
+                processor.onPointAvailable(key, point);
+                pointCount++;
+            }
+
+            processor.onComplete();
+            return Optional.of(pointCount);
+
+        } catch (Exception e) {
+            logger.error("Error querying metadata", e);
+            processor.onError(e);
+            return Optional.empty();
+        }
+    }
+
+    private static PropertySet measurementToPropertySet(Measurement m) {
+        BasicPropertySet ps = new BasicPropertySet();
+
+        if (m.getDatatype() != null && !m.getDatatype().isEmpty()) {
+            ps.set(new BasicProperty<>("datatype", String.class), m.getDatatype());
+        }
+        if (m.getStatus() != null && !m.getStatus().isEmpty()) {
+            ps.set(new BasicProperty<>("status", String.class), m.getStatus());
+        }
+        if (m.getName() != null && !m.getName().isEmpty()) {
+            ps.set(new BasicProperty<>("name", String.class), m.getName());
+        }
+
+        if (m.hasEngineeringSpecs()) {
+            var specs = m.getEngineeringSpecs();
+            if (specs.hasUom()) {
+                ps.set(new BasicProperty<>("engUnit", String.class), specs.getUom());
+            }
+            if (specs.hasValueMin()) {
+                ps.set(new BasicProperty<>("engLow", Double.class), specs.getValueMin());
+            }
+            if (specs.hasValueMax()) {
+                ps.set(new BasicProperty<>("engHigh", Double.class), specs.getValueMax());
+            }
+            if (specs.hasLimitLo()) {
+                ps.set(new BasicProperty<>("limitLow", Double.class), specs.getLimitLo());
+            }
+            if (specs.hasLimitHi()) {
+                ps.set(new BasicProperty<>("limitHigh", Double.class), specs.getLimitHi());
+            }
+        }
+
+        return ps;
     }
 
     private static String toFactryAggregateFunction(String name) {
@@ -480,22 +545,13 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             return Optional.of(new FactryHistoricalNode(m.getUuid(), path, m.getDatatype(), createdTime));
         }
 
-        // Try calculation
-        Calculation c = measurementCache.getCalculationByName(tagPath);
-        if (c != null) {
-            Instant createdTime = c.hasCreatedAt()
-                    ? Instant.ofEpochSecond(c.getCreatedAt().getSeconds(), c.getCreatedAt().getNanos())
-                    : Instant.EPOCH;
-            return Optional.of(new FactryHistoricalNode(c.getUuid(), path, c.getDatatype(), createdTime));
-        }
-
         // Try asset
         Asset a = measurementCache.getAssetByName(tagPath);
         if (a != null) {
             Instant createdTime = a.hasCreatedAt()
                     ? Instant.ofEpochSecond(a.getCreatedAt().getSeconds(), a.getCreatedAt().getNanos())
                     : Instant.EPOCH;
-            return Optional.of(new FactryHistoricalNode(a.getUuid(), path, a.getDatatype(), createdTime));
+            return Optional.of(new FactryHistoricalNode(a.getUuid(), path, "number", createdTime));
         }
 
         return Optional.empty();
@@ -506,10 +562,6 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         String uuid = measurementCache.getUUID(tagPath);
         if (uuid != null) return uuid;
 
-        // Try calculation
-        uuid = measurementCache.getCalculationUUID(tagPath);
-        if (uuid != null) return uuid;
-
         // Try asset
         uuid = measurementCache.getAssetUUID(tagPath);
         if (uuid != null) return uuid;
@@ -517,8 +569,6 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         // Refresh and retry
         measurementCache.refresh(grpcClient);
         uuid = measurementCache.getUUID(tagPath);
-        if (uuid != null) return uuid;
-        uuid = measurementCache.getCalculationUUID(tagPath);
         if (uuid != null) return uuid;
         uuid = measurementCache.getAssetUUID(tagPath);
         return uuid;

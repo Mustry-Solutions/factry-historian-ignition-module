@@ -2,10 +2,9 @@ package io.factry.historian.gateway;
 
 import io.factry.historian.proto.Asset;
 import io.factry.historian.proto.Assets;
-import io.factry.historian.proto.Calculation;
-import io.factry.historian.proto.Calculations;
 import io.factry.historian.proto.CreateMeasurement;
 import io.factry.historian.proto.CreateMeasurementsRequest;
+import io.factry.historian.proto.GetAssetsRequest;
 import io.factry.historian.proto.Measurement;
 import io.factry.historian.proto.MeasurementRequest;
 import io.factry.historian.proto.Measurements;
@@ -24,9 +23,6 @@ public class MeasurementCache {
     private final ConcurrentHashMap<String, String> tagPathToUUID = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Measurement> uuidToMeasurement = new ConcurrentHashMap<>();
     private final Set<String> pendingCreations = ConcurrentHashMap.newKeySet();
-
-    private final ConcurrentHashMap<String, String> calcNameToUUID = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, Calculation> uuidToCalculation = new ConcurrentHashMap<>();
 
     private final ConcurrentHashMap<String, String> assetNameToUUID = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Asset> uuidToAsset = new ConcurrentHashMap<>();
@@ -56,36 +52,14 @@ public class MeasurementCache {
             logger.info("Measurement cache refreshed, {} active of {} total from Factry, {} in cache",
                     freshPaths.size(), total, tagPathToUUID.size());
 
-            // Fetch calculations
-            try {
-                Calculations calcsResponse = grpcClient.getCalculations();
-                Map<String, String> freshCalcNames = new HashMap<>();
-                Map<String, Calculation> freshCalcs = new HashMap<>();
-                for (Calculation c : calcsResponse.getCalculationsList()) {
-                    if ("active".equalsIgnoreCase(c.getStatus())) {
-                        freshCalcNames.put(c.getName(), c.getUuid());
-                        freshCalcs.put(c.getUuid(), c);
-                    }
-                }
-                calcNameToUUID.clear();
-                calcNameToUUID.putAll(freshCalcNames);
-                uuidToCalculation.clear();
-                uuidToCalculation.putAll(freshCalcs);
-                logger.info("Calculation cache refreshed, {} active", freshCalcNames.size());
-            } catch (Exception ce) {
-                logger.error("Failed to refresh calculation cache", ce);
-            }
-
             // Fetch assets
             try {
                 Assets assetsResponse = grpcClient.getAssets();
                 Map<String, String> freshAssetNames = new HashMap<>();
                 Map<String, Asset> freshAssets = new HashMap<>();
                 for (Asset a : assetsResponse.getAssetsList()) {
-                    if ("active".equalsIgnoreCase(a.getStatus())) {
-                        freshAssetNames.put(a.getName(), a.getUuid());
-                        freshAssets.put(a.getUuid(), a);
-                    }
+                    freshAssetNames.put(a.getName(), a.getUuid());
+                    freshAssets.put(a.getUuid(), a);
                 }
                 assetNameToUUID.clear();
                 assetNameToUUID.putAll(freshAssetNames);
@@ -191,21 +165,6 @@ public class MeasurementCache {
 
     public Collection<Measurement> getAllMeasurements() {
         return uuidToMeasurement.values();
-    }
-
-    // --- Calculation accessors ---
-
-    public String getCalculationUUID(String name) {
-        return calcNameToUUID.get(name);
-    }
-
-    public Calculation getCalculationByName(String name) {
-        String uuid = calcNameToUUID.get(name);
-        return uuid != null ? uuidToCalculation.get(uuid) : null;
-    }
-
-    public Collection<Calculation> getAllCalculations() {
-        return uuidToCalculation.values();
     }
 
     // --- Asset accessors ---

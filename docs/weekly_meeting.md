@@ -50,13 +50,10 @@ Done:
  [+] preliminary protobuf + emulator
  [+] Browsing measurements from the emulator
  
-
- 
 known issue:
-  - new point is not always flushed : 
- 
-  - if the requests fails for measuremnts -> shows old instead of empty
   - missing point in store and forward
+  - new point is not always flushed 
+  - if the requests fails for measuremnts -> shows old instead of empty
 
 > remark: one 'store and forward' object can serve several historian (or anything else), the pathtag includes the provider
 
@@ -67,48 +64,68 @@ Questions:
 
 # 23/03/2026
 
-Changes:
+changes/remarks:
+
+>   *pending* : points queue, the ignition S&F tries to send them periodically
+> 
+>   *quarantined* :  malformed points
+>       how to decide if network error or malformed point: we need a proper error message in case of the second
+
+ 
   + missing point in store and forward
-    When the Factry server went down, the gRPC createPoints() call had no deadline and
-    blocked indefinitely waiting for a TCP timeout. During this window (2-10 seconds),
-    incoming points were lost because the S&F engine couldn't detect the failure fast enough
-    to start buffering. Additionally, isEngineUnavailable() always returned false, so S&F
-    kept attempting to forward — each attempt blocking again — instead of buffering directly.
+     
+     . isEngineUnavailable() < always returned false, now it is correct (checks periodically)
+     
+     . adds a 3-second deadline to createPoints() so failures are detected quickly
+          flag flips to disconnected and isEngineUnavailable() returns true
+     
+     . possible improvement: return error is it is malformed otherwise  set isEngineUnavailable()
 
-    The fix adds a 3-second deadline to createPoints() so failures are detected quickly, and
-    tracks connection state via a volatile flag in the gRPC client. When a call fails, the
-    flag flips to disconnected and isEngineUnavailable() returns true. This tells S&F to stop
-    attempting and buffer all incoming points in the pending queue immediately. A periodic
-    connectivity check (every 30s) detects when the server is back and re-enables forwarding.
-    This way, only the very first failed call experiences the 3-second timeout; all subsequent
-    points go straight to pending with zero delay and zero data loss.
+  + if the requests fails for measurements -> shows old instead of empty
 
-
-Remarks:
- - pending vs quarantined:
-    .points get in pending bucket first
-    .it tries to send it periodically
-    .if fails, it gets into the quarantined:
-      "Imagine a point is malformed or the server rejects it specifically (not a connection   
-       issue, but a data issue). If S&F kept retrying it forever in the pending queue, it
-       would block all the points behind it — the entire pipeline stalls on one bad record."
-
-    Ergo: quarantined contains malformed points or points while it was not obvious that the engine is not available. We have to send them further periodically. 
+>  + *new point is not always flushed*:
+>   This is standard Ignition historian behavior, not a bug in our code. The current value gets flushed when the next value change occurs.
+>   That's a classic off-by-one timing issue — Ignition's historian likely sends the previous value when a new change arrives (that's how SourceChangePoint / deadband works: it confirms the old value held until the new one arrived). 
+>
 
 
- - new point is not always flushed
-   That's a classic off-by-one timing issue — Ignition's historian likely sends the       
-   previous value when a new change arrives (that's how SourceChangePoint / deadband
-   works: it confirms the old value held until the new one arrived). So you're always     
-   seeing the previous value because the current one hasn't been "confirmed" yet — it will
-   arrive with the next change.
+  + handleChangeSettings — all classes is in the code  support dynamic
+  settings changes without module restart                                     
+  + Logging improvements — FactryHistoryProvider logging adjustments         
+  + testConnection() + getStatus polling — FactryGrpcClient got a            
+  testConnection() method; FactryHistoryProvider polls 30 seconds to  
+  track connection status                                                     
+  + Aggregated query support — FactryQueryEngine got 
+      doQueryAggregated() 
+      getNativeAggregates() < list, but not sure it is correct
+  + Metrics — New HistorianMetrics class (118 lines) for tracking store/query
+   performance
 
-   This is standard Ignition historian behavior, not a bug in our code. The current value 
-   gets flushed when the next value change occurs.
 
+  + adopted new proto from factrylabs/historian-proto 
+    - replaced QueryRawPoints with QueryTimeseries (no aggregation = raw query)
+    - removed Calculations as a separate concept, no separate folder in Power Chart tag browser
+    - updated Asset message to new richer format (parentUUID, assetPath, attributes, metadata)
+    - replaced GetAssets(AssetRequest) with GetAssets(GetAssetsRequest) with filtering support
+    - updated Aggregation fields: function→name, fill→fillType, added arguments
+    - updated fake gRPC server with all new RPCs
+ 
 
+Questions about the new proto:
+  - Series.fields (repeated string) < Column names for multi-value series
+  - QueryTimeseriesRequest.join (bool) - skip, not important
+  - QueryTimeseriesRequest.onlyChanges (bool)  - sends only changes, so 1,2,2,3 -> 1,2,3
+  
 
-
-Question:
-  - what should happen if the tag is removed? should we remove the measurements? 
+Other questions
+  - what should happen if the tag is removed? should we remove the measurements?
+      FactryStorageEngine.applySourceChanges explicitly does nothing, just logs a debug message                          
   - what does the calculation collector mean
+  - testing strategies?
+      - automated scripts on gateway to change the tags
+      - run the jython code the get the data
+      - insert a lot of data, check the performance
+      - compare the performance to grafana
+      - send integer first, try to send float
+      - change to discrete, is the last point immediatly send
+    -   
