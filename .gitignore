@@ -122,3 +122,4 @@ ignition/modules/
 
 venv
 build-number.txt
+docs/.design/

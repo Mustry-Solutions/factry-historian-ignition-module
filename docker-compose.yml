@@ -6,23 +6,28 @@ services:
       - "8088:8088"   # HTTP - Gateway web interface
       - "8043:8043"   # HTTPS
       - "8060:8060"   # Gateway Network
-      - "8022:8022"   # Java debug port
+      - "8022:8022"    # Java debug port
     volumes:
-      # Named volume for gateway data persistence — Docker initializes from the image on first run,
-      # so init files like gateway.xml_clean are present and not hidden by an empty bind mount.
+      # Named volume so Docker initializes data from the image on first run,
+      # avoiding gateway.xml_clean errors with an empty bind mount.
       - ignition_data:/usr/local/bin/ignition/data
-
-      # Bind mount for easy module deployment: drop .modl files into ./ignition/modules/
+      # Drop .modl files here to install modules
       - ./ignition/modules:/usr/local/bin/ignition/data/modules
-
-      # Git-tracked: gateway config and projects
+      # Git-tracked gateway config and projects
       - ./ignition/config:/usr/local/bin/ignition/data/config
       - ./ignition/projects:/usr/local/bin/ignition/data/projects
     environment:
+      # Accept EULA automatically
       ACCEPT_IGNITION_EULA: "Y"
+
+      # Gateway admin credentials (change these!)
       GATEWAY_ADMIN_USERNAME: "admin"
       GATEWAY_ADMIN_PASSWORD: "password"
+
+
+      # Gateway network settings
       GATEWAY_NETWORK_0_HOST: "ignition-dev"
+
     command: -- -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:8022
     restart: unless-stopped
     healthcheck:
