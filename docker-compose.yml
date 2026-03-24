@@ -8,8 +8,14 @@ services:
       - "8060:8060"   # Gateway Network
       - "8022:8022"    # Java debug port
     volumes:
-      # Mount data directory for persistence (modules, projects, gateway config, etc.)
-      - ./ignition/data:/usr/local/bin/ignition/data
+      # Named volume so Docker initializes data from the image on first run,
+      # avoiding gateway.xml_clean errors with an empty bind mount.
+      - ignition_data:/usr/local/bin/ignition/data
+      # Drop .modl files here to install modules
+      - ./ignition/modules:/usr/local/bin/ignition/data/modules
+      # Git-tracked gateway config and projects
+      - ./ignition/config:/usr/local/bin/ignition/data/config
+      - ./ignition/projects:/usr/local/bin/ignition/data/projects
     environment:
       # Accept EULA automatically
       ACCEPT_IGNITION_EULA: "Y"
@@ -86,6 +92,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  ignition_data:
   historian_data:
   postgres_data:
   influx_data:
