@@ -120,6 +120,14 @@ ignition/modules/
 **/fonts.digest.json
 **/icons.digest.json
 
+# Ignition local security and machine-specific files — never commit
+ignition/config/local/
+ignition/config/ignition/
+*.der
+*.pfx
+*.pem
+*valueStore.idb
+
 venv
 build-number.txt
 docs/.design/

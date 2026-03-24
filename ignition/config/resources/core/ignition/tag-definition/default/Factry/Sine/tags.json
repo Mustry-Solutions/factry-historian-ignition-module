@@ -1,0 +1,102 @@
+[
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Sine/Sine4",
+    "dataType": "Int4",
+    "historyProvider": "factry",
+    "name": "Sine4",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Sine/Sine7",
+    "dataType": "Int8",
+    "historyProvider": "factry",
+    "name": "Sine7",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Sine/Sine2",
+    "dataType": "Float8",
+    "historyProvider": "factry",
+    "name": "Sine2",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Sine/Sine9",
+    "dataType": "Float8",
+    "historyProvider": "factry",
+    "name": "Sine9",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Sine/Sine0",
+    "dataType": "Float4",
+    "historyProvider": "factry",
+    "name": "Sine0",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Sine/Sine5",
+    "dataType": "Int4",
+    "historyProvider": "factry",
+    "name": "Sine5",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Sine/Sine3",
+    "dataType": "Float8",
+    "historyProvider": "factry",
+    "name": "Sine3",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Sine/Sine1",
+    "dataType": "Float4",
+    "historyProvider": "factry",
+    "name": "Sine1",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Sine/Sine8",
+    "dataType": "Float8",
+    "historyProvider": "factry",
+    "name": "Sine8",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Sine/Sine6",
+    "dataType": "Int8",
+    "historyProvider": "factry",
+    "name": "Sine6",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  }
+]

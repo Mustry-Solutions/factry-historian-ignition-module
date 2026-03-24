@@ -1,0 +1,36 @@
+{
+  "connectURL": "jdbc:postgresql://postgres:5432/factry_historian",
+  "connectionProps": "",
+  "connectionResetParams": "",
+  "defaultTransactionLevel": "DEFAULT",
+  "driver": "PostgreSQL",
+  "evictionRate": -1,
+  "evictionTests": 3,
+  "evictionTime": 1800000,
+  "failoverMode": "STANDARD",
+  "failoverProfile": "",
+  "includeSchemaInTableName": true,
+  "password": {
+    "data": {
+      "ciphertext": "jzLGSDIoLj-L7A",
+      "encrypted_key": "bWNdxGhdnmDukoSr5ft3oYPPKOqq4suVIRlZYvARu5IbjnrorWRUJw",
+      "iv": "0MUBOVJ8wEn7oZ-w",
+      "protected": "eyJhbGciOiJBMjU2S1ciLCJlbmMiOiJBMjU2R0NNIiwiaWF0IjoxNzc0MzQ1MDEyLCJ6aXAiOiJERUYifQ",
+      "tag": "9r3C8M7uTv3Dh-xfkUiOxA"
+    },
+    "type": "Embedded"
+  },
+  "poolInitSize": 0,
+  "poolMaxActive": 8,
+  "poolMaxIdle": 8,
+  "poolMaxWait": 5000,
+  "poolMinIdle": 0,
+  "slowQueryLogThreshold": 60000,
+  "testOnBorrow": true,
+  "testOnReturn": false,
+  "testWhileIdle": false,
+  "translator": "POSTGRES",
+  "username": "factry",
+  "validationQuery": "SELECT 1",
+  "validationSleepTime": 10000
+}
