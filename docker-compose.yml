@@ -48,8 +48,9 @@ services:
       HISTORIAN_POSTGRES_HOST: postgres
       HISTORIAN_POSTGRES_USER: factry
       HISTORIAN_POSTGRES_PASSWORD: password
-      HISTORIAN_POSTGRES_DB: factry
+      HISTORIAN_POSTGRES_DB: factry_historian
       HISTORIAN_INFLUXDB_URL: http://influx:8086
+      AUTO_MIGRATE: "true"
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,12 +66,12 @@ services:
     environment:
       POSTGRES_USER: factry
       POSTGRES_PASSWORD: password
-      POSTGRES_DB: factry
+      POSTGRES_DB: factry_historian
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U factry"]
+      test: ["CMD-SHELL", "pg_isready -U factry -d factry_historian"]
       interval: 10s
       timeout: 5s
       retries: 5
