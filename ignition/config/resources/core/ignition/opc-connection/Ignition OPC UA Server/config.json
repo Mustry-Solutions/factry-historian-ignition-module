@@ -1,0 +1,70 @@
+{
+  "profile": {
+    "readOnly": false,
+    "type": "com.inductiveautomation.OpcUaServerType"
+  },
+  "settings": {
+    "advanced": {
+      "acknowledgeTimeout": 5000,
+      "browseOrigin": "OBJECTS_FOLDER",
+      "connectTimeout": 5000,
+      "deprecatedDataTypeDictionarySupport": false,
+      "maxArrayLength": 2147483647,
+      "maxMessageSize": 33554432,
+      "maxNotificationsPerPublish": 65535,
+      "maxPendingPublishRequests": 2,
+      "maxPerOperation": 8192,
+      "maxReferencesPerNode": 8192,
+      "maxStringLength": 2147483647,
+      "requestTimeout": 60000,
+      "sessionTimeout": 120000,
+      "timestampSource": "OPC_PREFER_SOURCE"
+    },
+    "authentication": {
+      "password": {
+        "data": {
+          "ciphertext": "PweD31nSrwURGA",
+          "encrypted_key": "gGeKN9xZj3kXsilOC_SQFum7ZVYx20DtcXhoRb1aFtEUedG5SYl5Tg",
+          "iv": "wOXoQI5toM4vX4pI",
+          "protected": "eyJhbGciOiJBMjU2S1ciLCJlbmMiOiJBMjU2R0NNIiwiaWF0IjoxNzc0MzQyNTc0LCJ6aXAiOiJERUYifQ",
+          "tag": "p9S9tvt3pFdDG4-spJ0OFg"
+        },
+        "type": "Embedded"
+      },
+      "username": "opcuauser"
+    },
+    "endpoint": {
+      "discoveryUrl": "opc.tcp://localhost:62541/discovery",
+      "endpointUrl": "opc.tcp://localhost:62541",
+      "hostOverride": "",
+      "securityMode": "SignAndEncrypt",
+      "securityPolicy": "Basic256Sha256"
+    },
+    "failover": {
+      "discoveryUrl": "",
+      "enabled": false,
+      "endpointUrl": "",
+      "hostOverride": "",
+      "threshold": 3
+    },
+    "keepAlive": {
+      "failuresAllowed": 1,
+      "interval": 15000,
+      "timeout": 10000
+    },
+    "security": {
+      "certificateValidationEnabled": true,
+      "keyStoreAlias": "client",
+      "keyStoreAliasPassword": {
+        "data": {
+          "ciphertext": "_1Eug3LlcSAaFA",
+          "encrypted_key": "1ZjyXlpVHh6pezEaJlbbaiSkKprWu61Jci5Ym5Dw-f_je-26W5WCsA",
+          "iv": "X_cXxfi9T-BXcfxr",
+          "protected": "eyJhbGciOiJBMjU2S1ciLCJlbmMiOiJBMjU2R0NNIiwiaWF0IjoxNzc0MzQyNTc0LCJ6aXAiOiJERUYifQ",
+          "tag": "l16NY2ALtpDfyRGn0cZhDA"
+        },
+        "type": "Embedded"
+      }
+    }
+  }
+}
