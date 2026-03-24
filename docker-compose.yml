@@ -6,27 +6,20 @@ services:
       - "8088:8088"   # HTTP - Gateway web interface
       - "8043:8043"   # HTTPS
       - "8060:8060"   # Gateway Network
-      - "8000:8000"    # Java debug port
+      - "5005:5005"   # Java debug port (JDWP)
     volumes:
-      # Mount data directory for persistence (modules, projects, gateway config, etc.)
-      - ./ignition/data:/usr/local/bin/ignition/data
+      # Named volume for gateway data persistence — Docker initializes from the image on first run,
+      # so init files like gateway.xml_clean are present and not hidden by an empty bind mount.
+      - ignition-factry-historian-module:/usr/local/bin/ignition/data
 
-      # Optional: Mount module directly for hot deployment
-      # NOTE: This does NOT work reliably for updates - always use manual UI upload
-      # - ./build/Factry-Historian.modl:/usr/local/bin/ignition/user-lib/modules/Factry-Historian.modl
+      # Bind mount for easy module deployment: drop .modl files into ./ignition/modules/
+      - ./ignition/modules:/usr/local/bin/ignition/data/modules
     environment:
-      # Accept EULA automatically
       ACCEPT_IGNITION_EULA: "Y"
-      
-      # Gateway admin credentials (change these!)
       GATEWAY_ADMIN_USERNAME: "admin"
       GATEWAY_ADMIN_PASSWORD: "password"
-
-      
-      # Gateway network settings
       GATEWAY_NETWORK_0_HOST: "ignition-dev"
-
-    command: -- -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:8000
+    command: -- -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8088/StatusPing"]
@@ -34,8 +27,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    networks:
+      - historian_default
 
-  # Optional: Add the Go proxy for testing
   factry-proxy:
     build:
       context: ./proxy
@@ -43,14 +37,107 @@ services:
     container_name: factry-proxy
     ports:
       - "8111:8111"   # Proxy HTTP API
-      - "9876:9876" # gRPC
+      - "9876:9876"   # gRPC
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8111/health"]
       interval: 30s
       timeout: 5s
       retries: 3
+    networks:
+      - historian_default
+
+  postgres:
+    image: "postgres:17-alpine"
+    hostname: "postgres"
+    environment:
+      POSTGRES_DB: "factry_historian"
+      POSTGRES_USER: "factry"
+      POSTGRES_PASSWORD: "password"
+    volumes:
+      - "postgres:/var/lib/postgresql/data"
+    restart: "unless-stopped"
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U factry -d factry_historian"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - historian_default
+
+  influxdb:
+    image: "influxdb:1.8"
+    hostname: "influx"
+    environment:
+      INFLUXDB_HTTP_AUTH_ENABLED: "true"
+      INFLUXDB_ADMIN_USER: "factry"
+      INFLUXDB_ADMIN_PASSWORD: "password"
+      INFLUXDB_HTTP_LOG_ENABLED: "false"
+      INFLUXDB_DATA_QUERY_LOG_ENABLED: "false"
+    volumes:
+      - "influxdb:/var/lib/influxdb"
+    restart: "unless-stopped"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --spider --tries=1 http://localhost:8086/ping || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+    networks:
+      - historian_default
+
+  grafana:
+    image: "grafana/grafana-oss:latest"
+    hostname: "grafana"
+    links:
+      - postgres
+      - influxdb
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "admin"
+      GF_INSTALL_PLUGINS: "factry-historian-datasource"
+    ports:
+      - "3000:3000"
+    volumes:
+      - "grafana:/var/lib/grafana"
+    restart: "unless-stopped"
+    networks:
+      - historian_default
+
+  historian:
+    image: "factry/historian:latest"
+    hostname: "historian"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      influxdb:
+        condition: service_healthy
+    environment:
+      AUTO_MIGRATE: "true"
+      DB_HOST: "postgres"
+      DB_NAME: "factry_historian"
+      DB_USER_NAME: "factry"
+      DB_PASSWORD: "password"
+    ports:
+      - "8000:8000"   # Factry Historian API
+      - "8001:8001"   # Factry Historian UI
+    links:
+      - postgres
+      - influxdb
+      - grafana
+    volumes:
+      - "historian:/var/opt/factry"
+    restart: "unless-stopped"
+    networks:
+      - historian_default
 
 networks:
-  default:
-    name: factry-historian-dev
+  historian_default:
+    name: historian_default
+
+volumes:
+  ignition-factry-historian-module:
+  postgres:
+  influxdb:
+  grafana:
+  historian:
