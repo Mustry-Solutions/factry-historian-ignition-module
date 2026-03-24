@@ -139,3 +139,18 @@ Question:
      If self-signed/internal CA: we'd need a setting for the user to provide a CA  
   certificate path.
                      
+
+  - boundaries (bounding values flag):
+        asking -1 and +1 point for the period 
+        
+        we can fake it with two extra
+        queries:                                                                              
+                                                    
+        1. Lower bound: QueryTimeseries with end = start, desc = true, limit = 1 → last point before start                                                                         
+        2. Upper bound: QueryTimeseries with start = end, limit = 1 → first point after end   
+                                                                                              
+        That's 2 extra gRPC calls per query though. The alternative would be to add an        
+        includeBoundingValues field to the proto, but that requires changes on the Go backend 
+        side too.                                                                             
+                                                                                              
+       
