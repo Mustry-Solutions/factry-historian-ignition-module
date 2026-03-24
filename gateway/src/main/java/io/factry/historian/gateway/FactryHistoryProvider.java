@@ -51,6 +51,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         super(context, historianName);
         this.context = context;
         this.settings = settings;
+        settings.validate();
         this.metrics = new HistorianMetrics();
 
         this.grpcClient = new FactryGrpcClient(
@@ -198,6 +199,8 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         logger.info("Historian settings change: {}", newSettings);
 
         try {
+            newSettings.validate();
+
             // Reconfigure the gRPC client (shuts down old channel, creates new one)
             grpcClient.reconfigure(
                     newSettings.getGrpcHost(),

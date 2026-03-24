@@ -48,6 +48,10 @@ dependencies {
     // Test dependencies
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testImplementation("com.inductiveautomation.historian:historian-gateway-api:1.3.3") {
+        isTransitive = false
+    }
+    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.12")
 }
 
 tasks.test {

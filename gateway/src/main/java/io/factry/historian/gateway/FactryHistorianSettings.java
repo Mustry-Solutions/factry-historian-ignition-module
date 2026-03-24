@@ -104,6 +104,28 @@ public class FactryHistorianSettings implements HistorianSettings {
         this.storeAndForwardEngine = storeAndForwardEngine;
     }
 
+    /**
+     * Validate settings and throw IllegalArgumentException if invalid.
+     * Called before creating or reconfiguring the gRPC client.
+     */
+    public void validate() {
+        if (collectorUUID == null || collectorUUID.trim().isEmpty()) {
+            throw new IllegalArgumentException("Collector ID is required");
+        }
+        if (grpcHost == null || grpcHost.trim().isEmpty()) {
+            throw new IllegalArgumentException("Host is required");
+        }
+        if (grpcPort < 1 || grpcPort > 65535) {
+            throw new IllegalArgumentException("Port must be between 1 and 65535");
+        }
+        if (batchSize < 1) {
+            throw new IllegalArgumentException("Batch size must be at least 1");
+        }
+        if (batchIntervalMs < 100) {
+            throw new IllegalArgumentException("Batch interval must be at least 100 ms");
+        }
+    }
+
     @Override
     public String toString() {
         return "FactryHistorianSettings{" +
