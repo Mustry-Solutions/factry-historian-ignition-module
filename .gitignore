@@ -111,11 +111,10 @@ gradle.properties
 # Ignition runtime data — all auto-generated, never commit
 ignition/data/
 
-# Ignore everything in ignition/config by default (Ignition auto-generates hundreds of files)
-ignition/config/
+# Ignition module binaries are build artifacts
+ignition/user-lib/
 
-# Allow only the project-specific seed config (for fast try-out setup)
-!ignition/config/resources/
+# Ignition default config that is auto-generated and not project-specific
 ignition/config/resources/local/
 ignition/config/resources/core/com.inductiveautomation.perspective/themes/
 ignition/config/resources/core/ignition/images/
@@ -126,12 +125,24 @@ ignition/config/resources/core/ignition/schedule/
 ignition/config/resources/core/ignition/edge-system-properties/
 ignition/config/resources/core/ignition/security-properties/
 ignition/config/resources/core/ignition/general-alarm-settings/
+ignition/config/resources/core/ignition/keyboard_layout/
+ignition/config/resources/core/ignition/identity-provider/
+ignition/config/resources/core/ignition/opc-connection/
+ignition/config/resources/core/ignition/quickstart/
+ignition/config/resources/core/ignition/security-levels/
+ignition/config/resources/core/ignition/system-properties/
+ignition/config/resources/core/ignition/tag-type-definition/
+ignition/config/resources/core/ignition/translations/
+ignition/config/resources/core/ignition/user-source/
+ignition/config/resources/core/ignition/gateway-network-proxy-rules/
+ignition/config/resources/core/ignition/gateway-network-queue-settings/
+ignition/config/resources/core/ignition/gateway-network-settings/
+ignition/config/resources/core/ignition/tag-group/
+ignition/config/resources/core/ignition/tag-definition/System/
 ignition/config/resources/core/com.inductiveautomation.eam/
 ignition/config/resources/core/com.inductiveautomation.sfc/
 ignition/config/resources/**/migration-log*
-
-# Ignition module binaries are build artifacts
-ignition/user-lib/
+ignition/config/resources/external/
 
 # Machine-specific files
 *.der
