@@ -39,7 +39,7 @@ public class FactryStorageEngine extends AbstractStorageEngine {
         this.grpcClient = grpcClient;
         this.measurementCache = measurementCache;
         this.metrics = metrics;
-        logger.info("Factry Storage Engine initialized with gRPC target: " +
+        logger.debug("Factry Storage Engine initialized with gRPC target: " +
                 settings.getGrpcHost() + ":" + settings.getGrpcPort());
     }
 
@@ -57,18 +57,18 @@ public class FactryStorageEngine extends AbstractStorageEngine {
                 String tagPath = TagPathUtil.qualifiedPathToStoredPath(point.source().toString());
                 Object value = point.value();
 
-                logger.info("Point: tagPath=" + tagPath
+                logger.debug("Point: tagPath=" + tagPath
                         + ", value=" + value
                         + ", valueType=" + (value != null ? value.getClass().getName() : "null"));
 
                 String measurementUUID = measurementCache.getOrCreateUUID(tagPath, grpcClient, value);
                 if (measurementUUID == null || measurementUUID.isEmpty()) {
-                    logger.info("Skipping point for '" + tagPath + "': no measurement UUID");
+                    logger.debug("Skipping point for '" + tagPath + "': no measurement UUID");
                     continue;
                 }
 
                 if (value == null) {
-                    logger.info("Skipping point for '" + tagPath + "': null value");
+                    logger.debug("Skipping point for '" + tagPath + "': null value");
                     continue;
                 }
 
@@ -90,15 +90,15 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
             int pointCount = pointsBuilder.getPointsCount();
             if (pointCount == 0) {
-                logger.info("No points to send (all skipped)");
+                logger.debug("No points to send (all skipped)");
                 return StorageResult.success(points);
             }
 
-            logger.info("Sending " + pointCount + " points via createPoints");
+            logger.debug("Sending " + pointCount + " points via createPoints");
             grpcClient.createPoints(pointsBuilder.build());
             long elapsedMs = System.currentTimeMillis() - startMs;
             metrics.recordStore(pointCount, elapsedMs);
-            logger.info("createPoints succeeded for " + pointCount + " points");
+            logger.debug("createPoints succeeded for " + pointCount + " points");
 
             if (settings.isDebugLogging()) {
                 logger.debug("gRPC createPoints succeeded for " + points.size() + " points");

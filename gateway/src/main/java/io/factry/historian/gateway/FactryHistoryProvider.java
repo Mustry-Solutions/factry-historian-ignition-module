@@ -77,11 +77,9 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
 
     @Override
     protected void onStartup() throws Exception {
-        logger.info("========================================");
         logger.info("Factry Historian - Starting Up");
-        logger.info("========================================");
-        logger.info("Name: {}", historianName);
-        logger.info("Settings: {}", settings);
+        logger.debug("Name: {}", historianName);
+        logger.debug("Settings: {}", settings);
 
         measurementCache.refresh(grpcClient);
         logger.info("Measurement cache pre-populated with {} entries", measurementCache.size());
@@ -148,10 +146,8 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
 
     @Override
     protected void onShutdown() {
-        logger.info("========================================");
         logger.info("Factry Historian - Shutting Down");
-        logger.info("========================================");
-        logger.info("Name: {}", historianName);
+        logger.debug("Name: {}", historianName);
 
         if (scheduledExecutor != null) {
             scheduledExecutor.shutdownNow();

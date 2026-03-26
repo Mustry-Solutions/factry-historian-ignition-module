@@ -72,6 +72,11 @@ final class TagPathUtil {
 
         // 1. Direct query with explicit sys/prov/tag components
         if (sys != null && tag != null) {
+            // If the tag component already contains a stored path (encoded during browse
+            // via displayPath), use it directly. Detected by the ":[" pattern.
+            if (tag.contains(":[")) {
+                return tag;
+            }
             return buildStoredPath(sys, prov, tag);
         }
 

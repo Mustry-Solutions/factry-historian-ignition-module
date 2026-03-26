@@ -24,6 +24,7 @@ import com.inductiveautomation.historian.gateway.api.query.processor.MetadataPoi
 import com.inductiveautomation.historian.gateway.api.query.processor.ProcessingContext;
 import com.inductiveautomation.historian.gateway.api.query.processor.RawPointProcessor;
 import com.inductiveautomation.ignition.common.QualifiedPath;
+import com.inductiveautomation.ignition.common.StringPath;
 import com.inductiveautomation.ignition.common.browsing.BrowseFilter;
 import com.inductiveautomation.ignition.common.config.BasicProperty;
 import com.inductiveautomation.ignition.common.config.BasicPropertySet;
@@ -59,6 +60,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     private static final List<AggregationType> SUPPORTED_AGGREGATES = List.of(
             LegacyAggregateAdapter.of(AggregationMode.Average),
             LegacyAggregateAdapter.of(AggregationMode.SimpleAverage),
+            LegacyAggregateAdapter.of(AggregationMode.MinMax),
             LegacyAggregateAdapter.of(AggregationMode.Minimum),
             LegacyAggregateAdapter.of(AggregationMode.Maximum),
             LegacyAggregateAdapter.of(AggregationMode.Sum),
@@ -87,7 +89,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         this.grpcClient = grpcClient;
         this.measurementCache = measurementCache;
         this.metrics = metrics;
-        logger.info("Factry Query Engine initialized");
+        logger.debug("Factry Query Engine initialized");
     }
 
     @Override
@@ -98,7 +100,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             // Extract browse prefix from root (AdaptedQualifiedPath)
             String prefix = extractBrowsePrefix(root);
 
-            logger.info("Browse: prefix='" + prefix + "'");
+            logger.debug("Browse: prefix='" + prefix + "'");
 
             String category = TagPathUtil.extractCategory(prefix);
 
@@ -106,7 +108,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 // Root level: show two category folders
                 publisher.newNode("folder", TagPathUtil.CATEGORY_MEASUREMENTS).hasChildren(true).add();
                 publisher.newNode("folder", TagPathUtil.CATEGORY_ASSETS).hasChildren(true).add();
-                logger.info("Browse: published 2 category folders at root");
+                logger.debug("Browse: published 2 category folders at root");
                 return;
             }
 
@@ -116,21 +118,21 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 if (!measPrefix.isEmpty() && !measPrefix.endsWith("/")) {
                     measPrefix += "/";
                 }
-                browsePaths(collectMeasurementDisplayPaths(), measPrefix, publisher);
+                browsePaths(collectMeasurementDisplayToStoredMap(), measPrefix, publisher);
             } else if (TagPathUtil.CATEGORY_ASSETS.equals(category)) {
                 // Assets: hierarchical by "/" in name
                 String assetPrefix = TagPathUtil.stripCategory(prefix);
                 if (!assetPrefix.isEmpty() && !assetPrefix.endsWith("/")) {
                     assetPrefix += "/";
                 }
-                List<String> assetNames = new ArrayList<>();
+                Map<String, String> assetDisplayToStored = new HashMap<>();
                 for (Asset a : measurementCache.getAllAssets()) {
-                    assetNames.add(a.getName());
+                    assetDisplayToStored.put(a.getName(), a.getName());
                 }
-                browsePaths(assetNames, assetPrefix, publisher);
+                browsePaths(assetDisplayToStored, assetPrefix, publisher);
             } else {
                 // Legacy fallback: browse measurements without category prefix
-                browsePaths(collectMeasurementDisplayPaths(), prefix, publisher);
+                browsePaths(collectMeasurementDisplayToStoredMap(), prefix, publisher);
             }
 
         } catch (Exception e) {
@@ -138,19 +140,21 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         }
     }
 
-    private List<String> collectMeasurementDisplayPaths() {
-        List<String> displayPaths = new ArrayList<>();
+    private Map<String, String> collectMeasurementDisplayToStoredMap() {
+        Map<String, String> displayToStored = new HashMap<>();
         for (Measurement m : measurementCache.getAllMeasurements()) {
-            displayPaths.add(TagPathUtil.storedPathToDisplayPath(m.getName()));
+            String display = TagPathUtil.storedPathToDisplayPath(m.getName());
+            displayToStored.put(display, m.getName());
         }
-        return displayPaths;
+        return displayToStored;
     }
 
-    private void browsePaths(List<String> paths, String prefix, BrowsePublisher publisher) {
+    private void browsePaths(Map<String, String> displayToStored, String prefix, BrowsePublisher publisher) {
         Set<String> folders = new LinkedHashSet<>();
-        List<String> leafTags = new ArrayList<>();
+        // Map from leaf display name to full display path (for stored path lookup)
+        Map<String, String> leafDisplayNameToFullPath = new HashMap<>();
 
-        for (String path : paths) {
+        for (String path : displayToStored.keySet()) {
             if (!path.startsWith(prefix)) {
                 continue;
             }
@@ -159,18 +163,25 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             if (slashPos >= 0) {
                 folders.add(remaining.substring(0, slashPos));
             } else if (!remaining.isEmpty()) {
-                leafTags.add(remaining);
+                leafDisplayNameToFullPath.put(remaining, path);
             }
         }
 
         for (String folder : folders) {
             publisher.newNode("folder", folder).hasChildren(true).add();
         }
-        for (String leaf : leafTags) {
-            publisher.newNode("tag", leaf).hasChildren(false).add();
+        for (Map.Entry<String, String> leaf : leafDisplayNameToFullPath.entrySet()) {
+            String displayName = leaf.getKey();
+            String storedPath = displayToStored.get(leaf.getValue());
+            // Use stored path as tag identifier so queries can resolve it back;
+            // displayPath controls what appears in the UI.
+            publisher.newNode("tag", storedPath != null ? storedPath : displayName)
+                    .displayPath(StringPath.of(displayName))
+                    .hasChildren(false)
+                    .add();
         }
 
-        logger.info("Browse: published " + folders.size() + " folders, " + leafTags.size() + " tags");
+        logger.debug("Browse: published " + folders.size() + " folders, " + leafDisplayNameToFullPath.size() + " tags");
     }
 
     /**
@@ -205,7 +216,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
     @Override
     protected Optional<Integer> doQueryRaw(RawQueryOptions options, RawPointProcessor processor) {
-        logger.info("Raw query request: " + options);
+        logger.debug("Raw query request: " + options);
         long startMs = System.currentTimeMillis();
 
         try {
@@ -282,7 +293,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
             processor.onComplete();
             metrics.recordRawQuery(totalPoints, System.currentTimeMillis() - startMs);
-            logger.info("Query completed with " + totalPoints + " total points");
+            logger.debug("Query completed with " + totalPoints + " total points");
             return Optional.of(totalPoints);
 
         } catch (Exception e) {
@@ -299,7 +310,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
     @Override
     protected Optional<Integer> doQueryAggregated(AggregatedQueryOptions options, AggregatedPointProcessor processor) {
-        logger.info("Aggregated query request: " + options);
+        logger.debug("Aggregated query request: " + options);
         long startMs = System.currentTimeMillis();
 
         try {
@@ -327,44 +338,15 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     continue;
                 }
 
-                String factryFunction = toFactryAggregateFunction(key.aggregationType().name());
-
-                Aggregation aggregation = Aggregation.newBuilder()
-                        .setName(factryFunction)
-                        .setPeriod(period)
-                        .setFillType("none")
-                        .build();
-
-                QueryTimeseriesRequest.Builder reqBuilder = QueryTimeseriesRequest.newBuilder()
-                        .addMeasurementUUIDs(uuid)
-                        .setAggregation(aggregation);
-
-                options.getTimeRange().ifPresent(tr -> {
-                    reqBuilder.setStart(Timestamps.fromMillis(tr.startTime().toEpochMilli()));
-                    reqBuilder.setEnd(Timestamps.fromMillis(tr.endTime().toEpochMilli()));
-                });
-
                 try {
-                    QueryTimeseriesResponse reply = grpcClient.queryTimeseries(reqBuilder.build());
+                    String aggName = key.aggregationType().name();
 
-                    for (Series series : reply.getSeriesList()) {
-                        for (SeriesPoint pt : series.getDataPointsList()) {
-                            Instant timestamp = Instant.ofEpochMilli(pt.getTimestamp());
-
-                            QualityCode quality = QualityCode.Good;
-                            Object value = protoValueToJava(pt.getValue());
-
-                            AggregatedDataPoint<Object, AggregationType> point =
-                                    AggregatedDataPoint.<Object, AggregationType>builder(
-                                            source, key.aggregationType())
-                                    .value(value)
-                                    .quality(quality)
-                                    .timestamp(timestamp)
-                                    .build();
-
-                            processor.onPointAvailable(key, point);
-                            pointCount++;
-                        }
+                    if ("MinMax".equals(aggName)) {
+                        // MinMax: query min and max separately, emit pairs
+                        pointCount += queryMinMax(uuid, source, key, period, options, processor);
+                    } else {
+                        String factryFunction = toFactryAggregateFunction(aggName);
+                        pointCount += querySingleAggregate(uuid, source, key, factryFunction, period, options, processor);
                     }
                 } catch (Exception e) {
                     logger.error("Error querying aggregated data for: " + tagPath, e);
@@ -374,7 +356,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
             processor.onComplete();
             metrics.recordAggregatedQuery(pointCount, System.currentTimeMillis() - startMs);
-            logger.info("Aggregated query completed with " + pointCount + " points");
+            logger.debug("Aggregated query completed with " + pointCount + " points");
             return Optional.of(pointCount);
 
         } catch (Exception e) {
@@ -386,12 +368,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
     @Override
     protected Optional<Integer> doQueryMetadata(MetadataQueryOptions options, MetadataPointProcessor processor) {
-        logger.info("Metadata query request with " + options.getQueryKeys().size() + " keys");
+        logger.debug("Metadata query request with " + options.getQueryKeys().size() + " keys");
 
         try {
             ProcessingContext context = DefaultProcessingContext.builder().build();
             if (!processor.onInitialize(context)) {
-                logger.info("Processor declined initialization for metadata query");
+                logger.debug("Processor declined initialization for metadata query");
                 processor.onComplete();
                 return Optional.of(0);
             }
@@ -460,6 +442,108 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         }
 
         return ps;
+    }
+
+    private int querySingleAggregate(
+            String uuid, QualifiedPath source, AggregatedQueryKey key,
+            String factryFunction, String period,
+            AggregatedQueryOptions options, AggregatedPointProcessor processor) {
+
+        Aggregation aggregation = Aggregation.newBuilder()
+                .setName(factryFunction)
+                .setPeriod(period)
+                .setFillType("none")
+                .build();
+
+        QueryTimeseriesRequest.Builder reqBuilder = QueryTimeseriesRequest.newBuilder()
+                .addMeasurementUUIDs(uuid)
+                .setAggregation(aggregation);
+
+        options.getTimeRange().ifPresent(tr -> {
+            reqBuilder.setStart(Timestamps.fromMillis(tr.startTime().toEpochMilli()));
+            reqBuilder.setEnd(Timestamps.fromMillis(tr.endTime().toEpochMilli()));
+        });
+
+        QueryTimeseriesResponse reply = grpcClient.queryTimeseries(reqBuilder.build());
+
+        int count = 0;
+        for (Series series : reply.getSeriesList()) {
+            for (SeriesPoint pt : series.getDataPointsList()) {
+                Instant timestamp = Instant.ofEpochMilli(pt.getTimestamp());
+                Object value = protoValueToJava(pt.getValue());
+
+                AggregatedDataPoint<Object, AggregationType> point =
+                        AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
+                                .value(value)
+                                .quality(QualityCode.Good)
+                                .timestamp(timestamp)
+                                .build();
+
+                processor.onPointAvailable(key, point);
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private int queryMinMax(
+            String uuid, QualifiedPath source, AggregatedQueryKey key,
+            String period, AggregatedQueryOptions options,
+            AggregatedPointProcessor processor) {
+
+        // Query min and max separately
+        QueryTimeseriesRequest.Builder minReqBuilder = QueryTimeseriesRequest.newBuilder()
+                .addMeasurementUUIDs(uuid)
+                .setAggregation(Aggregation.newBuilder().setName("min").setPeriod(period).setFillType("none").build());
+        QueryTimeseriesRequest.Builder maxReqBuilder = QueryTimeseriesRequest.newBuilder()
+                .addMeasurementUUIDs(uuid)
+                .setAggregation(Aggregation.newBuilder().setName("max").setPeriod(period).setFillType("none").build());
+
+        options.getTimeRange().ifPresent(tr -> {
+            long startMs = tr.startTime().toEpochMilli();
+            long endMs = tr.endTime().toEpochMilli();
+            minReqBuilder.setStart(Timestamps.fromMillis(startMs)).setEnd(Timestamps.fromMillis(endMs));
+            maxReqBuilder.setStart(Timestamps.fromMillis(startMs)).setEnd(Timestamps.fromMillis(endMs));
+        });
+
+        QueryTimeseriesResponse minReply = grpcClient.queryTimeseries(minReqBuilder.build());
+        QueryTimeseriesResponse maxReply = grpcClient.queryTimeseries(maxReqBuilder.build());
+
+        // Collect min values by timestamp
+        Map<Long, Object> minValues = new HashMap<>();
+        for (Series series : minReply.getSeriesList()) {
+            for (SeriesPoint pt : series.getDataPointsList()) {
+                minValues.put(pt.getTimestamp(), protoValueToJava(pt.getValue()));
+            }
+        }
+
+        // Emit min/max pairs for each bucket
+        int count = 0;
+        for (Series series : maxReply.getSeriesList()) {
+            for (SeriesPoint pt : series.getDataPointsList()) {
+                long ts = pt.getTimestamp();
+                Instant timestamp = Instant.ofEpochMilli(ts);
+                Object minVal = minValues.get(ts);
+                Object maxVal = protoValueToJava(pt.getValue());
+
+                // Emit min point
+                if (minVal != null) {
+                    processor.onPointAvailable(key,
+                            AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
+                                    .value(minVal).quality(QualityCode.Good).timestamp(timestamp).build());
+                    count++;
+                }
+
+                // Emit max point
+                if (maxVal != null) {
+                    processor.onPointAvailable(key,
+                            AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
+                                    .value(maxVal).quality(QualityCode.Good).timestamp(timestamp).build());
+                    count++;
+                }
+            }
+        }
+        return count;
     }
 
     private static String toFactryAggregateFunction(String name) {

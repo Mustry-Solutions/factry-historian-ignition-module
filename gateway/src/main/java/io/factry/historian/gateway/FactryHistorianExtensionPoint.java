@@ -51,11 +51,9 @@ public class FactryHistorianExtensionPoint extends HistorianExtensionPoint<Factr
      */
     public FactryHistorianExtensionPoint() {
         super(TYPE_ID, DISPLAY_NAME, DESCRIPTION);
-        logger.info("========================================");
-        logger.info("Factry Historian Extension Point created");
-        logger.info("MODULE VERSION: {}", io.factry.historian.common.FactryHistorianModule.MODULE_VERSION);
-        logger.info("Type: {}, Name: {}", TYPE_ID, DISPLAY_NAME);
-        logger.info("========================================");
+        logger.debug("Factry Historian Extension Point created");
+        logger.debug("MODULE VERSION: {}", io.factry.historian.common.FactryHistorianModule.MODULE_VERSION);
+        logger.debug("Type: {}, Name: {}", TYPE_ID, DISPLAY_NAME);
     }
 
     /**
@@ -100,16 +98,11 @@ public class FactryHistorianExtensionPoint extends HistorianExtensionPoint<Factr
      */
     @Override
     public Optional<WebUiComponent> getWebUiComponent(ComponentType type) {
-        logger.info("========================================");
-        logger.info("getWebUiComponent called!");
-        logger.info("Component Type: {}", type);
-        logger.info("Resource Type: {}", resourceType());
-        logger.info("TYPE_ID: {}", TYPE_ID);
-        logger.info("========================================");
+        logger.debug("getWebUiComponent called: type={}, resourceType={}", type, resourceType());
 
         try {
             var schema = SchemaUtil.fromType(FactryHistorianConfig.class);
-            logger.info("Schema created successfully: {}", schema);
+            logger.debug("Schema created successfully: {}", schema);
 
             var component = new ExtensionPointResourceForm(
                     resourceType(),  // Use the historian resource type from parent class
@@ -120,7 +113,7 @@ public class FactryHistorianExtensionPoint extends HistorianExtensionPoint<Factr
                     Set.of()  // No additional capabilities
             );
 
-            logger.info("ExtensionPointResourceForm created successfully");
+            logger.debug("ExtensionPointResourceForm created successfully");
             return Optional.of(component);
         } catch (Exception e) {
             logger.error("Error creating web UI component", e);

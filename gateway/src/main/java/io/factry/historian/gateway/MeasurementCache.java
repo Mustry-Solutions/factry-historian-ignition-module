@@ -41,7 +41,7 @@ public class MeasurementCache {
                     freshPaths.put(m.getName(), m.getUuid());
                     freshMeasurements.put(m.getUuid(), m);
                 } else {
-                    logger.info("Skipping measurement '{}' with status '{}'", m.getName(), m.getStatus());
+                    logger.debug("Skipping measurement '{}' with status '{}'", m.getName(), m.getStatus());
                 }
             }
             // Replace maps entirely so deleted measurements don't linger
@@ -49,7 +49,7 @@ public class MeasurementCache {
             tagPathToUUID.putAll(freshPaths);
             uuidToMeasurement.clear();
             uuidToMeasurement.putAll(freshMeasurements);
-            logger.info("Measurement cache refreshed, {} active of {} total from Factry, {} in cache",
+            logger.debug("Measurement cache refreshed, {} active of {} total from Factry, {} in cache",
                     freshPaths.size(), total, tagPathToUUID.size());
 
             // Fetch assets
@@ -65,7 +65,7 @@ public class MeasurementCache {
                 assetNameToUUID.putAll(freshAssetNames);
                 uuidToAsset.clear();
                 uuidToAsset.putAll(freshAssets);
-                logger.info("Asset cache refreshed, {} active", freshAssetNames.size());
+                logger.debug("Asset cache refreshed, {} active", freshAssetNames.size());
             } catch (Exception ae) {
                 logger.error("Failed to refresh asset cache", ae);
             }
@@ -79,10 +79,10 @@ public class MeasurementCache {
         // Fast path: already cached
         String uuid = tagPathToUUID.get(tagPath);
         if (uuid != null) {
-            logger.info("Cache hit for '{}': uuid={}", tagPath, uuid);
+            logger.debug("Cache hit for '{}': uuid={}", tagPath, uuid);
             return uuid;
         }
-        logger.info("Cache miss for '{}', cache size={}, keys={}", tagPath, tagPathToUUID.size(), tagPathToUUID.keySet());
+        logger.debug("Cache miss for '{}', cache size={}, keys={}", tagPath, tagPathToUUID.size(), tagPathToUUID.keySet());
 
         // Determine data type from value — refuse to create without it
         String dataType = toFactryDataType(value);
@@ -104,7 +104,7 @@ public class MeasurementCache {
                 return uuid;
             }
 
-            logger.info("Creating measurement for '{}' with dataType={}", tagPath, dataType);
+            logger.debug("Creating measurement for '{}' with dataType={}", tagPath, dataType);
 
             CreateMeasurement createMeasurement = CreateMeasurement.newBuilder()
                     .setName(tagPath)
@@ -130,10 +130,10 @@ public class MeasurementCache {
                 refresh(grpcClient);
                 uuid = tagPathToUUID.get(tagPath);
                 if (uuid != null) {
-                    logger.info("Measurement UUID resolved for '{}' on attempt {}: {}", tagPath, attempt, uuid);
+                    logger.debug("Measurement UUID resolved for '{}' on attempt {}: {}", tagPath, attempt, uuid);
                     return uuid;
                 }
-                logger.info("Measurement '{}' not visible yet, attempt {}/5", tagPath, attempt);
+                logger.debug("Measurement '{}' not visible yet, attempt {}/5", tagPath, attempt);
             }
 
             logger.warn("Measurement UUID not found after create + retries for '{}'", tagPath);
