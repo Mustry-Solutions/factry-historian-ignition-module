@@ -8,8 +8,14 @@ services:
       - "8060:8060"   # Gateway Network
       - "8022:8022"    # Java debug port
     volumes:
-      # Mount data directory for persistence (modules, projects, gateway config, etc.)
-      - ./ignition/data:/usr/local/bin/ignition/data
+      # Named volume so Docker initializes data from the image on first run,
+      # avoiding gateway.xml_clean errors with an empty bind mount.
+      - ignition_data:/usr/local/bin/ignition/data
+      # Drop .modl files here to install modules
+      - ./ignition/modules:/usr/local/bin/ignition/data/modules
+      # Git-tracked gateway config and projects
+      - ./ignition/config:/usr/local/bin/ignition/data/config
+      - ./ignition/projects:/usr/local/bin/ignition/data/projects
     environment:
       # Accept EULA automatically
       ACCEPT_IGNITION_EULA: "Y"
@@ -42,8 +48,11 @@ services:
       HISTORIAN_POSTGRES_HOST: postgres
       HISTORIAN_POSTGRES_USER: factry
       HISTORIAN_POSTGRES_PASSWORD: password
-      HISTORIAN_POSTGRES_DB: factry
+      HISTORIAN_POSTGRES_DB: factry_historian
       HISTORIAN_INFLUXDB_URL: http://influx:8086
+      HISTORIAN_INFLUXDB_USERNAME: factry
+      HISTORIAN_INFLUXDB_PASSWORD: password
+      AUTO_MIGRATE: "true"
     depends_on:
       postgres:
         condition: service_healthy
@@ -59,12 +68,12 @@ services:
     environment:
       POSTGRES_USER: factry
       POSTGRES_PASSWORD: password
-      POSTGRES_DB: factry
+      POSTGRES_DB: factry_historian
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U factry"]
+      test: ["CMD-SHELL", "pg_isready -U factry -d factry_historian"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -72,6 +81,10 @@ services:
   influx:
     image: influxdb:1.8
     container_name: factry-influx
+    environment:
+      INFLUXDB_HTTP_AUTH_ENABLED: "true"
+      INFLUXDB_ADMIN_USER: "factry"
+      INFLUXDB_ADMIN_PASSWORD: "password"
     volumes:
       - influx_data:/var/lib/influxdb
     restart: unless-stopped
@@ -86,6 +99,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  ignition_data:
   historian_data:
   postgres_data:
   influx_data:
