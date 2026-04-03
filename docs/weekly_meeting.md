@@ -130,15 +130,36 @@ Other questions
       - change to discrete, is the last point immediatly send
     -   
 
-30/03/2026
+# 30/03/2026
 
-Question:
-
-  - tsl certificatie 
+changes:
+  - TLS: Added "Skip TLS Verification" setting, proper cert validation by default
+    (it skipped automatically before)
+    Question:
      If publicly-signed: nothing to do
      If self-signed/internal CA: we'd need a setting for the user to provide a CA  
   certificate path.
-                     
+  
+  - Config validation: FactryHistorianSettings.validate() — checks host, port,     
+  collectorUUID, batchSize, batchIntervalMs    
+     (use token)
+ 
+  - Malformed point handling: StatusRuntimeException catch distinguishes             
+     UNAVAILABLE/DEADLINE_EXCEEDED (retry) from INVALID_ARGUMENT (quarantine)
+  
+  - Logging cleanup: ~50 logger.info() calls downgraded to debug(), separator banners
+   removed                 
+
+  - little refactor: 
+      gRPC client refactor: extracted buildChannel() and tlsLabel(), eliminated code   
+  duplication   
+
+  - unit tests:                                                                   
+      - FactryHistorianSettingsTest — 18 tests for validation                            
+      - HistorianMetricsTest — 10 tests for metrics tracking                           
+      - Added historian-gateway-api and slf4j-simple test dependencies    
+
+  - Ingition files/example project commited into the git repo
 
   - boundaries (bounding values flag):
         asking -1 and +1 point for the period 
@@ -152,5 +173,19 @@ Question:
         That's 2 extra gRPC calls per query though. The alternative would be to add an        
         includeBoundingValues field to the proto, but that requires changes on the Go backend 
         side too.                                                                             
-                                                                                              
-       
+
+Still to do:
+  - So metadata flows one direction only: 
+       Factry → Ignition 
+       create tag with metadata in Ignition --/--> is not sent to Factry
+                                                                      
+
+  - Integration tests (working on it)                                                                          
+      webdev module let you to run scripts on the gateway
+       - call the script 
+       - check the result (e.g. points arrived to Factry or aggragetation is correct)
+
+  - Null check in FactryGrpcClient.shutdown()                                        
+  - Race condition in handleSettingsChange()
+  - Silent exception swallowing in doBrowse()                                        
+  - Hardcoded timeouts not yet configurable          
