@@ -144,7 +144,7 @@ tasks.named("build") {
 }
 
 // Deploy tasks — copy module to Ignition and restart the container
-val ignitionModlDir = file("ignition/data/var/ignition/modl")
+val ignitionModlDir = file("ignition/data/modules")
 
 tasks.register<Copy>("copy") {
     group = "deploy"

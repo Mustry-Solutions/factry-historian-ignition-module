@@ -1,21 +1,14 @@
 services:
   ignition:
     image: inductiveautomation/ignition:8.3.3
-    container_name: ignition-dev
+    container_name: factry-historian-ignition
     ports:
-      - "8088:8088"   # HTTP - Gateway web interface
-      - "8043:8043"   # HTTPS
-      - "8060:8060"   # Gateway Network
-      - "8022:8022"    # Java debug port
+      - "8089:8088"   # HTTP - Gateway web interface
+      - "8044:8043"   # HTTPS
+      - "8061:8060"   # Gateway Network
+      - "8023:8022"    # Java debug port
     volumes:
-      # Named volume so Docker initializes data from the image on first run,
-      # avoiding gateway.xml_clean errors with an empty bind mount.
-      - ignition_data:/usr/local/bin/ignition/data
-      # Drop .modl files here to install modules
-      - ./ignition/modules:/usr/local/bin/ignition/data/modules
-      # Git-tracked gateway config and projects
-      - ./ignition/config:/usr/local/bin/ignition/data/config
-      - ./ignition/projects:/usr/local/bin/ignition/data/projects
+      - ./ignition/data:/usr/local/bin/ignition/data
     environment:
       # Accept EULA automatically
       ACCEPT_IGNITION_EULA: "Y"
@@ -26,7 +19,7 @@ services:
 
 
       # Gateway network settings
-      GATEWAY_NETWORK_0_HOST: "ignition-dev"
+      GATEWAY_NETWORK_0_HOST: "factry-historian-ignition"
 
     command: -- -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:8022
     restart: unless-stopped
@@ -99,7 +92,6 @@ services:
     restart: unless-stopped
 
 volumes:
-  ignition_data:
   historian_data:
   postgres_data:
   influx_data:
@@ -107,4 +99,4 @@ volumes:
 
 networks:
   default:
-    name: factry-historian-dev
+    name: factry-historian-module

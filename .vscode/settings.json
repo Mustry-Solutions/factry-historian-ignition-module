@@ -1,5 +1,5 @@
 {
-    "workbench.colorTheme": "Default Light Modern",
-    "workbench.preferredDarkColorTheme": "Default Dark Modern",
+    "workbench.colorTheme": "Light Modern",
+    "workbench.preferredDarkColorTheme": "Dark Modern",
     "java.configuration.updateBuildConfiguration": "interactive"
 }
