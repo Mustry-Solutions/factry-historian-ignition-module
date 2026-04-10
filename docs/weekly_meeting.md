@@ -189,3 +189,13 @@ Still to do:
   - Race condition in handleSettingsChange()
   - Silent exception swallowing in doBrowse()                                        
   - Hardcoded timeouts not yet configurable          
+
+# 13/04/2026
+
+changes:
+  - use the generated token instead of port/uuid, name, etc.
+     remark: - the token will be visible in ignition (plain text store), this might be risk, if somebody has access to ignition file system. However, that is rarely the case. 
+             - we could store the token in secret, but it comes with None/Embedded/Referenced radio UI, which is simple just strange 
+
+  - recreate           
+             

@@ -32,7 +32,7 @@ services:
 
   # Factry Historian
   historian:
-    image: factry/historian:latest
+    image: registry.gitlab.com/factry/historian/historian-server:v8.2.0-beta-ade295879d
     container_name: factry-historian
     ports:
       - "8000:8000"   # Web UI

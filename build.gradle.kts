@@ -22,7 +22,7 @@ val buildNumber = if (buildNumberFile.exists()) buildNumberFile.readText().trim(
 val timestamp = SimpleDateFormat("yyyyMMddHH").format(Date())
 
 allprojects {
-    version = "0.3.${buildNumber}"
+    version = "0.8.${buildNumber}"
 }
 
 ignitionModule {
@@ -144,7 +144,7 @@ tasks.named("build") {
 }
 
 // Deploy tasks — copy module to Ignition and restart the container
-val ignitionModlDir = file("ignition/data/modules")
+val ignitionModlDir = file("ignition/data/var/ignition/modl")
 
 tasks.register<Copy>("copy") {
     group = "deploy"
