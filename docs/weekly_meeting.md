@@ -197,12 +197,11 @@ changes:
      remark: - the token will be visible in ignition (plain text store), this might be risk, if somebody has access to ignition file system. However, that is rarely the case. 
              - we could store the token in secret, but it comes with None/Embedded/Referenced radio UI, which is simple just strange 
 
-  - recreate           
-
-
-  - script to query data from the new factry (it fails)
-
+  -  using Factry image v8.2.0-beta
+ 
 remarks:
+  - script to query data from the new factry (it fails)
   - blocked at filling default data to the config page of the historian 
+  - new point to measurement silently fails
 
 
