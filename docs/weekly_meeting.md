@@ -205,6 +205,9 @@ changes:
 remarks:
   - script to query data from the new factry (it fails)
   - blocked at filling default data to the config page of the historian 
+  - pull request is open and it is growing
+  - failed methods can only send log error, but not other way to notify user
+        (for example in case of browsing the measurement/assets)
   
 
 

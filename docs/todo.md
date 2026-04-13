@@ -15,13 +15,5 @@
 
   [] Race condition in handleSettingsChange()
 
-  [] Silent exception swallowing in doBrowse()
 
 
-
-  [] Periodic measurement cache refresh to detect deleted measurements
-     Factry silently accepts createPoints for non-existent measurement UUIDs (no error returned).
-     If a measurement is deleted in Factry while Ignition is writing, data is silently lost.
-     Fix: add a periodic cache refresh (e.g. every 30s via the existing scheduler). When deleted
-     measurements disappear from the cache, getOrCreateUUID will recreate them on the next store.
-     The retry-on-rejection logic in FactryStorageEngine can stay as a safety net for actual errors.

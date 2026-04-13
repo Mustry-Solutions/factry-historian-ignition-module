@@ -136,7 +136,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             }
 
         } catch (Exception e) {
-            logger.error("Error browsing", e);
+            logger.error("Error browsing historian at path '{}': {}", root, e.getMessage(), e);
         }
     }
 
