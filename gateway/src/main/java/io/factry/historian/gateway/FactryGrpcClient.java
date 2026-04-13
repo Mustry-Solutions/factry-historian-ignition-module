@@ -24,7 +24,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.SSLException;
+import java.io.InputStream;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class FactryGrpcClient {
     private static final Logger logger = LoggerFactory.getLogger(FactryGrpcClient.class);
@@ -34,6 +37,13 @@ public class FactryGrpcClient {
             Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER);
 
     private static final long WRITE_DEADLINE_SECONDS = ModuleProperties.getWriteDeadlineSeconds();
+    private static final String CA_CERT_RESOURCE = "factry-historian-ca.crt";
+
+    /**
+     * Guards channel/stub access during reconfiguration.
+     * gRPC calls take the read lock (concurrent), reconfigure takes the write lock (exclusive).
+     */
+    private final ReadWriteLock channelLock = new ReentrantReadWriteLock();
 
     private volatile ManagedChannel channel;
     private volatile HistorianGrpc.HistorianBlockingStub blockingStub;
@@ -48,6 +58,7 @@ public class FactryGrpcClient {
 
     public CreatePointsReply createPoints(Points points) {
         logger.debug("Sending CreatePoints with {} points", points.getPointsCount());
+        channelLock.readLock().lock();
         try {
             CreatePointsReply reply = blockingStub
                     .withDeadlineAfter(WRITE_DEADLINE_SECONDS, TimeUnit.SECONDS)
@@ -60,27 +71,49 @@ public class FactryGrpcClient {
                 connected = false;
             }
             throw e;
+        } finally {
+            channelLock.readLock().unlock();
         }
     }
 
     public Measurements getMeasurements(MeasurementRequest request) {
         logger.debug("Sending GetMeasurements");
-        return blockingStub.getMeasurements(request);
+        channelLock.readLock().lock();
+        try {
+            return blockingStub.getMeasurements(request);
+        } finally {
+            channelLock.readLock().unlock();
+        }
     }
 
     public QueryTimeseriesResponse queryTimeseries(QueryTimeseriesRequest request) {
         logger.debug("Sending QueryTimeseries for {} measurements", request.getMeasurementUUIDsCount());
-        return blockingStub.queryTimeseries(request);
+        channelLock.readLock().lock();
+        try {
+            return blockingStub.queryTimeseries(request);
+        } finally {
+            channelLock.readLock().unlock();
+        }
     }
 
     public Assets getAssets() {
         logger.debug("Sending GetAssets");
-        return blockingStub.getAssets(GetAssetsRequest.newBuilder().build());
+        channelLock.readLock().lock();
+        try {
+            return blockingStub.getAssets(GetAssetsRequest.newBuilder().build());
+        } finally {
+            channelLock.readLock().unlock();
+        }
     }
 
     public CreateMeasurementsReply createMeasurements(CreateMeasurementsRequest request) {
         logger.debug("Sending CreateMeasurements with {} measurements", request.getMeasurementsCount());
-        return blockingStub.createMeasurements(request);
+        channelLock.readLock().lock();
+        try {
+            return blockingStub.createMeasurements(request);
+        } finally {
+            channelLock.readLock().unlock();
+        }
     }
 
     /**
@@ -90,10 +123,15 @@ public class FactryGrpcClient {
     public void reconfigure(String host, int port, String collectorUUID, String token,
                             boolean useTls, boolean skipTlsVerification) {
         logger.info("Reconfiguring gRPC client: {}:{}", host, port);
-        shutdown();
-        buildChannel(host, port, collectorUUID, token, useTls, skipTlsVerification);
-        logger.info("gRPC client reconfigured ({}), target={}:{}, collectorUUID={}",
-                tlsLabel(useTls, skipTlsVerification), host, port, collectorUUID);
+        channelLock.writeLock().lock();
+        try {
+            shutdownChannel();
+            buildChannel(host, port, collectorUUID, token, useTls, skipTlsVerification);
+            logger.info("gRPC client reconfigured ({}), target={}:{}, collectorUUID={}",
+                    tlsLabel(useTls, skipTlsVerification), host, port, collectorUUID);
+        } finally {
+            channelLock.writeLock().unlock();
+        }
     }
 
     private void buildChannel(String host, int port, String collectorUUID, String token,
@@ -103,6 +141,15 @@ public class FactryGrpcClient {
                 var sslBuilder = GrpcSslContexts.forClient();
                 if (skipTlsVerification) {
                     sslBuilder.trustManager(InsecureTrustManagerFactory.INSTANCE);
+                } else {
+                    InputStream caCert = getClass().getClassLoader().getResourceAsStream(CA_CERT_RESOURCE);
+                    if (caCert != null) {
+                        sslBuilder.trustManager(caCert);
+                        logger.info("Using bundled Factry CA certificate for TLS verification");
+                    } else {
+                        logger.warn("Bundled CA certificate '{}' not found, falling back to system trust store",
+                                CA_CERT_RESOURCE);
+                    }
                 }
                 this.channel = NettyChannelBuilder.forAddress(host, port)
                         .sslContext(sslBuilder.build())
@@ -130,7 +177,20 @@ public class FactryGrpcClient {
     }
 
     public void shutdown() {
+        channelLock.writeLock().lock();
+        try {
+            shutdownChannel();
+        } finally {
+            channelLock.writeLock().unlock();
+        }
+    }
+
+    /** Shuts down the channel. Caller must hold the write lock. */
+    private void shutdownChannel() {
         logger.info("Shutting down gRPC channel");
+        if (channel == null) {
+            return;
+        }
         try {
             channel.shutdown().awaitTermination(5, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
@@ -158,6 +218,7 @@ public class FactryGrpcClient {
      * @return true if the server responds
      */
     public boolean testConnection() {
+        channelLock.readLock().lock();
         try {
             blockingStub.withDeadlineAfter(5, TimeUnit.SECONDS)
                     .getMeasurements(MeasurementRequest.newBuilder().build());
@@ -167,6 +228,8 @@ public class FactryGrpcClient {
             connected = false;
             logger.debug("Connection test failed: {}", e.getMessage());
             return false;
+        } finally {
+            channelLock.readLock().unlock();
         }
     }
 }

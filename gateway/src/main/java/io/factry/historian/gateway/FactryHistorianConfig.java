@@ -35,14 +35,14 @@ public record FactryHistorianConfig(
         @Label("Batch Size")
         @FormField(FormFieldType.NUMBER)
         @DefaultValue("100")
-        @Description("Number of historical data points to collect before sending")
+        @Description("Data points are buffered and written in batches. A write is triggered when this many points have accumulated, or when the batch interval expires — whichever comes first.")
         int batchSize,
 
         @FormCategory("Advanced")
         @Label("Batch Interval (ms)")
         @FormField(FormFieldType.NUMBER)
         @DefaultValue("5000")
-        @Description("Time interval in milliseconds between batch sends")
+        @Description("Maximum time in milliseconds to wait before writing buffered data points. A write is triggered when this interval expires, or when the batch size is reached — whichever comes first.")
         int batchIntervalMs,
 
         @FormCategory("Advanced")
