@@ -1,6 +1,6 @@
 # TODO
      
-  [waiting] Factry uses self-signed certificate. We can add to the repo the public part and wired in the validation.
+
 
   [] So metadata flows one direction only: 
          Factry → Ignition create tag with metadata in Ignition 
@@ -13,7 +13,7 @@
         check the result (e.g. points arrived to Factry or aggragetation is correct)
         Null check in FactryGrpcClient.shutdown()
 
-  [] Race condition in handleSettingsChange()
+  
 
 
 

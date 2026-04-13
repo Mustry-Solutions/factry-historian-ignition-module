@@ -200,7 +200,8 @@ changes:
   -  using Factry image v8.2.0-beta
   -  Hardcoded timeouts not yet configurable into factry-historian.properties
   -  issue: new point to measurement silently fails, if measurement doesn't exist
-       solution: [] Periodic measurement cache refresh (30sec) to detect deleted measurements
+       solution:  Periodic measurement cache refresh (30sec) to detect deleted measurements
+  - Race condition in handleSettingsChange()
  
 remarks:
   - script to query data from the new factry (it fails)
@@ -208,6 +209,14 @@ remarks:
   - pull request is open and it is growing
   - failed methods can only send log error, but not other way to notify user
         (for example in case of browsing the measurement/assets)
-  
 
+Still: 
+  - more tests (test with Factry, test with calling Ignition endpoint for running scripts)
+  - check metadata flows
+  - build in CA certificate
+  - unit tests
+
+
+# 21/04/2026
+  - Factry CA certificate bundled in module JAR (gateway/src/main/resources/factry-historian-ca.crt). Used for TLS verification when skipTlsVerification is false.
 
