@@ -146,6 +146,16 @@ public class MeasurementCache {
         }
     }
 
+    /**
+     * Remove a measurement from the cache by UUID so the next
+     * {@link #getOrCreateUUID} call will re-create it in Factry.
+     */
+    public void evictByUUID(String uuid) {
+        uuidToMeasurement.remove(uuid);
+        tagPathToUUID.entrySet().removeIf(e -> e.getValue().equals(uuid));
+        logger.info("Evicted measurement UUID '{}' from cache", uuid);
+    }
+
     public int size() {
         return tagPathToUUID.size();
     }
