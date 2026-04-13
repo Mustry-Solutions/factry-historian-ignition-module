@@ -33,7 +33,7 @@ public class FactryGrpcClient {
     private static final Metadata.Key<String> AUTHORIZATION_KEY =
             Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER);
 
-    private static final long WRITE_DEADLINE_SECONDS = 3;
+    private static final long WRITE_DEADLINE_SECONDS = ModuleProperties.getWriteDeadlineSeconds();
 
     private volatile ManagedChannel channel;
     private volatile HistorianGrpc.HistorianBlockingStub blockingStub;
