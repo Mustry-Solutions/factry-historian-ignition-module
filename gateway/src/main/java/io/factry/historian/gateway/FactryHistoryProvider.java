@@ -7,9 +7,6 @@ import com.inductiveautomation.historian.gateway.interop.TagHistoryDataSinkBridg
 import com.inductiveautomation.historian.gateway.interop.TagHistoryStorageEngineBridge;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 import com.inductiveautomation.ignition.gateway.model.ProfileStatus;
-import com.inductiveautomation.ignition.gateway.secrets.Plaintext;
-import com.inductiveautomation.ignition.gateway.secrets.Secret;
-import com.inductiveautomation.ignition.gateway.secrets.SecretConfig;
 import com.inductiveautomation.ignition.gateway.storeforward.StorageKey;
 import com.inductiveautomation.ignition.gateway.storeforward.quarantine.QuarantineInterface;
 import com.inductiveautomation.ignition.gateway.storeforward.quarantine.QuarantinedDataInfo;
@@ -51,6 +48,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         super(context, historianName);
         this.context = context;
         this.settings = settings;
+        settings.applyTokenDefaults(settings.getToken());
         settings.validate();
         this.metrics = new HistorianMetrics();
 
@@ -58,7 +56,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
                 settings.getGrpcHost(),
                 settings.getGrpcPort(),
                 settings.getCollectorUUID(),
-                resolveToken(context, settings.getToken()),
+                settings.getToken(),
                 settings.isUseTls(),
                 settings.isSkipTlsVerification()
         );
@@ -195,6 +193,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         logger.info("Historian settings change: {}", newSettings);
 
         try {
+            newSettings.applyTokenDefaults(newSettings.getToken());
             newSettings.validate();
 
             // Reconfigure the gRPC client (shuts down old channel, creates new one)
@@ -202,7 +201,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
                     newSettings.getGrpcHost(),
                     newSettings.getGrpcPort(),
                     newSettings.getCollectorUUID(),
-                    resolveToken(context, newSettings.getToken()),
+                    newSettings.getToken(),
                     newSettings.isUseTls(),
                     newSettings.isSkipTlsVerification()
             );
@@ -268,18 +267,6 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
             }
         } catch (Exception e) {
             logger.debug("Error retrying quarantined data", e);
-        }
-    }
-
-    private static String resolveToken(GatewayContext context, SecretConfig secretConfig) {
-        if (secretConfig == null) {
-            return "";
-        }
-        try (Plaintext plaintext = Secret.create(context, secretConfig).getPlaintext()) {
-            return plaintext.getAsString();
-        } catch (Exception e) {
-            logger.error("Failed to resolve token secret", e);
-            return "";
         }
     }
 

@@ -198,4 +198,11 @@ changes:
              - we could store the token in secret, but it comes with None/Embedded/Referenced radio UI, which is simple just strange 
 
   - recreate           
-             
+
+
+  - script to query data from the new factry (it fails)
+
+remarks:
+  - blocked at filling default data to the config page of the historian 
+
+
