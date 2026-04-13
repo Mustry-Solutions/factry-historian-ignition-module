@@ -42,7 +42,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
     /** Cached status to avoid hitting gRPC on every gateway UI poll. */
     private volatile ProfileStatus cachedStatus = ProfileStatus.UNKNOWN;
     private volatile long statusCheckedAt = 0;
-    private static final long STATUS_CACHE_MS = 30_000; // 30 seconds
+    private static final long STATUS_CACHE_MS = ModuleProperties.getStatusCacheMs();
 
     public FactryHistoryProvider(GatewayContext context, String historianName, FactryHistorianSettings settings) {
         super(context, historianName);
@@ -126,10 +126,15 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
             scheduledExecutor.scheduleWithFixedDelay(
                     metrics::logSummary, 30, 30, TimeUnit.SECONDS);
 
+            // Periodic measurement cache refresh to detect deleted measurements
+            long refreshInterval = ModuleProperties.getMeasurementCacheRefreshSeconds();
+            scheduledExecutor.scheduleWithFixedDelay(
+                    this::refreshMeasurementCache, refreshInterval, refreshInterval, TimeUnit.SECONDS);
+
             logger.info("Store-and-forward enabled via engine '{}', sink accepting: {}",
                     sfEngine, dataSinkBridge.isAccepting());
         } else {
-            // Even without S&F, schedule metrics logging
+            // Even without S&F, schedule metrics logging and cache refresh
             scheduledExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "factry-historian-scheduler");
                 t.setDaemon(true);
@@ -137,6 +142,10 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
             });
             scheduledExecutor.scheduleWithFixedDelay(
                     metrics::logSummary, 30, 30, TimeUnit.SECONDS);
+
+            long refreshInterval = ModuleProperties.getMeasurementCacheRefreshSeconds();
+            scheduledExecutor.scheduleWithFixedDelay(
+                    this::refreshMeasurementCache, refreshInterval, refreshInterval, TimeUnit.SECONDS);
         }
 
         logger.info("Factry Historian - Startup Complete");
@@ -267,6 +276,21 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
             }
         } catch (Exception e) {
             logger.debug("Error retrying quarantined data", e);
+        }
+    }
+
+    private void refreshMeasurementCache() {
+        try {
+            int before = measurementCache.size();
+            measurementCache.refresh(grpcClient);
+            int after = measurementCache.size();
+            if (before != after) {
+                logger.info("Measurement cache refreshed: {} -> {} entries", before, after);
+            } else {
+                logger.debug("Measurement cache refreshed: {} entries (unchanged)", after);
+            }
+        } catch (Exception e) {
+            logger.debug("Error refreshing measurement cache", e);
         }
     }
 

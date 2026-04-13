@@ -1,6 +1,6 @@
 # TODO
      
-  [] Factry uses self-signed certificate. We can add to the repo the public part and wired in the validation.
+  [waiting] Factry uses self-signed certificate. We can add to the repo the public part and wired in the validation.
 
   [] So metadata flows one direction only: 
          Factry → Ignition create tag with metadata in Ignition 
@@ -17,7 +17,7 @@
 
   [] Silent exception swallowing in doBrowse()
 
-  [] Hardcoded timeouts not yet configurable
+
 
   [] Periodic measurement cache refresh to detect deleted measurements
      Factry silently accepts createPoints for non-existent measurement UUIDs (no error returned).

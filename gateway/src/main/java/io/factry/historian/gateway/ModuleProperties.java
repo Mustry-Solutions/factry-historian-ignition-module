@@ -40,6 +40,10 @@ public final class ModuleProperties {
         return getLong("status.cache.ms", 30_000);
     }
 
+    public static long getMeasurementCacheRefreshSeconds() {
+        return getLong("measurement.cache.refresh.seconds", 30);
+    }
+
     private static long getLong(String key, long defaultValue) {
         String val = props.getProperty(key);
         if (val != null) {

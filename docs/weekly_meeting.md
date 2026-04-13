@@ -198,10 +198,13 @@ changes:
              - we could store the token in secret, but it comes with None/Embedded/Referenced radio UI, which is simple just strange 
 
   -  using Factry image v8.2.0-beta
+  -  Hardcoded timeouts not yet configurable into factry-historian.properties
+  -  issue: new point to measurement silently fails, if measurement doesn't exist
+       solution: [] Periodic measurement cache refresh (30sec) to detect deleted measurements
  
 remarks:
   - script to query data from the new factry (it fails)
   - blocked at filling default data to the config page of the historian 
-  - new point to measurement silently fails
+  
 
 
