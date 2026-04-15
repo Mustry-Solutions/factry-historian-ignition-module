@@ -153,3 +153,6 @@ ignition/config/resources/external/
 venv
 build-number.txt
 docs/.design/
+
+# Docker image tarballs (loaded locally, not committed)
+docker/

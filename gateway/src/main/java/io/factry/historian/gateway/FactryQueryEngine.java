@@ -572,21 +572,26 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         }
     }
 
+    /**
+     * Convert a TimeWindow to a Go-style duration string (e.g. "2h30m", "45s").
+     * Factry uses Go's time.ParseDuration() which does not accept ISO 8601.
+     */
     private static String timeWindowToPeriod(TimeWindow tw) {
         long totalSeconds = tw.toSeconds();
         if (totalSeconds <= 0) {
-            return "PT1M";
+            return "1m";
         }
-        if (totalSeconds % 86400 == 0) {
-            return "P" + (totalSeconds / 86400) + "D";
-        }
-        if (totalSeconds % 3600 == 0) {
-            return "PT" + (totalSeconds / 3600) + "H";
-        }
-        if (totalSeconds % 60 == 0) {
-            return "PT" + (totalSeconds / 60) + "M";
-        }
-        return "PT" + totalSeconds + "S";
+
+        StringBuilder sb = new StringBuilder();
+        long hours = totalSeconds / 3600;
+        long minutes = (totalSeconds % 3600) / 60;
+        long seconds = totalSeconds % 60;
+
+        if (hours > 0) sb.append(hours).append("h");
+        if (minutes > 0) sb.append(minutes).append("m");
+        if (seconds > 0) sb.append(seconds).append("s");
+
+        return sb.length() > 0 ? sb.toString() : "1m";
     }
 
     @Override
