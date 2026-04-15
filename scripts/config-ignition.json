@@ -1,0 +1,7 @@
+{
+  "host": "localhost",
+  "port": 8001,
+  "collectorUUID": "a16cac76-3272-11f1-b9ed-4a5934d93d4f",
+  "token": "PASTE_IGNITION_COLLECTOR_TOKEN_HERE",
+  "measurementUUID": "e468e8dc-3272-11f1-b9ed-4a5934d93d4f"
+}
