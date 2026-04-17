@@ -144,12 +144,6 @@ ignitionModule {
     skipModlSigning.set(project.findProperty("skipSigning")?.toString()?.toBoolean() ?: false)
 }
 
-tasks.named("build") {
-    doLast {
-        buildNumberFile.writeText("${majorMinor}\n${buildNumber + 1}")
-    }
-}
-
 tasks.register("printVersion") {
     group = "help"
     description = "Print the project version (used by CI/CD)"
