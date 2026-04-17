@@ -18,8 +18,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Fetch all tags
-        run: git fetch --tags
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
       - name: Download module artifact
         uses: actions/download-artifact@v4
@@ -28,24 +31,7 @@ jobs:
 
       - name: Calculate version
         run: |
-          MAJOR=$(grep MAJOR VERSION | cut -d= -f2)
-          MINOR=$(grep MINOR VERSION | cut -d= -f2)
-          CURRENT_MINOR="$MAJOR.$MINOR"
-
-          LAST_TAG=$(git tag -l "${MAJOR}.${MINOR}.*" --sort=-v:version | head -1)
-
-          if [ -z "$LAST_TAG" ]; then
-            PATCH=0
-          else
-            LAST_MINOR=$(echo $LAST_TAG | cut -d. -f1,2)
-            if [ "$CURRENT_MINOR" != "$LAST_MINOR" ]; then
-              PATCH=0
-            else
-              PATCH=$(( $(echo $LAST_TAG | cut -d. -f3) + 1 ))
-            fi
-          fi
-
-          VERSION="$MAJOR.$MINOR.$PATCH"
+          VERSION=$(./gradlew -q printVersion)
           DATE=$(date '+%Y%m%d')
           BRANCH_NAME=$(echo "${GITHUB_REF#refs/heads/}" | tr '/' '-')
           RELEASE_NAME="Release_v${VERSION}_${DATE}.${GITHUB_RUN_NUMBER}-${BRANCH_NAME}"
@@ -56,6 +42,18 @@ jobs:
 
           echo "Calculated version: ${VERSION}"
           echo "Release name: ${RELEASE_NAME}"
+
+      - name: Increment build number
+        run: |
+          PREFIX=$(head -1 build-number.txt)
+          CURRENT=$(tail -1 build-number.txt | tr -d '[:space:]')
+          NEXT=$(( CURRENT + 1 ))
+          printf '%s\n%s' "$PREFIX" "$NEXT" > build-number.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add build-number.txt
+          git commit -m "bump build number to ${PREFIX}.${NEXT} [skip ci]"
+          git push origin HEAD:${GITHUB_REF#refs/heads/}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1

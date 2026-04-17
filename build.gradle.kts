@@ -16,13 +16,20 @@ plugins {
 
 val sdk_version by extra("8.3.3")
 
+val majorMinor = "0.9"
+
 val buildNumberFile = file("build-number.txt")
-val buildNumber = if (buildNumberFile.exists()) buildNumberFile.readText().trim().toInt() else 0
+val buildNumber = if (buildNumberFile.exists()) {
+    val lines = buildNumberFile.readLines()
+    val savedPrefix = lines.getOrElse(0) { "" }
+    val savedPatch = lines.getOrElse(1) { "0" }.trim().toInt()
+    if (savedPrefix == majorMinor) savedPatch else 0
+} else 0
 
 val timestamp = SimpleDateFormat("yyyyMMddHH").format(Date())
 
 allprojects {
-    version = "0.8.${buildNumber}"
+    version = "${majorMinor}.${buildNumber}"
 }
 
 ignitionModule {
@@ -139,7 +146,15 @@ ignitionModule {
 
 tasks.named("build") {
     doLast {
-        buildNumberFile.writeText("${buildNumber + 1}")
+        buildNumberFile.writeText("${majorMinor}\n${buildNumber + 1}")
+    }
+}
+
+tasks.register("printVersion") {
+    group = "help"
+    description = "Print the project version (used by CI/CD)"
+    doLast {
+        println(project.version)
     }
 }
 
@@ -160,4 +175,11 @@ tasks.register<Exec>("restart") {
     description = "Restart the Ignition Docker container"
     dependsOn("copy")
     commandLine("docker", "compose", "restart", "ignition")
+}
+
+// Integration tests — delegates to the gateway subproject
+tasks.register("integrationTest") {
+    group = "verification"
+    description = "Run integration tests against running Ignition + Factry"
+    dependsOn(":gateway:integrationTest")
 }

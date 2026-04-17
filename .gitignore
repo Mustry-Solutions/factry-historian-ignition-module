@@ -109,7 +109,13 @@ certificates
 gradle.properties
 
 # Ignition runtime data — all auto-generated, never commit
-ignition/data/
+# We selectively un-ignore the WebDev integration test scripts
+ignition/data/*
+!ignition/data/projects/
+ignition/data/projects/*
+!ignition/data/projects/TestFactry/
+ignition/data/projects/TestFactry/*
+!ignition/data/projects/TestFactry/com.inductiveautomation.webdev/
 
 # Ignition module binaries are build artifacts
 ignition/user-lib/
@@ -151,7 +157,6 @@ ignition/config/resources/external/
 *valueStore.idb
 
 venv
-build-number.txt
 docs/.design/
 
 # Docker image tarballs (loaded locally, not committed)

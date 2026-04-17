@@ -54,6 +54,60 @@ dependencies {
     testRuntimeOnly("org.slf4j:slf4j-simple:2.0.12")
 }
 
+// ---------------------------------------------------------------------------
+// Integration test source set
+// ---------------------------------------------------------------------------
+sourceSets {
+    create("integrationTest") {
+        java.srcDir("src/integrationTest/java")
+        // Reuse main's compiled classes (including generated proto stubs) and resources
+        compileClasspath += sourceSets.main.get().output + configurations["modlImplementation"]
+        runtimeClasspath += sourceSets.main.get().output + configurations["modlImplementation"]
+    }
+}
+
+val integrationTestImplementation by configurations.getting {
+    extendsFrom(configurations["implementation"], configurations["modlImplementation"])
+}
+val integrationTestRuntimeOnly by configurations.getting {
+    extendsFrom(configurations["runtimeOnly"])
+}
+
+dependencies {
+    integrationTestImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+    integrationTestImplementation("com.google.code.gson:gson:2.10.1")
+    integrationTestRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    integrationTestRuntimeOnly("org.slf4j:slf4j-simple:2.0.12")
+}
+
+tasks.register<Test>("integrationTest") {
+    group = "verification"
+    description = "Run integration tests against running Ignition + Factry"
+    testClassesDirs = sourceSets["integrationTest"].output.classesDirs
+    classpath = sourceSets["integrationTest"].runtimeClasspath
+    useJUnitPlatform()
+
+    // Pass system properties from Gradle command line (-P) or env vars
+    systemProperty("gateway.url", System.getenv("GATEWAY_URL") ?: "http://localhost:8089")
+    systemProperty("webdev.project", System.getenv("WEBDEV_PROJECT") ?: "TestFactry")
+    systemProperty("historian.name", System.getenv("HISTORIAN_NAME") ?: "Factry Historian 0.8")
+    systemProperty("grpc.host", System.getenv("GRPC_HOST") ?: "localhost")
+    systemProperty("grpc.port", System.getenv("GRPC_PORT") ?: "8001")
+    systemProperty("collector.uuid", System.getenv("COLLECTOR_UUID") ?: "")
+    systemProperty("collector.token", System.getenv("COLLECTOR_TOKEN") ?: "")
+    systemProperty("gateway.system.name", System.getenv("GATEWAY_SYSTEM_NAME") ?: "Ignition-296a8ca4b6cd")
+
+    testLogging {
+        events("passed", "skipped", "failed")
+        showStandardStreams = true
+    }
+}
+
+// Ensure integration test compilation sees main sources
+tasks.named<JavaCompile>("compileIntegrationTestJava") {
+    dependsOn(tasks.named("compileJava"))
+}
+
 tasks.test {
     useJUnitPlatform()
 }
