@@ -1,7 +1,0 @@
-{
-  "host": "localhost",
-  "port": 9876,
-  "collectorUUID": "test-collector-001",
-  "token": "fake-token",
-  "measurementUUID": "meas-000004"
-}
