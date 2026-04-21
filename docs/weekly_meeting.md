@@ -217,6 +217,27 @@ Still:
   - unit tests
 
 
-# 21/04/2026
+# 20/04/2026
   - Factry CA certificate bundled in module JAR (gateway/src/main/resources/factry-historian-ca.crt). Used for TLS verification when skipTlsVerification is false.
+  - testing with new factry historian version 
+  - unit testing './gradlew cleanTest test':
+      Test results: SUCCESS (74 tests, 74 passed, 0 failed, 0 skipped)
+  - integration testing 
+      - script loaded to ignition
+      - script is executed on the gateway with webdev
+      - scripts does something (like sending data to factry)
+      - returns result
+      - integration test can call factry directly(check if data is there)
+      - show success/failure
+
+Next is prepare for version 1.0:
+  - good unit test coverage
+  - good integration test coverage
+  - documentation 
+  - check feature completeness (e.g. metadata flows)
+  - demo 
+  - code review
+
+
+
 
