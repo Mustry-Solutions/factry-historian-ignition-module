@@ -79,10 +79,16 @@ class FactryIntegrationTest {
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
 
-        // gRPC channel for direct Factry access
-        grpcChannel = NettyChannelBuilder.forAddress(GRPC_HOST, GRPC_PORT)
-                .usePlaintext()
-                .build();
+        // gRPC channel for direct Factry access (TLS with insecure trust, matching module config)
+        try {
+            grpcChannel = NettyChannelBuilder.forAddress(GRPC_HOST, GRPC_PORT)
+                    .sslContext(io.grpc.netty.shaded.io.grpc.netty.GrpcSslContexts.forClient()
+                            .trustManager(io.grpc.netty.shaded.io.netty.handler.ssl.util.InsecureTrustManagerFactory.INSTANCE)
+                            .build())
+                    .build();
+        } catch (javax.net.ssl.SSLException e) {
+            throw new RuntimeException("Failed to create TLS gRPC channel", e);
+        }
 
         Metadata headers = new Metadata();
         if (!COLLECTOR_UUID.isEmpty()) {
@@ -98,7 +104,14 @@ class FactryIntegrationTest {
 
         // Verify connectivity
         assertDoesNotThrow(() -> checkGateway(), "Ignition gateway unreachable at " + GATEWAY_URL);
-        assertDoesNotThrow(() -> checkFactryGrpc(), "Factry gRPC unreachable at " + GRPC_HOST + ":" + GRPC_PORT);
+        try {
+            checkFactryGrpc();
+        } catch (Exception e) {
+            System.out.println("  Factry gRPC: FAILED — " + e.getMessage());
+            System.out.println("  Collector UUID: " + (COLLECTOR_UUID.isEmpty() ? "(empty)" : COLLECTOR_UUID));
+            System.out.println("  Token: " + (COLLECTOR_TOKEN.isEmpty() ? "(empty)" : COLLECTOR_TOKEN.substring(0, Math.min(20, COLLECTOR_TOKEN.length())) + "..."));
+            fail("Factry gRPC unreachable at " + GRPC_HOST + ":" + GRPC_PORT + " — " + e.getMessage());
+        }
     }
 
     @AfterAll
@@ -145,6 +158,9 @@ class FactryIntegrationTest {
         assertNotNull(uuid, "Measurement UUID should not be null");
         assertFalse(uuid.isEmpty(), "Measurement UUID should not be empty");
 
+        // Print measurement status for diagnostics
+        printMeasurementStatus(measurementName);
+
         // Insert 5 data points directly via gRPC
         long baseTs = 1700000000000L;
         List<Point> points = new ArrayList<>();
@@ -155,6 +171,15 @@ class FactryIntegrationTest {
 
         // Small delay for Factry to index
         Thread.sleep(2000);
+
+        // Verify data exists via direct gRPC query first
+        QueryTimeseriesResponse grpcResult = grpcQuery(uuid, baseTs - 1000, baseTs + 5000);
+        System.out.println("  gRPC direct query: " + grpcResult.getSeriesCount() + " series");
+        if (!grpcResult.getSeriesList().isEmpty()) {
+            System.out.println("  gRPC points: " + grpcResult.getSeries(0).getDataPointsCount());
+        } else {
+            System.out.println("  gRPC returned no series!");
+        }
 
         // Query via Ignition WebDev
         Map<String, Object> queryResult = gatewayQuery(
@@ -504,6 +529,8 @@ class FactryIntegrationTest {
         String url = GATEWAY_URL + "/system/webdev/" + WEBDEV_PROJECT + "/" + endpoint;
         String jsonBody = gson.toJson(data);
 
+        System.out.println("  >> POST " + url);
+
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .header("Content-Type", "text/plain")
@@ -512,11 +539,23 @@ class FactryIntegrationTest {
                 .build();
 
         HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+        System.out.println("  << " + resp.statusCode() + " " + resp.body());
+
         assertEquals(200, resp.statusCode(),
                 "WebDev " + endpoint + " returned " + resp.statusCode() + ": " + resp.body());
 
         Type type = new TypeToken<Map<String, Object>>() {}.getType();
-        return gson.fromJson(resp.body(), type);
+        Map<String, Object> result = gson.fromJson(resp.body(), type);
+
+        // Surface WebDev script errors (success=false with error/trace fields)
+        if (Boolean.FALSE.equals(result.get("success"))) {
+            System.out.println("  !! WebDev error: " + result.get("error"));
+            if (result.containsKey("trace")) {
+                System.out.println("  !! Trace: " + result.get("trace"));
+            }
+        }
+
+        return result;
     }
 
     // -- Assertion helpers ----------------------------------------------------
@@ -546,6 +585,19 @@ class FactryIntegrationTest {
         double actual = ((Number) val).doubleValue();
         assertEquals(expected, actual, Math.abs(expected * tolerance) + tolerance,
                 label + " value");
+    }
+
+    /** Print measurement status for diagnostics. */
+    private void printMeasurementStatus(String name) {
+        Measurements measurements = grpcStub.getMeasurements(MeasurementRequest.newBuilder().build());
+        for (Measurement m : measurements.getMeasurementsList()) {
+            if (m.getName().equals(name)) {
+                System.out.println("  Measurement '" + name + "': uuid=" + m.getUuid()
+                        + " status=" + m.getStatus());
+                return;
+            }
+        }
+        System.out.println("  Measurement '" + name + "': NOT FOUND");
     }
 
     /** Generate a random lowercase suffix. */

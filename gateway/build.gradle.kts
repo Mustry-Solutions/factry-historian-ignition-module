@@ -1,4 +1,6 @@
 import com.google.protobuf.gradle.*
+import org.gradle.api.tasks.testing.logging.TestLogEvent
+import org.gradle.kotlin.dsl.KotlinClosure2
 
 plugins {
     `java-library`
@@ -93,8 +95,8 @@ tasks.register<Test>("integrationTest") {
     systemProperty("historian.name", System.getenv("HISTORIAN_NAME") ?: "Factry Historian 0.8")
     systemProperty("grpc.host", System.getenv("GRPC_HOST") ?: "localhost")
     systemProperty("grpc.port", System.getenv("GRPC_PORT") ?: "8001")
-    systemProperty("collector.uuid", System.getenv("COLLECTOR_UUID") ?: "")
-    systemProperty("collector.token", System.getenv("COLLECTOR_TOKEN") ?: "")
+    systemProperty("collector.uuid", System.getenv("COLLECTOR_UUID") ?: "a16cac76-3272-11f1-b9ed-4a5934d93d4f")
+    systemProperty("collector.token", System.getenv("COLLECTOR_TOKEN") ?: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJodHRwOi8vaGlzdG9yaWFuIiwiZXhwIjoyNTY0MDM2OTAzLCJncnBjLXBvcnQiOiI4MDAxIiwiaWF0IjoxNzc1NjM2OTAzLCJpc3MiOiJmYWN0cnkuaW8iLCJqdGkiOiJjb2xsZWN0b3ItYTE2Y2FjNzYtMzI3Mi0xMWYxLWI5ZWQtNGE1OTM0ZDkzZDRmIiwibmFtZSI6IkluZ2l0aW9uIiwib3JnYW5pemF0aW9uLXV1aWQiOiIxOTMwOTkyMC0zMjY5LTExZjEtYjkwYi04ZTMzMzdkZGM3MjgiLCJyZXN0LXBvcnQiOiI4MDAwIiwidXNlciI6eyJuYW1lIjoiY29sbGVjdG9yLWExNmNhYzc2LTMyNzItMTFmMS1iOWVkLTRhNTkzNGQ5M2Q0ZiIsInV1aWQiOiJhMTZjYWM3Ni0zMjcyLTExZjEtYjllZC00YTU5MzRkOTNkNGYifSwidXVpZCI6ImExNmNhYzc2LTMyNzItMTFmMS1iOWVkLTRhNTkzNGQ5M2Q0ZiJ9.8w_KLgd458TJsnhk8VkKIf1vOc8FUqOWhu5zAUdTHig")
     systemProperty("gateway.system.name", System.getenv("GATEWAY_SYSTEM_NAME") ?: "Ignition-296a8ca4b6cd")
 
     testLogging {
@@ -110,6 +112,17 @@ tasks.named<JavaCompile>("compileIntegrationTestJava") {
 
 tasks.test {
     useJUnitPlatform()
+    testLogging {
+        events("passed", "skipped", "failed")
+        showStandardStreams = false
+        afterSuite(KotlinClosure2<TestDescriptor, TestResult, Unit>({ desc, result ->
+            if (desc.parent == null) {
+                println("\nTest results: ${result.resultType} " +
+                    "(${result.testCount} tests, ${result.successfulTestCount} passed, " +
+                    "${result.failedTestCount} failed, ${result.skippedTestCount} skipped)")
+            }
+        }))
+    }
 }
 
 // Ensure compileTestJava sees test sources (protobuf plugin can interfere)
