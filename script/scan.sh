@@ -7,7 +7,7 @@
 #   API_KEY      - Ignition API token for authentication
 
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:8089}"
-API_KEY="${API_KEY:-cicd:sMwrq8GV0e16T6yzpY9_5iejY6wO_6ddHY__RKb-ksM}"
+API_KEY="${API_KEY:-cicd:ZI_JqKRI99tHqU1cqt7cY0fe3oDu2bYJPd4_v5CufWQ}"
 
 scan_gateway() {
     local name=$1
