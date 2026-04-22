@@ -129,6 +129,31 @@ You can also check the Ignition gateway logs for messages like:
 gRPC store succeeded: stored, count=1
 ```
 
+## 9. Visualize with Power Chart (Optional)
+
+To visually verify the query side works, create a Perspective project with a Power Chart.
+
+### Create a Perspective Project
+
+1. Download the Ignition Designer Launcher from http://localhost:8089
+2. Launch it and connect to `localhost:8089`
+3. Log in with admin / password
+4. Click **New Project**, name it (e.g., `QueryTest`), enable **Perspective**, click **Create**
+
+### Add a Power Chart
+
+1. Open the default **Page** (or create a new view)
+2. In the **Component Palette**, search for **Power Chart** (under Charts)
+3. Drag it onto the view and resize it
+
+### Browse and Plot Data
+
+1. Open the project in a browser: http://localhost:8089/data/perspective/client/QueryTest
+2. In the Power Chart toolbar, click the **tag browse** icon
+3. Expand your Factry Historian provider — you should see the measurements
+4. Select one or more tags and confirm
+5. The chart should display historical data
+
 ## Troubleshooting
 
 ### "UNAVAILABLE" or TLS errors in gateway logs

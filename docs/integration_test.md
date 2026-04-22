@@ -145,7 +145,8 @@ GATEWAY_SYSTEM_NAME="your-system-name" ./gradlew integrationTest
 ./gradlew integrationTest
 
 # Run unit tests (does not require running infrastructure)
-./gradlew test
+# (remark: cleanTest needed for redo it, otherwise it is cashed)
+./gradlew cleanTest test
 ```
 
 ## Environment variables
