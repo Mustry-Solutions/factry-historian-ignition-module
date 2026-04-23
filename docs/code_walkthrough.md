@@ -410,3 +410,26 @@ FactryStorageEngine.doStoreAtomic(points)
        │
        └─ gRPC → Factry Historian → InfluxDB
 ```
+
+---
+
+## 11. Remarks
+
+
+
+### A few items were intentionally left out or deferred:
+
+**Explicitly out of scope:**
+- **Annotations** — not supported by the Factry platform
+- **History renaming** — not supported by the Factry platform
+- **Extended scripting** (e.g. `system.factry.queryEvents`) — deferred until customer demand exists
+
+**Store metadata is a no-op:** `FactryStorageEngine.doStoreMetadata()` accepts the call and returns success, but does not forward metadata to Factry. Metadata (engineering units, limits, etc.) is managed on the Factry platform directly, not pushed from Ignition.
+
+**Pagination:** The design document lists pagination as a provider requirement. In practice, there is no paginated use case — charts receive the full dataset and Jython scripts get a complete `DataSet` object. The gRPC proto does define `limit`/`offset` fields on `QueryTimeseriesRequest`, so pagination can be added if Factry ever imposes response size limits.
+
+**Browse filters and optional query parameters:** The design document's appendix lists optional parameters for `browse`, `queryRawPoints`, and `queryAggregatedPoints` (e.g. `returnSize`, `includeBounds`, `fillModes`, `nameFilters`). These are part of the Ignition scripting API — the framework parses them and passes relevant options to the query engine. Our implementation handles the core parameters (time range, aggregation type, time window). The optional parameters are either handled by the Ignition framework itself or are not relevant for the Factry backend.
+
+### Known Limitation: String Data in Raw Queries
+
+The query engine correctly returns string data points to the Ignition framework (confirmed via `HistorianMetrics` counters), but Ignition 8.3's `system.historian.queryRawPoints` produces a `DataSet` with 0 rows for string-typed measurements. This appears to be a framework-level limitation in how `DataSet` handles non-numeric values. Numeric and boolean data types work correctly.

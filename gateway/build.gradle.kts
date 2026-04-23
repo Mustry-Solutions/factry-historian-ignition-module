@@ -89,6 +89,9 @@ tasks.register<Test>("integrationTest") {
     classpath = sourceSets["integrationTest"].runtimeClasspath
     useJUnitPlatform()
 
+    // Always re-run — integration tests depend on external services, not just code
+    outputs.upToDateWhen { false }
+
     // Pass system properties from Gradle command line (-P) or env vars
     systemProperty("gateway.url", System.getenv("GATEWAY_URL") ?: "http://localhost:8089")
     systemProperty("webdev.project", System.getenv("WEBDEV_PROJECT") ?: "TestFactry")
