@@ -207,7 +207,7 @@ public class FactryStorageEngine extends AbstractStorageEngine {
         logger.info("Shutting down Factry Storage Engine");
     }
 
-    private static String qualityToStatus(int qualityCode) {
+    static String qualityToStatus(int qualityCode) {
         if (qualityCode >= 192) {
             return "Good";
         } else if (qualityCode >= 64) {

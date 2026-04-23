@@ -192,7 +192,7 @@ public class MeasurementCache {
         return uuidToAsset.values();
     }
 
-    private static String toFactryDataType(Object value) {
+    static String toFactryDataType(Object value) {
         if (value instanceof Boolean) {
             return "boolean";
         } else if (value instanceof Number) {

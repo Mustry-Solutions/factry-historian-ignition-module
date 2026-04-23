@@ -546,7 +546,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         return count;
     }
 
-    private static String toFactryAggregateFunction(String name) {
+    static String toFactryAggregateFunction(String name) {
         switch (name) {
             case "Average":
             case "SimpleAverage":
@@ -576,7 +576,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      * Convert a TimeWindow to a Go-style duration string (e.g. "2h30m", "45s").
      * Factry uses Go's time.ParseDuration() which does not accept ISO 8601.
      */
-    private static String timeWindowToPeriod(TimeWindow tw) {
+    static String timeWindowToPeriod(TimeWindow tw) {
         long totalSeconds = tw.toSeconds();
         if (totalSeconds <= 0) {
             return "1m";
@@ -671,7 +671,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         return TagPathUtil.qualifiedPathToStoredPath(path.toString());
     }
 
-    private static QualityCode statusToQuality(String status) {
+    static QualityCode statusToQuality(String status) {
         if (status == null) {
             return QualityCode.Good;
         }
@@ -687,7 +687,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         }
     }
 
-    private static Object protoValueToJava(com.google.protobuf.Value value) {
+    static Object protoValueToJava(com.google.protobuf.Value value) {
         if (value == null) {
             return null;
         }

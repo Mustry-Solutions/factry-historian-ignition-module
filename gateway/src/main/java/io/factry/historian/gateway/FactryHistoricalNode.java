@@ -46,7 +46,7 @@ public class FactryHistoricalNode implements HistoricalNode {
         return Optional.empty();
     }
 
-    private static DataType toIgnitionDataType(String factryDataType) {
+    static DataType toIgnitionDataType(String factryDataType) {
         if (factryDataType == null) {
             return DataType.Float8;
         }
