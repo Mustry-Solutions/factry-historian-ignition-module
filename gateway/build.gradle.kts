@@ -50,9 +50,14 @@ dependencies {
     // Test dependencies
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testImplementation("com.inductiveautomation.ignitionsdk:ignition-common:${rootProject.extra["sdk_version"]}")
     testImplementation("com.inductiveautomation.historian:historian-gateway-api:1.3.3") {
         isTransitive = false
     }
+    testImplementation("com.inductiveautomation.historian:historian-common:1.3.3") {
+        isTransitive = false
+    }
+    testImplementation("com.google.protobuf:protobuf-java:$protobufVersion")
     testRuntimeOnly("org.slf4j:slf4j-simple:2.0.12")
 }
 
@@ -101,6 +106,8 @@ tasks.register<Test>("integrationTest") {
     systemProperty("collector.uuid", System.getenv("COLLECTOR_UUID") ?: "a16cac76-3272-11f1-b9ed-4a5934d93d4f")
     systemProperty("collector.token", System.getenv("COLLECTOR_TOKEN") ?: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJodHRwOi8vaGlzdG9yaWFuIiwiZXhwIjoyNTY0MDM2OTAzLCJncnBjLXBvcnQiOiI4MDAxIiwiaWF0IjoxNzc1NjM2OTAzLCJpc3MiOiJmYWN0cnkuaW8iLCJqdGkiOiJjb2xsZWN0b3ItYTE2Y2FjNzYtMzI3Mi0xMWYxLWI5ZWQtNGE1OTM0ZDkzZDRmIiwibmFtZSI6IkluZ2l0aW9uIiwib3JnYW5pemF0aW9uLXV1aWQiOiIxOTMwOTkyMC0zMjY5LTExZjEtYjkwYi04ZTMzMzdkZGM3MjgiLCJyZXN0LXBvcnQiOiI4MDAwIiwidXNlciI6eyJuYW1lIjoiY29sbGVjdG9yLWExNmNhYzc2LTMyNzItMTFmMS1iOWVkLTRhNTkzNGQ5M2Q0ZiIsInV1aWQiOiJhMTZjYWM3Ni0zMjcyLTExZjEtYjllZC00YTU5MzRkOTNkNGYifSwidXVpZCI6ImExNmNhYzc2LTMyNzItMTFmMS1iOWVkLTRhNTkzNGQ5M2Q0ZiJ9.8w_KLgd458TJsnhk8VkKIf1vOc8FUqOWhu5zAUdTHig")
     systemProperty("gateway.system.name", System.getenv("GATEWAY_SYSTEM_NAME") ?: "Ignition-296a8ca4b6cd")
+    systemProperty("historian.name.nosf", System.getenv("HISTORIAN_NAME_NOSF") ?: "")
+    systemProperty("historian.name.sf", System.getenv("HISTORIAN_NAME_SF") ?: "")
 
     testLogging {
         events("passed", "skipped", "failed")
