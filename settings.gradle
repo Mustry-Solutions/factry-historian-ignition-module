@@ -1,10 +1,15 @@
 pluginManagement {
+    // Gradle plugins we want to use
     plugins {
         id 'com.google.protobuf' version '0.9.4'
         id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
     }
+    // location of the plugins
     repositories {
+        // the official Gradle plugin registry (the plugins above live there)
         gradlePluginPortal()
+        // Inductive Automation public repository using Maven layout 
+        // resolve dependecies from here
         maven {
             url = "https://nexus.inductiveautomation.com/repository/public"
         }
