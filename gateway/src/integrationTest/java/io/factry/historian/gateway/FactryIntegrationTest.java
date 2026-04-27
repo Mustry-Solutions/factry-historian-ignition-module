@@ -289,9 +289,9 @@ class FactryIntegrationTest {
 
         @Test
         @Order(30)
-        @DisplayName("system.historian.queryAggregatedPoints — aggregation queries")
+        @DisplayName("system.historian.queryAggregatedPoints — all aggregation types")
         void testQueryAggregatedPoints() throws Exception {
-            section(label() + " - queryAggregatedPoints");
+            section(label() + " - queryAggregatedPoints (all aggregation types)");
 
             String tagName = TEST_PREFIX + "/" + label() + "/Aggregation";
             String measurementName = storedTagPath(tagName);
@@ -299,6 +299,7 @@ class FactryIntegrationTest {
             String uuid = createMeasurement(measurementName, "number");
             assertFalse(uuid.isEmpty());
 
+            // Insert 100 points with values 0..99 (1 second apart)
             long baseTs = 1700030000000L;
             List<Point> points = new ArrayList<>();
             for (int i = 0; i < 100; i++) {
@@ -310,48 +311,69 @@ class FactryIntegrationTest {
             Thread.sleep(2000);
 
             String qPath = qualifiedPath(historianName(), tagName);
+            long startMs = baseTs - 1000;
+            long endMs = baseTs + 100_000;
 
-            // Average
-            Map<String, Object> avgResult = webdevPost("test/queryAgg", Map.of(
+            // --- Average ---
+            assertAggQuery(qPath, startMs, endMs, "Average", 49.5, 5.0);
+
+            // --- SimpleAverage ---
+            assertAggQuery(qPath, startMs, endMs, "SimpleAverage", 49.5, 5.0);
+
+            // --- Minimum ---
+            assertAggQuery(qPath, startMs, endMs, "Minimum", 0.0, 1.0);
+
+            // --- Maximum ---
+            assertAggQuery(qPath, startMs, endMs, "Maximum", 99.0, 1.0);
+
+            // --- Sum ---
+            assertAggQuery(qPath, startMs, endMs, "Sum", 4950.0, 50.0);
+
+            // --- Count ---
+            assertAggQuery(qPath, startMs, endMs, "Count", 100.0, 5.0);
+
+            // --- LastValue ---
+            assertAggQuery(qPath, startMs, endMs, "LastValue", 99.0, 1.0);
+
+            // --- Range (spread = max - min) ---
+            assertAggQuery(qPath, startMs, endMs, "Range", 99.0, 1.0);
+
+            // --- Variance (population variance of 0..99 ≈ 833.25) ---
+            assertAggQuery(qPath, startMs, endMs, "Variance", 833.25, 50.0);
+
+            // --- StdDev (population stddev of 0..99 ≈ 28.87) ---
+            assertAggQuery(qPath, startMs, endMs, "StdDev", 28.87, 3.0);
+
+            // --- MinMax (emits min+max pairs, at least 2 points) ---
+            Map<String, Object> minMaxResult = webdevPost("test/queryAgg", Map.of(
                     "paths", List.of(qPath),
-                    "startDate", baseTs - 1000,
-                    "endDate", baseTs + 100_000,
-                    "aggregates", List.of("Average"),
+                    "startDate", startMs,
+                    "endDate", endMs,
+                    "aggregates", List.of("MinMax"),
                     "returnSize", 1
             ));
-            assertTrue((Boolean) avgResult.get("success"), "Average query should succeed");
-            double avgValue = extractAggregationValue(avgResult);
-            log("Average = " + avgValue + " (expected ~49.5)");
-            assertAggregationValue(avgResult, 49.5, 5.0, "Average");
-            pass("Average value");
+            assertTrue((Boolean) minMaxResult.get("success"), "MinMax query should succeed");
+            int minMaxRows = ((Number) minMaxResult.get("rowCount")).intValue();
+            log("MinMax returned " + minMaxRows + " rows (expected >= 2 for min+max pair)");
+            assertTrue(minMaxRows >= 2, "MinMax should return >= 2 rows, got " + minMaxRows);
+            pass("MinMax");
+        }
 
-            // Minimum
-            Map<String, Object> minResult = webdevPost("test/queryAgg", Map.of(
+        /** Helper: query a single aggregation type and assert the value. */
+        private void assertAggQuery(String qPath, long startMs, long endMs,
+                                    String aggName, double expected, double tolerance) throws Exception {
+            Map<String, Object> result = webdevPost("test/queryAgg", Map.of(
                     "paths", List.of(qPath),
-                    "startDate", baseTs - 1000,
-                    "endDate", baseTs + 100_000,
-                    "aggregates", List.of("Minimum"),
+                    "startDate", startMs,
+                    "endDate", endMs,
+                    "aggregates", List.of(aggName),
                     "returnSize", 1
             ));
-            assertTrue((Boolean) minResult.get("success"), "Minimum query should succeed");
-            double minValue = extractAggregationValue(minResult);
-            log("Minimum = " + minValue + " (expected 0.0)");
-            assertAggregationValue(minResult, 0.0, 1.0, "Minimum");
-            pass("Minimum value");
-
-            // Maximum
-            Map<String, Object> maxResult = webdevPost("test/queryAgg", Map.of(
-                    "paths", List.of(qPath),
-                    "startDate", baseTs - 1000,
-                    "endDate", baseTs + 100_000,
-                    "aggregates", List.of("Maximum"),
-                    "returnSize", 1
-            ));
-            assertTrue((Boolean) maxResult.get("success"), "Maximum query should succeed");
-            double maxValue = extractAggregationValue(maxResult);
-            log("Maximum = " + maxValue + " (expected 99.0)");
-            assertAggregationValue(maxResult, 99.0, 1.0, "Maximum");
-            pass("Maximum value");
+            assertTrue((Boolean) result.get("success"), aggName + " query should succeed");
+            double actual = extractAggregationValue(result);
+            log(aggName + " = " + actual + " (expected ~" + expected + ")");
+            assertAggregationValue(result, expected, tolerance, aggName);
+            pass(aggName);
         }
 
         @Test
