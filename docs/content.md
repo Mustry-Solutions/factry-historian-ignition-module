@@ -5,6 +5,7 @@
 
 
 ## Architecture
+- [Design Overview](design_overview.md) — Architectural overview, high-level structure, and design justifications
 - [Code Walkthrough](code_walkthrough.md) — Guided tour through the codebase, organized by category
 - [Components and Data Flow](data_flow.md) — Low level explanation of the SDK and inheritance
 

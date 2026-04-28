@@ -109,24 +109,22 @@ ignition.signing.certPassword=<password>
 
 ## 4. Install the Module in the Dev Environment
 
-1. Copy the module into the Ignition data directory:
-   ```bash
-   cp build/Factry-Historian.unsigned.modl ignition/data/modules/
-   ```
-2. Restart Ignition:
-   ```bash
-   docker-compose restart ignition
-   ```
-3. On first install, go to **Config > System > Modules** and accept the **Factry** certificate.
+```bash
+./gradlew copy restart
+```
 
-For subsequent updates, repeat steps 1 and 2.
+This copies the module to the Ignition modules directory, and restarts the Ignition Docker container.
+
+On first install, go to **Config > System > Modules** and accept the **Factry** certificate.
+
+See [gradlew_commands.md](gradlew_commands.md) for all available commands.
 
 ## 5. Run Tests
 
 ### Unit Tests
 
 ```bash
-./gradlew :gateway:test
+./gradlew test
 ```
 
 ### Integration Tests
