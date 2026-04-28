@@ -620,7 +620,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         return false;
     }
 
-    private Optional<FactryHistoricalNode> findNode(String tagPath, QualifiedPath path) {
+    private Optional<FactryRecord> findNode(String tagPath, QualifiedPath path) {
         // Try measurement
         Measurement m = measurementCache.getMeasurementByName(tagPath);
         if (m == null) {
@@ -631,7 +631,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             Instant createdTime = m.hasCreatedAt()
                     ? Instant.ofEpochSecond(m.getCreatedAt().getSeconds(), m.getCreatedAt().getNanos())
                     : Instant.EPOCH;
-            return Optional.of(new FactryHistoricalNode(m.getUuid(), path, m.getDatatype(), createdTime));
+            return Optional.of(new FactryRecord(m.getUuid(), path, m.getDatatype(), createdTime));
         }
 
         // Try asset
@@ -640,7 +640,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             Instant createdTime = a.hasCreatedAt()
                     ? Instant.ofEpochSecond(a.getCreatedAt().getSeconds(), a.getCreatedAt().getNanos())
                     : Instant.EPOCH;
-            return Optional.of(new FactryHistoricalNode(a.getUuid(), path, "number", createdTime));
+            return Optional.of(new FactryRecord(a.getUuid(), path, "number", createdTime));
         }
 
         return Optional.empty();

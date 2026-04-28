@@ -8,13 +8,13 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
-public class FactryHistoricalNode implements HistoricalNode {
+public class FactryRecord implements HistoricalNode {
     private final UUID nodeId;
     private final QualifiedPath source;
     private final DataType dataType;
     private final Instant createdTime;
 
-    public FactryHistoricalNode(String measurementUUID, QualifiedPath source, String factryDataType, Instant createdTime) {
+    public FactryRecord(String measurementUUID, QualifiedPath source, String factryDataType, Instant createdTime) {
         this.nodeId = UUID.nameUUIDFromBytes(measurementUUID.getBytes());
         this.source = source;
         this.dataType = toIgnitionDataType(factryDataType);

@@ -73,79 +73,7 @@ All historian logic (gRPC, storage, queries) is gateway-scoped.
 
 ![Class Diagram](class_diagram.excalidraw.svg)
 
-```mermaid
-graph TD
-    %% Entry point
-    Hook[FactryHistorianGatewayHook]
-    ExtPoint[FactryHistorianExtensionPoint]
 
-    %% Core
-    Provider[FactryHistoryProvider]
-    QueryEngine[FactryQueryEngine]
-    StorageEngine[FactryStorageEngine]
-
-    %% Adapter
-    GrpcClient[FactryGrpcClient]
-    Cache[MeasurementCache]
-
-    %% Configuration
-    Settings[FactryHistorianSettings]
-    Config[FactryHistorianConfig]
-    Jwt[JwtTokenParser]
-
-    %% Utilities
-    Metrics[HistorianMetrics]
-    TagPath[TagPathUtil]
-    HistNode[FactryHistoricalNode]
-    ModProps[ModuleProperties]
-    Module[FactryHistorianModule]
-
-    %% Relationships
-    Hook -->|registers| ExtPoint
-    Hook -.->|reads version| Module
-    ExtPoint -->|creates| Provider
-    ExtPoint -.->|reads schema| Config
-    Config -.->|converts to| Settings
-    Settings -.->|parses JWT via| Jwt
-
-    Provider -->|owns| QueryEngine
-    Provider -->|owns| StorageEngine
-    Provider -->|owns| GrpcClient
-    Provider -->|owns| Cache
-    Provider -->|owns| Metrics
-    Provider -.->|reads| ModProps
-
-    QueryEngine -->|queries via| GrpcClient
-    QueryEngine -->|looks up| Cache
-    QueryEngine -.->|uses| TagPath
-    QueryEngine -.->|uses| Metrics
-    QueryEngine -.->|creates| HistNode
-
-    StorageEngine -->|stores via| GrpcClient
-    StorageEngine -->|looks up| Cache
-    StorageEngine -.->|uses| TagPath
-    StorageEngine -.->|uses| Metrics
-
-    Cache -->|fetches via| GrpcClient
-
-    %% Styles
-    classDef entry fill:#e8e8e8,stroke:#888,color:#333
-    classDef core fill:#d4edda,stroke:#28a745,color:#333
-    classDef adapter fill:#ffe0b2,stroke:#e68a00,color:#333
-    classDef config fill:#cce5ff,stroke:#2196f3,color:#333
-    classDef util fill:#f0f0f0,stroke:#aaa,color:#666
-
-    class Hook,ExtPoint entry
-    class Provider,QueryEngine,StorageEngine core
-    class GrpcClient,Cache adapter
-    class Config,Settings,Jwt config
-    class Metrics,TagPath,HistNode,ModProps,Module util
-```
-
-**Legend:** solid arrows = primary dependencies, dashed arrows = secondary/utility usage.
-🟢 Core &nbsp; 🟠 Adapter &nbsp; 🔵 Configuration &nbsp; ⚪ Utilities &nbsp; ⬜ Entry point
-
----
 ### Statistics
 
 
@@ -175,7 +103,7 @@ graph TD
   ├────────────────────────────────────┼───────┤
   │ JwtTokenParser.java                │  83   │
   ├────────────────────────────────────┼───────┤
-  │ FactryHistoricalNode.java          │  64   │
+  │ FactryRecord.java          │  64   │
   ├────────────────────────────────────┼───────┤
   │ FactryHistorianGatewayHook.java    │  61   │
   ├────────────────────────────────────┼───────┤
@@ -302,9 +230,9 @@ Key methods:
 
 Has comprehensive unit tests in `TagPathUtilTest.java`.
 
-### `FactryHistoricalNode.java`
+### `FactryRecord.java`
 
-**Location:** `gateway/src/main/java/.../gateway/FactryHistoricalNode.java`
+**Location:** `gateway/src/main/java/.../gateway/FactryRecord.java`
 
 Implements `HistoricalNode` — the Ignition SDK's representation of a browsable tag node. Created by the query engine's browse logic. Maps Factry data types to Ignition `DataType`:
 - `"boolean"` → `DataType.Boolean`

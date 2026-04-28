@@ -116,7 +116,7 @@ This section documents every Ignition SDK class/interface that the Factry Histor
 #### `HistoricalNode`
 - **What**: Metadata about a historical tag. Returned by `lookupNode()` and `queryForHistoricalNodes()`.
 - **Responsibility**: Tells Ignition the tag's UUID, source path, data type, and creation/retirement times. Used internally by `AbstractQueryEngine.mapKeysToNodes()` before executing queries.
-- **Our impl**: `FactryHistoricalNode` — maps a Factry `Measurement` (uuid, name, datatype, createdAt) to the Ignition interface.
+- **Our impl**: `FactryRecord` — maps a Factry `Measurement` (uuid, name, datatype, createdAt) to the Ignition interface.
 - **Key methods**: `nodeId()`, `source()`, `dataType()`, `createdTime()`, `retiredTime()`.
 
 #### `DataType` (enum)
@@ -397,7 +397,7 @@ FactryQueryEngine.lookupNode(QualifiedPath)
         ├── measurementCache.getMeasurementByName(tagPath)
         │   (refresh from gRPC if not found)
         │
-        └── return FactryHistoricalNode(uuid, path, datatype, createdAt)
+        └── return FactryRecord(uuid, path, datatype, createdAt)
                 │
                 ▼
         AbstractQueryEngine uses nodeId, dataType

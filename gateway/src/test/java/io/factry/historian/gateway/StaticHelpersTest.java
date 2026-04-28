@@ -177,7 +177,7 @@ class StaticHelpersTest {
     }
 
     // =========================================================================
-    // FactryHistoricalNode.toIgnitionDataType
+    // FactryRecord.toIgnitionDataType
     // =========================================================================
 
     @Nested
@@ -185,27 +185,27 @@ class StaticHelpersTest {
 
         @Test
         void booleanType() {
-            assertEquals(DataType.Boolean, FactryHistoricalNode.toIgnitionDataType("boolean"));
+            assertEquals(DataType.Boolean, FactryRecord.toIgnitionDataType("boolean"));
         }
 
         @Test
         void numberType() {
-            assertEquals(DataType.Float8, FactryHistoricalNode.toIgnitionDataType("number"));
+            assertEquals(DataType.Float8, FactryRecord.toIgnitionDataType("number"));
         }
 
         @Test
         void stringType() {
-            assertEquals(DataType.String, FactryHistoricalNode.toIgnitionDataType("string"));
+            assertEquals(DataType.String, FactryRecord.toIgnitionDataType("string"));
         }
 
         @Test
         void nullDefaultsToFloat8() {
-            assertEquals(DataType.Float8, FactryHistoricalNode.toIgnitionDataType(null));
+            assertEquals(DataType.Float8, FactryRecord.toIgnitionDataType(null));
         }
 
         @Test
         void unknownDefaultsToFloat8() {
-            assertEquals(DataType.Float8, FactryHistoricalNode.toIgnitionDataType("custom"));
+            assertEquals(DataType.Float8, FactryRecord.toIgnitionDataType("custom"));
         }
     }
 }
