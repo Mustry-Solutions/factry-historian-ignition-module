@@ -103,7 +103,7 @@ All historian logic (gRPC, storage, queries) is gateway-scoped.
   ├────────────────────────────────────┼───────┤
   │ JwtTokenParser.java                │  83   │
   ├────────────────────────────────────┼───────┤
-  │ FactryRecord.java          │  64   │
+  │ FactryRecord.java                  │  64   │
   ├────────────────────────────────────┼───────┤
   │ FactryHistorianGatewayHook.java    │  61   │
   ├────────────────────────────────────┼───────┤

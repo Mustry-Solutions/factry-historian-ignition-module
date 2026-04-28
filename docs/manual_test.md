@@ -30,7 +30,7 @@ These tests use the Tag Browser (**Config > Tags > Tag Browser**).
 3. Write values to the tag (e.g., 10.0, 20.0, 30.0)
 4. Open Factry web UI > Measurements
 
-**Expected:** A measurement named `<system>:[default]ManualTest/Numeric` appears in Factry with data type `number`. Data points match the written values.
+**Expected:** A measurement named `<collector>/default/ManualTest/Numeric` appears in Factry with data type `number`. Data points match the written values.
 
 ### T1.2 — Create a boolean tag with history
 
@@ -62,7 +62,7 @@ These tests use the Tag Browser (**Config > Tags > Tag Browser**).
 2. Create a Memory Tag inside it: `ManualTest/Subfolder/Deep`, type=Float8, history enabled
 3. Write a value
 
-**Expected:** Measurement name includes the full path: `<system>:[default]ManualTest/Subfolder/Deep`.
+**Expected:** Measurement name includes the full path: `<collector>/default/ManualTest/Subfolder/Deep`.
 
 ### T1.6 — Rename a tag with history
 
@@ -116,7 +116,7 @@ end = system.date.now()
 start = system.date.addHours(end, -1)
 
 ds = system.tag.queryTagHistory(
-    paths=["histprov:<historian>:/tag:<system>/default/ManualTest/Numeric"],
+    paths=["histprov:<historian>:/tag:<collector>/default/ManualTest/Numeric"],
     startDate=start,
     endDate=end
 )
@@ -135,7 +135,7 @@ end = system.date.now()
 start = system.date.addHours(end, -1)
 
 ds = system.tag.queryTagHistory(
-    paths=["histprov:<historian>:/tag:<system>/default/ManualTest/Numeric"],
+    paths=["histprov:<historian>:/tag:<collector>/default/ManualTest/Numeric"],
     startDate=start,
     endDate=end,
     aggregationMode="Average",
@@ -204,7 +204,7 @@ for r in results:
 
 ```python
 # Browse into the system level
-results = system.historian.browse("histprov:<historian>:/tag:<system>/default/ManualTest")
+results = system.historian.browse("histprov:<historian>:/tag:<collector>/default/ManualTest")
 
 for r in results:
     print r
@@ -219,7 +219,7 @@ end = system.date.now()
 start = system.date.addHours(end, -1)
 
 ds = system.historian.queryRawPoints(
-    paths=["histprov:<historian>:/tag:<system>/default/ManualTest/Numeric"],
+    paths=["histprov:<historian>:/tag:<collector>/default/ManualTest/Numeric"],
     startTime=start,
     endTime=end
 )
@@ -237,7 +237,7 @@ end = system.date.now()
 start = system.date.addHours(end, -1)
 
 ds = system.historian.queryAggregatedPoints(
-    paths=["histprov:<historian>:/tag:<system>/default/ManualTest/Numeric"],
+    paths=["histprov:<historian>:/tag:<collector>/default/ManualTest/Numeric"],
     startTime=start,
     endTime=end,
     aggregates=["Average", "Minimum", "Maximum"],
@@ -254,7 +254,7 @@ for row in ds:
 
 ```python
 ds = system.historian.queryMetadata(
-    paths=["histprov:<historian>:/tag:<system>/default/ManualTest/Numeric"]
+    paths=["histprov:<historian>:/tag:<collector>/default/ManualTest/Numeric"]
 )
 
 for row in ds:
@@ -291,7 +291,7 @@ system.historian.storeMetadata(
 )
 ```
 
-**Expected:** Metadata stored (or gracefully handled — Factry manages metadata on its platform, the module may no-op this).
+**Expected:** Metadata is cached by the module and applied as initial `description`/`attributes` when the measurement is first created in Factry. If the measurement already exists, metadata is cached but not retroactively applied (Factry has no update API).
 
 ### T2.12 — Multi-tag query
 
@@ -301,9 +301,9 @@ start = system.date.addHours(end, -1)
 
 ds = system.tag.queryTagHistory(
     paths=[
-        "histprov:<historian>:/tag:<system>/default/ManualTest/Numeric",
-        "histprov:<historian>:/tag:<system>/default/ManualTest/Boolean",
-        "histprov:<historian>:/tag:<system>/default/ManualTest/String"
+        "histprov:<historian>:/tag:<collector>/default/ManualTest/Numeric",
+        "histprov:<historian>:/tag:<collector>/default/ManualTest/Boolean",
+        "histprov:<historian>:/tag:<collector>/default/ManualTest/String"
     ],
     startDate=start,
     endDate=end
@@ -408,7 +408,7 @@ Metrics | store: N ops, N pts (X.X pts/s), ... | raw query: ... | agg query: ...
 2. Click the tag browse icon
 3. Expand the Factry Historian provider
 
-**Expected:** Shows a hierarchy: system > provider > tag folders > tag leaves. Measurements from Group 1 are visible.
+**Expected:** Shows a hierarchy: Measurements/Assets > collector name > provider > tag folders > tag leaves. Measurements from Group 1 are visible.
 
 ### T4.2 — Browse assets
 

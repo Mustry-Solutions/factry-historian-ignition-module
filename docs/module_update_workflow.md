@@ -75,7 +75,7 @@ After the first installation or when the module certificate changes:
 1. Navigate to **Config → System → Modules** in the Ignition Gateway (http://localhost:8088)
 2. Find the **Factry Historian** module
 3. The module status will show a certificate acceptance prompt
-4. Accept the certificate from **Mustry Solution**
+4. Accept the certificate from **Factry**
 5. The module status should change to **ACTIVE** (or **FAULTED** if there are runtime errors)
 
 ## Quick Reference Commands
@@ -136,7 +136,7 @@ After each update:
 ### Certificate Issues
 - Navigate to **Config → System → Modules**
 - Look for certificate acceptance prompts
-- Accept the **Mustry Solution** certificate
+- Accept the **Factry** certificate
 - Restart gateway if needed
 
 ### Changes Not Reflecting

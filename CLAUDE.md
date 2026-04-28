@@ -53,7 +53,7 @@ The module requires signing certificates configured in `gradle.properties`:
 ignition.signing.keystoreFile=certificates/keystore.jks
 ignition.signing.keystorePassword=<password>
 ignition.signing.certAlias=<alias>
-ignition.signing.certFile=certificates/Mustry_Modules_Root_CA.p7b
+ignition.signing.certFile=certificates/cert.p7b
 ignition.signing.certPassword=<password>
 ```
 
@@ -114,10 +114,10 @@ open http://localhost:8088
 docker-compose logs -f
 ```
 
-See **`DOCKER_SETUP.md`** for complete documentation including:
-- Module installation
-- Data persistence
-- Testing procedures
+See **`docs/setup_environment.md`** for complete documentation including:
+- Factry Historian setup
+- Building and installing the module
+- Running tests
 - Troubleshooting
 
 The `ignition/` folder contains persistent data and is git-ignored.
@@ -133,7 +133,7 @@ The `ignition/` folder contains persistent data and is git-ignored.
 1. Build the module: `./gradlew clean build`
 2. Copy to Docker volume: `cp build/Factry-Historian.unsigned.modl ignition/data/modules/`
 3. Restart Gateway: `docker-compose restart ignition`
-4. On first install: Accept the **Mustry Solution** certificate in **Config → System → Modules**
+4. On first install: Accept the **Factry** certificate in **Config → System → Modules**
 
 See **`docs/module_update_workflow.md`** for complete details and troubleshooting.
 

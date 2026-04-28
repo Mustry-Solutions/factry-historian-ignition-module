@@ -14,7 +14,7 @@ Recently:
   - Tidied up documentation
   - Some clarifications
 
-See [try-out.md](try-out.md) for setup instructions.
+See [setup_environment.md](setup_environment.md) for setup instructions.
 
 > This falls under "Milestone 1: Proof of Concept" (proposed milestones).
 > (Milestone 2: Historian Collector Full implementation)
@@ -240,9 +240,11 @@ Next is prepare for version 1.0:
 
 # 29/04/2026
 
-Meeting at Factry.
+Meeting at Factry office.
 
 Plan:
+  - test with only downloading the module and installing Ignition
+
   - Make Demo working on on Wannes's computer
   - Tests:
       - manual
