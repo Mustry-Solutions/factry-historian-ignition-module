@@ -43,7 +43,5 @@ dependencyResolutionManagement {
 include(
 ":",
     ":common",
-    ":gateway",
-    ":client",
-    ":designer"
+    ":gateway"
 )

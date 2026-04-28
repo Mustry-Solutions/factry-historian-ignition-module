@@ -67,9 +67,7 @@ ignitionModule {
      *  Example entry: listOf( ":gateway" to "G", ":common" to "GC", ":vision-client" to "C" )
      */
     projectScopes.putAll(mapOf(
-        ":client" to "CD",
         ":common" to "GCD",
-        ":designer" to "D",
         ":gateway" to "G"
     ))
 
@@ -110,9 +108,7 @@ ignitionModule {
      * Example entry: "com.myorganization.vectorizer.VectorizerDesignerHook" to "D"
      */
     hooks.putAll(mapOf(
-        "io.factry.historian.gateway.FactryHistorianGatewayHook" to "G",
-        "io.factry.historian.client.FactryHistorianClientHook" to "C",
-        "io.factry.historian.designer.FactryHistorianDesignerHook" to "D"
+        "io.factry.historian.gateway.FactryHistorianGatewayHook" to "G"
     ))
 
     /*

@@ -2,6 +2,20 @@
 
 A guided tour through the Factry Historian module codebase, organized by category. Designed to be read top-to-bottom with a colleague.
 
+Terminology:
+  - JVM - Java Virtual Machine or Java engine, this is the runner
+  - Java and Kotlin compiled to bytecode. This is a platform independent small instruction set code(~200 opcodes) to run in the JVM, it is in the file .class 
+  - extensions:
+       *.java - java code
+       *.kts - kotlin code
+       *.class - bytecode  
+  - Gradle - Gradle Build Tool is a build automation tool (language idependent for example Java, C/C++, and JavaScript)
+             Ignition official tool
+  - JIT - compiler inside the JVM
+  - JRE - JVM + standard libraries
+  - JDK - JRE + dev tools for development
+  - Jython -> it is a python syntax code, but it compiles to bytecode as well
+  
 ---
 
 ## 1. Project Structure
