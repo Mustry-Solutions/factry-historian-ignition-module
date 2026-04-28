@@ -154,7 +154,7 @@ The protobuf contract shared with Factry. Compiled by the `protobuf` Gradle plug
 
 ---
 
-## 4. Gateway — Configuration
+## 3. Gateway — Configuration
 
 ### `FactryHistorianConfig.java`
 
@@ -189,7 +189,7 @@ This is what the engines and gRPC client receive. The separation from `FactryHis
 
 ---
 
-## 5. Gateway — Utilities
+## 4. Gateway — Utilities
 
 ### `JwtTokenParser.java`
 
@@ -243,7 +243,7 @@ Loads tuning values from `factry-historian.properties` (bundled in the .modl). T
 
 ---
 
-## 6. Gateway — Logic
+## 5. Gateway — Logic
 
 ### `FactryStorageEngine.java`
 
@@ -311,7 +311,7 @@ Extends `AbstractQueryEngine`. Handles all data retrieval from Factry.
 
 ---
 
-## 7. Gateway — Integration
+## 6. Gateway — Integration
 
 These classes plug the module into Ignition's extension point system.
 
@@ -368,7 +368,7 @@ Extends `AbstractHistorian<FactryHistorianSettings>`. The orchestrator that ties
 
 ---
 
-## 8. Gateway — Observability
+## 7. Gateway — Observability
 
 ### `HistorianMetrics.java`
 
@@ -391,7 +391,7 @@ Metrics | store: 5 ops, 120 pts (4.0 pts/s), 450 ms total, 0 errors | raw query:
 
 ---
 
-## 9. Tests
+## 8. Tests
 
 ### Unit Tests
 
@@ -413,7 +413,7 @@ Run with `./gradlew integrationTest`. Requires running Docker infrastructure. Se
 
 ---
 
-## 10. Proto → Java Data Flow (Example)
+## 9. Proto → Java Data Flow (Example)
 
 To illustrate how the pieces connect, here is the path a single tag value takes from Ignition to Factry:
 
@@ -446,7 +446,7 @@ FactryStorageEngine.doStoreAtomic(points)
 
 ---
 
-## 11. Remarks
+## 10. Remarks
 
 
 
