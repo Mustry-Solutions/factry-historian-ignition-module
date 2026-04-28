@@ -79,10 +79,6 @@ This starts:
 ## 3. Build the Module
 
 ```bash
-# Development build (no signing)
-# Set skipModlSigning.set(true) in build.gradle.kts first
-./gradlew clean build
-
 # Production build (with signing)
 ./gradlew clean build
 ```

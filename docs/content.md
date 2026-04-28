@@ -9,7 +9,7 @@
 - [Components and Data Flow](data_flow.md) — Low level explanation of the SDK and inheritance
 
 ## Development
-- [Module Update Workflow](module_update_workflow.md) — How to build, deploy, and update the module during development
+- [Gradle Commands](gradlew_commands.md) — Build, test, and deploy commands
 - [Module Signing Guide](signing_module.md) — Certificate setup for signing the module
 
 

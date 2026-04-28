@@ -135,7 +135,7 @@ The `ignition/` folder contains persistent data and is git-ignored.
 3. Restart Gateway: `docker-compose restart ignition`
 4. On first install: Accept the **Factry** certificate in **Config → System → Modules**
 
-See **`docs/module_update_workflow.md`** for complete details and troubleshooting.
+See **`docs/gradlew_commands.md`** for build, test, and deploy commands.
 
 ### Adding Gateway Functionality
 
