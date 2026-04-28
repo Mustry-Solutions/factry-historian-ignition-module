@@ -1,4 +1,4 @@
-package io.factry.historian.common;
+package io.factry.historian.gateway;
 
 import java.io.InputStream;
 import java.util.Properties;

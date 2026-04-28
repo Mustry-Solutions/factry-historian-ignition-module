@@ -37,8 +37,6 @@ dependencies {
     // JSON library for HTTP communication with proxy
     compileOnly("com.google.code.gson:gson:2.10.1")
 
-    compileOnly(project(":common"))
-
     // gRPC and Protobuf dependencies (bundled in .modl via modlImplementation)
     modlImplementation("io.grpc:grpc-netty-shaded:$grpcVersion")
     modlImplementation("io.grpc:grpc-protobuf:$grpcVersion")
@@ -163,5 +161,15 @@ sourceSets {
         proto {
             srcDir("${rootProject.projectDir}/proto")
         }
+    }
+}
+
+tasks.named<ProcessResources>("processResources") {
+    val moduleVersion = rootProject.extensions
+        .getByType<io.ia.sdk.gradle.modl.extension.ModuleSettings>()
+        .moduleVersion
+    inputs.property("moduleVersion", moduleVersion)
+    filesMatching("version.properties") {
+        expand("moduleVersion" to moduleVersion.get())
     }
 }

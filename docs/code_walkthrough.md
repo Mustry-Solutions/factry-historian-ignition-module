@@ -24,12 +24,9 @@ Terminology:
 
 | File | Purpose |
 |------|---------|
-| `settings.gradle` | Declares the 4 subprojects (`:common`, `:gateway`, `:client`, `:designer`), configures Inductive Automation Maven repositories |
+| `settings.gradle` | Declares the `:gateway` subproject, configures Inductive Automation Maven repositories |
 | `build.gradle.kts` (root) | Module packaging: name, ID, version, scope mappings, hook registrations, module dependencies, signing. Also defines deploy tasks (`copy`, `restart`) |
 | `gateway/build.gradle.kts` | Gateway dependencies (Ignition SDK, Historian API, gRPC/protobuf), protobuf compilation, unit test and integration test source sets |
-| `common/build.gradle.kts` | Minimal — only `ignition-common` dependency |
-| `client/build.gradle.kts` | Vision client dependency |
-| `designer/build.gradle.kts` | Designer dependency |
 
 ### Key Gradle Commands
 
@@ -46,18 +43,21 @@ Terminology:
 
 ```
 factry-historian-module/
-├── common/src/main/java/      # Shared constants (MODULE_ID, MODULE_VERSION)
 ├── gateway/src/main/java/     # All historian logic lives here
 ├── gateway/src/main/proto/    # (generated from proto/)
 ├── gateway/src/test/java/     # Unit tests
 ├── gateway/src/integrationTest/java/  # Integration tests
-├── client/src/main/java/      # Vision client hook (empty)
-├── designer/src/main/java/    # Designer hook (empty)
 ├── proto/historian/            # Protobuf definitions (shared with Factry)
 ├── ignition/data/              # Docker-mounted Ignition data (WebDev scripts)
 ├── script/                     # Utility scripts (scan.sh)
 └── docs/                       # Documentation
 ```
+
+
+
+
+
+
 
 ### Scope Architecture
 
@@ -65,28 +65,47 @@ Ignition modules have scopes that determine where code runs:
 
 | Subproject | Scope | Runs in |
 |------------|-------|---------|
-| `:common` | GCD | Gateway + Client + Designer |
 | `:gateway` | G | Gateway only |
-| `:client` | CD | Client + Designer |
-| `:designer` | D | Designer only |
 
-All historian logic (gRPC, storage, queries) is gateway-scoped. The client and designer hooks are empty stubs — they exist because the Ignition module SDK requires a hook class for each scope.
+All historian logic (gRPC, storage, queries) is gateway-scoped.
 
 ---
+### Statistics
 
-## 2. Common
 
-### `FactryHistorianModule.java`
+```bash
+  ┌─────────┬───────┬───────┐                                    
+  │         │ Files │ Lines │                                        
+  ├─────────┼───────┼───────┤                                        
+  │ gateway │ 15    │ 2,725 │                                        
+  └─────────┴───────┴───────┘                                        
+                                                                     
+  The biggest files in gateway:                                      
+                                                                     
+  ┌────────────────────────────────────┬───────┐                     
+  │                File                │ Lines │                     
+  ├────────────────────────────────────┼───────┤
+  │ FactryQueryEngine.java             │ 705   │
+  ├────────────────────────────────────┼───────┤
+  │ FactryHistoryProvider.java         │ 304   │
+  ├────────────────────────────────────┼───────┤
+  │ TagPathUtil.java                   │ 239   │
+  ├────────────────────────────────────┼───────┤
+  │ FactryGrpcClient.java              │ 235   │
+  ├────────────────────────────────────┼───────┤
+  │ FactryStorageEngine.java           │ 219   │
+  ├────────────────────────────────────┼───────┤
+  │ MeasurementCache.java              │ 205   │
+  ├────────────────────────────────────┼───────┤
+  │ FactryHistorianSettings.java       │ 174   │
+  ├────────────────────────────────────┼───────┤
+  │ FactryHistorianExtensionPoint.java │ 152   │
+  ├────────────────────────────────────┼───────┤
+  │ HistorianMetrics.java              │ 118   │
+  └────────────────────────────────────┴───────┘
+```
 
-**Location:** `common/src/main/java/.../common/FactryHistorianModule.java`
-
-Shared constants available across all scopes:
-- `MODULE_ID` — the unique module identifier (`io.factry.historian.FactryHistorian`), must match `build.gradle.kts`
-- `MODULE_VERSION` — loaded at runtime from `version.properties` (generated during build)
-
----
-
-## 3. Gateway — Adapter
+## 2. Gateway — Adapter
 
 These classes handle communication with Factry Historian over gRPC.
 

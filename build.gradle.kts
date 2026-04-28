@@ -67,7 +67,6 @@ ignitionModule {
      *  Example entry: listOf( ":gateway" to "G", ":common" to "GC", ":vision-client" to "C" )
      */
     projectScopes.putAll(mapOf(
-        ":common" to "GCD",
         ":gateway" to "G"
     ))
 

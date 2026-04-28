@@ -42,6 +42,5 @@ dependencyResolutionManagement {
 
 include(
 ":",
-    ":common",
     ":gateway"
 )

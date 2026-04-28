@@ -50,7 +50,7 @@ public class FactryHistorianExtensionPoint extends HistorianExtensionPoint<Factr
     public FactryHistorianExtensionPoint() {
         super(TYPE_ID, DISPLAY_NAME, DESCRIPTION);
         logger.debug("Factry Historian Extension Point created");
-        logger.debug("MODULE VERSION: {}", io.factry.historian.common.FactryHistorianModule.MODULE_VERSION);
+        logger.debug("MODULE VERSION: {}", FactryHistorianModule.MODULE_VERSION);
         logger.debug("Type: {}, Name: {}", TYPE_ID, DISPLAY_NAME);
     }
 

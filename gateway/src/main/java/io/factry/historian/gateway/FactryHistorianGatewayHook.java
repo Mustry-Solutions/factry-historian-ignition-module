@@ -27,7 +27,7 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
     @Override
     public void setup(GatewayContext context) {
         logger.info("Factry Historian Module - Setup");
-        logger.info("MODULE VERSION: {}", io.factry.historian.common.FactryHistorianModule.MODULE_VERSION);
+        logger.info("MODULE VERSION: {}", FactryHistorianModule.MODULE_VERSION);
 
         this.gatewayContext = context;
 
@@ -37,7 +37,7 @@ public class FactryHistorianGatewayHook extends AbstractGatewayModuleHook {
     @Override
     public void startup(LicenseState activationState) {
         logger.info("Factry Historian Module - Startup");
-        logger.info("MODULE VERSION: {}", io.factry.historian.common.FactryHistorianModule.MODULE_VERSION);
+        logger.info("MODULE VERSION: {}", FactryHistorianModule.MODULE_VERSION);
         // Historian instances are created by the extension point when users
         // configure them in the Gateway UI. No hardcoded instance needed.
     }

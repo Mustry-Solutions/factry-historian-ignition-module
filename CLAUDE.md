@@ -67,28 +67,14 @@ For development, set `skipModlSigning.set(true)` in `build.gradle.kts` (line 120
 
 ## Project Architecture
 
-### Multi-Scope Module Structure
+### Module Structure
 
-The module uses Ignition's standard multi-scope architecture with 4 subprojects:
+The module has a single subproject:
 
-1. **`:common`** (Scope: GCD - Gateway, Client, Designer)
-   - Shared code across all scopes
-   - Contains module constants like `MODULE_ID`
-   - No Ignition API dependencies beyond `ignition-common`
-
-2. **`:gateway`** (Scope: G - Gateway only)
-   - Server-side historian logic
+- **`:gateway`** (Scope: G - Gateway only)
+   - All historian logic: storage, queries, gRPC communication
    - Hook: `FactryHistorianGatewayHook`
    - Implements Storage Provider and History Provider interfaces
-   - Handles REST API communication with external Factry system
-
-3. **`:client`** (Scope: CD - Client and Designer)
-   - Vision Client runtime code
-   - Hook: `FactryHistorianClientHook`
-
-4. **`:designer`** (Scope: D - Designer only)
-   - Designer-specific functionality
-   - Hook: `FactryHistorianDesignerHook`
 
 ### Module Configuration
 
@@ -101,20 +87,12 @@ Module metadata is defined in root `build.gradle.kts`:
 
 Scope mappings in `projectScopes`:
 - Gateway: "G"
-- Client: "CD"
-- Designer: "D"
-- Common: "GCD"
 
 **Note**: This module is designed exclusively for Ignition 8.3+ and uses the new Historian Extension Point API introduced in 8.3.
 
 ### Hook Classes
 
-Each scope has a hook class that extends Ignition's base hook:
-- Gateway: `AbstractGatewayModuleHook` - implements lifecycle methods (setup, startup, shutdown)
-- Client: Extends appropriate client hook base class
-- Designer: Extends appropriate designer hook base class
-
-The gateway hook is where most module logic lives, including:
+The gateway hook extends `AbstractGatewayModuleHook` and implements lifecycle methods (setup, startup, shutdown). It is where all module logic lives, including:
 - Config panels (`getConfigPanels()`)
 - Web routes (`mountRouteHandlers()`)
 - Resource mounting (`getMountedResourceFolder()`)
@@ -166,7 +144,6 @@ See **`docs/module_update_workflow.md`** for complete details and troubleshootin
    ```kotlin
    dependencies {
        compileOnly("com.inductiveautomation.ignitionsdk:gateway-api:${rootProject.extra["sdk_version"]}")
-       compileOnly(project(":common"))
    }
    ```
 3. Override relevant hook methods in `FactryHistorianGatewayHook`
