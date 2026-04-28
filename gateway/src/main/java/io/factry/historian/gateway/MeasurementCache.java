@@ -1,5 +1,7 @@
 package io.factry.historian.gateway;
 
+import com.google.protobuf.Struct;
+import com.google.protobuf.Value;
 import io.factry.historian.proto.Asset;
 import io.factry.historian.proto.Assets;
 import io.factry.historian.proto.CreateMeasurement;
@@ -26,6 +28,9 @@ public class MeasurementCache {
 
     private final ConcurrentHashMap<String, String> assetNameToUUID = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Asset> uuidToAsset = new ConcurrentHashMap<>();
+
+    /** Metadata properties cached from doStoreMetadata, applied when creating measurements. */
+    private final ConcurrentHashMap<String, Map<String, String>> pendingMetadata = new ConcurrentHashMap<>();
 
     public void refresh(FactryGrpcClient grpcClient) {
         try {
@@ -106,11 +111,29 @@ public class MeasurementCache {
 
             logger.debug("Creating measurement for '{}' with dataType={}", tagPath, dataType);
 
-            CreateMeasurement createMeasurement = CreateMeasurement.newBuilder()
+            CreateMeasurement.Builder builder = CreateMeasurement.newBuilder()
                     .setName(tagPath)
                     .setAutoOnboard(true)
-                    .setDataType(dataType)
-                    .build();
+                    .setDataType(dataType);
+
+            Map<String, String> metadata = pendingMetadata.remove(tagPath);
+            if (metadata != null && !metadata.isEmpty()) {
+                String description = metadata.remove("description");
+                if (description != null) {
+                    builder.setDescription(description);
+                }
+                if (!metadata.isEmpty()) {
+                    Struct.Builder attrs = Struct.newBuilder();
+                    for (Map.Entry<String, String> entry : metadata.entrySet()) {
+                        attrs.putFields(entry.getKey(),
+                                Value.newBuilder().setStringValue(entry.getValue()).build());
+                    }
+                    builder.setAttributes(attrs);
+                }
+                logger.debug("Applied cached metadata to new measurement '{}'", tagPath);
+            }
+
+            CreateMeasurement createMeasurement = builder.build();
 
             CreateMeasurementsRequest request = CreateMeasurementsRequest.newBuilder()
                     .addMeasurements(createMeasurement)
@@ -190,6 +213,21 @@ public class MeasurementCache {
 
     public Collection<Asset> getAllAssets() {
         return uuidToAsset.values();
+    }
+
+    /**
+     * Cache metadata properties for a tag path. These will be applied as initial
+     * values when the measurement is created in Factry via {@link #getOrCreateUUID}.
+     */
+    public void storeMetadata(String tagPath, Map<String, String> properties) {
+        if (properties == null || properties.isEmpty()) {
+            return;
+        }
+        pendingMetadata.merge(tagPath, new HashMap<>(properties), (existing, incoming) -> {
+            existing.putAll(incoming);
+            return existing;
+        });
+        logger.debug("Cached metadata for '{}': {}", tagPath, properties);
     }
 
     static String toFactryDataType(Object value) {

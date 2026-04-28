@@ -18,8 +18,10 @@ import io.factry.historian.proto.Point;
 import io.factry.historian.proto.Points;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public class FactryStorageEngine extends AbstractStorageEngine {
@@ -175,9 +177,26 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
     @Override
     protected StorageResult<MetadataPoint> doStoreMetadata(List<MetadataPoint> metadataPoints) {
-        // Metadata is managed by the Factry platform, not by this collector.
-        // Acknowledge the points without storing — metadata lives in Factry's database.
-        logger.debug("doStoreMetadata called with " + metadataPoints.size() + " points (no-op for Factry)");
+        // Factry doesn't support updating metadata after creation, but we cache the
+        // properties so they can be applied as initial values when a measurement is
+        // first created via MeasurementCache.getOrCreateUUID().
+        logger.debug("doStoreMetadata called with " + metadataPoints.size() + " points");
+        for (MetadataPoint point : metadataPoints) {
+            String tagPath = TagPathUtil.qualifiedPathToStoredPath(point.source().toString());
+            com.inductiveautomation.ignition.common.config.PropertySet ps = point.value();
+            if (ps != null) {
+                Map<String, String> properties = new HashMap<>();
+                for (var pv : ps) {
+                    Object val = pv.getValue();
+                    if (val != null) {
+                        properties.put(pv.getProperty().getName(), val.toString());
+                    }
+                }
+                if (!properties.isEmpty()) {
+                    measurementCache.storeMetadata(tagPath, properties);
+                }
+            }
+        }
         return StorageResult.success(metadataPoints);
     }
 
