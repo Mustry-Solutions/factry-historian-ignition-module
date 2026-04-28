@@ -1,6 +1,6 @@
 # Data Flow Diagrams
 
-### 2.1 Module Startup Flow
+### 1. Module Startup Flow
 
 ```
 Ignition Gateway Boot
@@ -41,7 +41,7 @@ FactryHistoryProvider.onStartup()
                 └── TagHistoryStorageEngineBridge.getOrCreate()
 ```
 
-### 2.2 Storage Flow (Tag Value → Factry)
+### 2. Storage Flow (Tag Value → Factry)
 
 ```
 Ignition Tag Subscription
@@ -91,7 +91,7 @@ StorageResult.success() ── or ── StorageResult.exception()
                                   [S&F retries later]
 ```
 
-### 2.3 Query Flow (Power Chart → Factry)
+### 3. Query Flow (Power Chart → Factry)
 
 ```
 Power Chart / Tag History Binding
@@ -114,8 +114,8 @@ FactryQueryEngine.doQueryRaw(options, processor)
         │       ┌─────────────────────────────────────────────┐
         │       │ path = key.source()                          │
         │       │ tagPath = toStoredTagPath(path)              │
-        │       │   strips "sys:gateway:/histprov:Name:/tag:"  │
-        │       │   → "prov:default:/tag:TagName"              │
+        │       │   strips Ignition prefix, builds             │
+        │       │   → "collectorName/default/TagName"          │
         │       │ uuid = measurementCache.getUUID(tagPath)     │
         │       └─────────────────────────────────────────────┘
         │
@@ -153,7 +153,7 @@ FactryQueryEngine.doQueryRaw(options, processor)
         Power Chart renders the data
 ```
 
-### 2.4 Browse Flow (Tag Browser → Factry)
+### 4. Browse Flow (Tag Browser → Factry)
 
 ```
 Power Chart Tag Browser
@@ -172,7 +172,7 @@ FactryQueryEngine.doBrowse(root, filter, publisher)
         └── For each active Measurement in cache:
                 │
                 ├── Extract display name from measurement name
-                │   "prov:default:/tag:Temperature" → "Temperature"
+                │   "Ignition/default/Temperature" → "Temperature"
                 │
                 └── publisher.newNode("Temperature", "Leaf")
                         .creationTime(m.createdAt)
@@ -186,7 +186,7 @@ FactryQueryEngine.doBrowse(root, filter, publisher)
         Tag browser shows list of measurements
 ```
 
-### 2.5 Node Lookup Flow
+### 5. Node Lookup Flow
 
 ```
 AbstractQueryEngine (internal, before query execution)
@@ -196,7 +196,7 @@ AbstractQueryEngine (internal, before query execution)
 FactryQueryEngine.lookupNode(QualifiedPath)
         │
         ├── toStoredTagPath(path)
-        │   "sys:..histprov:Name:/tag:prov:default:/tag:X" → "prov:default:/tag:X"
+        │   "sys:..histprov:Name:/tag:prov:default:/tag:X" → "collectorName/default/X"
         │
         ├── measurementCache.getMeasurementByName(tagPath)
         │   (refresh from gRPC if not found)
@@ -208,7 +208,7 @@ FactryQueryEngine.lookupNode(QualifiedPath)
         for query routing and processor configuration
 ```
 
-### 2.6 Measurement Cache Interactions
+### 6. Measurement Cache Interactions
 
 ```
                     ┌──────────────────┐
