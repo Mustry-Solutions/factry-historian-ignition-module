@@ -1,11 +1,12 @@
 package io.factry.historian.gateway;
 
 /**
- * Utility methods for converting between different tag path formats.
+ * Utility methods for converting between Ignition QualifiedPath strings
+ * and Factry measurement names.
  * <p>
- * Stored format: {@code "Ignition-296a8ca4b6cd:[default]FactrySim/ii2"}
+ * Measurement name format: {@code "collectorName/provider/tagPath"}
  * <p>
- * Display format (for browse tree): {@code "Ignition-296a8ca4b6cd/default/FactrySim/ii2"}
+ * Example: {@code "Ignition/default/FactrySim/ff1"}
  * <p>
  * No Ignition SDK dependencies — pure string operations, easy to unit test.
  */
@@ -42,54 +43,47 @@ final class TagPathUtil {
     }
 
     /**
-     * Build the stored tag path from individual components.
-     * Format: {@code "sys:[prov]tag"}
+     * Build the measurement name from components.
+     * Format: {@code "collectorName/prov/tag"}
      *
-     * @return stored path, e.g. {@code "Ignition-abc:[default]Temperature"}
+     * @return measurement name, e.g. {@code "Ignition/default/FactrySim/ff1"}
      */
-    static String buildStoredPath(String sys, String prov, String tag) {
+    static String buildStoredPath(String collectorName, String prov, String tag) {
         if (prov == null) prov = "default";
-        return sys + ":[" + prov + "]" + tag;
+        return collectorName + "/" + prov + "/" + tag;
     }
 
     /**
-     * Convert a QualifiedPath string to the stored tag_path format.
+     * Convert a QualifiedPath string to the Factry measurement name format.
+     * <p>
      * Handles multiple input formats:
      * <ul>
-     *   <li>Direct query: {@code sys:X:/prov:Y:/tag:Z} → {@code X:[Y]Z}</li>
-     *   <li>Browse with folders: {@code histprov:xxx:/folder:A:/folder:B:/tag:C} → {@code A/B/C}</li>
-     *   <li>Browse without folders (legacy): {@code histprov:xxx:/tag:Sys/Prov/Tag} → {@code Sys:[Prov]Tag}</li>
-     *   <li>Category-prefixed: {@code histprov:xxx:/tag:Measurements/...} or {@code /folder:Measurements:/...}</li>
+     *   <li>Storage path: {@code sys:X:/prov:Y:/tag:Z} → {@code collectorName/Y/Z}</li>
+     *   <li>Browse with folders: {@code histprov:xxx:/folder:A:/folder:B:/tag:C} → {@code A/B/C}
+     *       (category prefix stripped if present)</li>
+     *   <li>Browse without folders: {@code histprov:xxx:/tag:collectorName/prov/tag}
+     *       → {@code collectorName/prov/tag} (already in correct format)</li>
      * </ul>
      *
      * @param qualifiedPathStr the QualifiedPath.toString() result
-     * @return the stored path or its normalized display-form equivalent
+     * @param collectorName    the collector name from the JWT token
+     * @return the Factry measurement name
      */
-    static String qualifiedPathToStoredPath(String qualifiedPathStr) {
-        String sys = extractComponent(qualifiedPathStr, "sys:");
+    static String qualifiedPathToStoredPath(String qualifiedPathStr, String collectorName) {
         String prov = extractComponent(qualifiedPathStr, "prov:");
         String tag = extractComponent(qualifiedPathStr, "tag:");
 
-        // 1. Direct query with explicit sys/prov/tag components
-        if (sys != null && tag != null) {
-            // If the tag component already contains a stored path (encoded during browse
-            // via displayPath), use it directly. Detected by the ":[" pattern.
-            if (tag.contains(":[")) {
-                return tag;
-            }
-            return buildStoredPath(sys, prov, tag);
+        // 1. Storage path with explicit prov: component → build collectorName/prov/tag
+        if (prov != null && tag != null) {
+            return buildStoredPath(collectorName, prov, tag);
         }
 
         if (tag != null) {
-            // 2. Browse-originated with folder: components
-            //    Reconstruct the display-form path from folders + tag leaf.
+            // 2. Browse with folder: components → reconstruct from folders + tag leaf
             String folderPrefix = parseFolderPrefix(qualifiedPathStr);
             if (!folderPrefix.isEmpty()) {
-                // Strip category prefix from folders if present
-                // (e.g. "Measurements/Ignition-abc/default/" → "Ignition-abc/default/")
                 String strippedPrefix = stripCategory(folderPrefix);
                 if (strippedPrefix.length() < folderPrefix.length()) {
-                    // Category was present in folders
                     String category = extractCategory(folderPrefix);
                     if (CATEGORY_ASSETS.equals(category)) {
                         return strippedPrefix + tag;
@@ -99,79 +93,22 @@ final class TagPathUtil {
                 return folderPrefix + tag;
             }
 
-            // 3. Browse-originated without folders (legacy format)
-            //    Handle category prefixes in the tag component
+            // 3. Browse without folders — tag already contains the full measurement name
+            //    Strip category prefix if present
             String category = extractCategory(tag);
             if (category != null) {
-                String stripped = stripCategory(tag);
-                if (CATEGORY_ASSETS.equals(category)) {
-                    return stripped;
-                }
-                tag = stripped;
+                return stripCategory(tag);
             }
 
-            // 4. Legacy: infer sys/prov from first two path levels
-            int firstSlash = tag.indexOf('/');
-            if (firstSlash >= 0) {
-                String sysName = tag.substring(0, firstSlash);
-                String rest = tag.substring(firstSlash + 1);
-                int secondSlash = rest.indexOf('/');
-                if (secondSlash >= 0) {
-                    String provName = rest.substring(0, secondSlash);
-                    String tagPath = rest.substring(secondSlash + 1);
-                    return buildStoredPath(sysName, provName, tagPath);
-                }
-            }
+            return tag;
         }
 
         return qualifiedPathStr;
     }
 
     /**
-     * Convert a stored path to a slash-separated display path for the browse tree.
-     * Handles multiple formats:
-     * <ul>
-     *   <li>Standard: {@code "Ignition-xxx:[default]FactrySim/ii2"} → {@code "Ignition-xxx/default/FactrySim/ii2"}</li>
-     *   <li>QualifiedPath: {@code "prov:default:/tag:Simulation/Pressure"} → {@code "default/Simulation/Pressure"}</li>
-     *   <li>Plain slash-separated: {@code "a/b/c/d"} → {@code "a/b/c/d"} (passthrough)</li>
-     * </ul>
-     */
-    static String storedPathToDisplayPath(String storedPath) {
-        // 1. Standard format: sys:[prov]tag
-        int colonIdx = storedPath.indexOf(":[");
-        if (colonIdx >= 0) {
-            String sys = storedPath.substring(0, colonIdx);
-            int closeBracket = storedPath.indexOf(']', colonIdx);
-            if (closeBracket >= 0) {
-                String prov = storedPath.substring(colonIdx + 2, closeBracket);
-                String tag = storedPath.substring(closeBracket + 1);
-                return sys + "/" + prov + "/" + tag;
-            }
-        }
-
-        // 2. QualifiedPath component format: contains ":/" separators
-        //    e.g. "prov:default:/tag:Simulation/Pressure" → "default/Simulation/Pressure"
-        //    Strips component type prefixes (sys:, prov:, tag:, etc.) and joins values.
-        if (storedPath.contains(":/")) {
-            StringBuilder display = new StringBuilder();
-            for (String segment : storedPath.split(":/")) {
-                int colonPos = segment.indexOf(':');
-                String value = colonPos >= 0 ? segment.substring(colonPos + 1) : segment;
-                if (!value.isEmpty()) {
-                    if (display.length() > 0) display.append("/");
-                    display.append(value);
-                }
-            }
-            if (display.length() > 0) return display.toString();
-        }
-
-        // 3. Fallback: already /-separated or plain text
-        return storedPath;
-    }
-
-    /**
      * Extract the category prefix from a display/browse path.
-     * Returns "Measurements", "Calculations", "Assets", or null if no category prefix.
+     * Returns "Measurements", "Assets", or null if no category prefix.
      */
     static String extractCategory(String displayPath) {
         if (displayPath == null) return null;
@@ -186,8 +123,7 @@ final class TagPathUtil {
 
     /**
      * Strip the category prefix from a display/browse path.
-     * {@code "Measurements/Ignition-xxx/default/Tag"} → {@code "Ignition-xxx/default/Tag"}
-     * {@code "Calculations/Avg_Temperature"} → {@code "Avg_Temperature"}
+     * {@code "Measurements/Ignition/default/Tag"} → {@code "Ignition/default/Tag"}
      */
     static String stripCategory(String displayPath) {
         if (displayPath == null) return null;
@@ -201,8 +137,8 @@ final class TagPathUtil {
      * Parse all {@code folder:} components from a QualifiedPath string
      * and join them into a slash-separated prefix.
      * <p>
-     * {@code "histprov:xxx:/folder:Ignition-abc:/folder:default"}
-     * → {@code "Ignition-abc/default/"}
+     * {@code "histprov:xxx:/folder:Ignition:/folder:default"}
+     * → {@code "Ignition/default/"}
      * <p>
      * Returns empty string if no folder components are found.
      */

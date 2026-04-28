@@ -143,8 +143,9 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     private Map<String, String> collectMeasurementDisplayToStoredMap() {
         Map<String, String> displayToStored = new HashMap<>();
         for (Measurement m : measurementCache.getAllMeasurements()) {
-            String display = TagPathUtil.storedPathToDisplayPath(m.getName());
-            displayToStored.put(display, m.getName());
+            // Measurement names are already slash-separated (collectorName/prov/tag),
+            // so display path == stored path.
+            displayToStored.put(m.getName(), m.getName());
         }
         return displayToStored;
     }
@@ -668,7 +669,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     }
 
     private String toStoredTagPath(QualifiedPath path) {
-        return TagPathUtil.qualifiedPathToStoredPath(path.toString());
+        return TagPathUtil.qualifiedPathToStoredPath(path.toString(), settings.getCollectorName());
     }
 
     static QualityCode statusToQuality(String status) {

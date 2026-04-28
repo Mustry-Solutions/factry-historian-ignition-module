@@ -8,6 +8,7 @@ public class FactryHistorianSettings implements HistorianSettings {
     private static final Logger logger = LoggerFactory.getLogger(FactryHistorianSettings.class);
 
     private String collectorUUID = "";
+    private String collectorName = "";
     private int batchSize = 100;
     private int batchIntervalMs = 5000;
     private String grpcHost = "localhost";
@@ -32,6 +33,14 @@ public class FactryHistorianSettings implements HistorianSettings {
 
     public void setCollectorUUID(String collectorUUID) {
         this.collectorUUID = collectorUUID;
+    }
+
+    public String getCollectorName() {
+        return collectorName;
+    }
+
+    public void setCollectorName(String collectorName) {
+        this.collectorName = collectorName;
     }
 
     public int getBatchSize() {
@@ -123,6 +132,10 @@ public class FactryHistorianSettings implements HistorianSettings {
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Invalid token: missing collector UUID. Ensure this is a Factry collector token."));
 
+        this.collectorName = JwtTokenParser.getCollectorName(payload)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Invalid token: missing collector name. Ensure this is a Factry collector token."));
+
         this.grpcHost = JwtTokenParser.getHost(payload)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Invalid token: missing host (aud claim). Ensure this is a Factry collector token."));
@@ -131,8 +144,8 @@ public class FactryHistorianSettings implements HistorianSettings {
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Invalid token: missing or invalid gRPC port. Ensure this is a Factry collector token."));
 
-        logger.info("Extracted from token: collectorUUID={}, host={}, port={}",
-                collectorUUID, grpcHost, grpcPort);
+        logger.info("Extracted from token: collectorName={}, collectorUUID={}, host={}, port={}",
+                collectorName, collectorUUID, grpcHost, grpcPort);
     }
 
     /**
@@ -142,6 +155,9 @@ public class FactryHistorianSettings implements HistorianSettings {
     public void validate() {
         if (collectorUUID == null || collectorUUID.trim().isEmpty()) {
             throw new IllegalArgumentException("Collector ID is required (should be extracted from token)");
+        }
+        if (collectorName == null || collectorName.trim().isEmpty()) {
+            throw new IllegalArgumentException("Collector name is required (should be extracted from token)");
         }
         if (grpcHost == null || grpcHost.trim().isEmpty()) {
             throw new IllegalArgumentException("Host is required (should be extracted from token)");
@@ -160,7 +176,8 @@ public class FactryHistorianSettings implements HistorianSettings {
     @Override
     public String toString() {
         return "FactryHistorianSettings{" +
-                "collectorUUID='" + collectorUUID + '\'' +
+                "collectorName='" + collectorName + '\'' +
+                ", collectorUUID='" + collectorUUID + '\'' +
                 ", grpcHost='" + grpcHost + '\'' +
                 ", grpcPort=" + grpcPort +
                 ", batchSize=" + batchSize +

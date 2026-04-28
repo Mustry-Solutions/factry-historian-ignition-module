@@ -50,6 +50,11 @@ public final class JwtTokenParser {
         return getStringField(payload, "uuid");
     }
 
+    /** Extract the collector name from the {@code name} claim. */
+    public static Optional<String> getCollectorName(JsonObject payload) {
+        return getStringField(payload, "name");
+    }
+
     /** Extract the host from the {@code aud} (audience) claim, which is a URL like {@code http://historian}. */
     public static Optional<String> getHost(JsonObject payload) {
         return getStringField(payload, "aud").map(aud -> {

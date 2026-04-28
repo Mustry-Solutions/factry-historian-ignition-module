@@ -135,9 +135,10 @@ public class FactryStorageEngine extends AbstractStorageEngine {
     private BuildResult buildPoints(List<AtomicPoint<?>> points) {
         Points.Builder pointsBuilder = Points.newBuilder();
         Set<String> usedUUIDs = new HashSet<>();
+        String collectorName = settings.getCollectorName();
 
         for (AtomicPoint<?> point : points) {
-            String tagPath = TagPathUtil.qualifiedPathToStoredPath(point.source().toString());
+            String tagPath = TagPathUtil.qualifiedPathToStoredPath(point.source().toString(), collectorName);
             Object value = point.value();
 
             logger.debug("Point: tagPath=" + tagPath
@@ -181,8 +182,9 @@ public class FactryStorageEngine extends AbstractStorageEngine {
         // properties so they can be applied as initial values when a measurement is
         // first created via MeasurementCache.getOrCreateUUID().
         logger.debug("doStoreMetadata called with " + metadataPoints.size() + " points");
+        String collectorName = settings.getCollectorName();
         for (MetadataPoint point : metadataPoints) {
-            String tagPath = TagPathUtil.qualifiedPathToStoredPath(point.source().toString());
+            String tagPath = TagPathUtil.qualifiedPathToStoredPath(point.source().toString(), collectorName);
             com.inductiveautomation.ignition.common.config.PropertySet ps = point.value();
             if (ps != null) {
                 Map<String, String> properties = new HashMap<>();

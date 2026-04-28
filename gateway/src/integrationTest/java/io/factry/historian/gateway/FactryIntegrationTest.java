@@ -59,6 +59,7 @@ class FactryIntegrationTest {
     private static final String COLLECTOR_UUID = System.getProperty("collector.uuid", "");
     private static final String COLLECTOR_TOKEN = System.getProperty("collector.token", "");
     private static final String GATEWAY_SYSTEM_NAME = System.getProperty("gateway.system.name", "Ignition-296a8ca4b6cd");
+    private static final String COLLECTOR_NAME = System.getProperty("collector.name", "Ignition");
 
     // Dual-historian config: when both are set, tests run twice (nested classes).
     // When only historian.name is set, that single name is used.
@@ -110,6 +111,7 @@ class FactryIntegrationTest {
         log("Project:    " + WEBDEV_PROJECT);
         log("Factry:     " + GRPC_HOST + ":" + GRPC_PORT);
         log("System:     " + GATEWAY_SYSTEM_NAME);
+        log("Collector:  " + COLLECTOR_NAME);
         log("Prefix:     " + TEST_PREFIX);
 
         if (!HISTORIAN_NAME_NOSF.isEmpty() && !HISTORIAN_NAME_SF.isEmpty()) {
@@ -884,9 +886,9 @@ class FactryIntegrationTest {
                 + ":/prov:default:/tag:" + tagName;
     }
 
-    /** Build the stored measurement name: {@code Ignition-xxx:[default]TagName} */
+    /** Build the stored measurement name: {@code CollectorName/default/TagName} */
     private String storedTagPath(String tagName) {
-        return GATEWAY_SYSTEM_NAME + ":[default]" + tagName;
+        return COLLECTOR_NAME + "/default/" + tagName;
     }
 
     /** Create a measurement in Factry and return its UUID. */

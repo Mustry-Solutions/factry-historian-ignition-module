@@ -238,6 +238,17 @@ Next is prepare for version 1.0:
   - demo 
   - code review
 
+# 29/04/2026
+
+Meeting at Factry.
+
+Plan:
+  - Make Demo working on on Wannes's computer
+  - Tests:
+      - manual
+      - automated tests
+  - Doc/Code Review
+  - Making follow-up list
 
 
 

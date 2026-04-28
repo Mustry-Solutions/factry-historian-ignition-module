@@ -80,6 +80,26 @@ class JwtTokenParserTest {
         assertTrue(JwtTokenParser.getCollectorUUID(null).isEmpty());
     }
 
+    // -- getCollectorName -----------------------------------------------------
+
+    @Test
+    void getCollectorName_present_returnsValue() {
+        JsonObject payload = parseJson("{\"name\":\"Ignition\"}");
+        assertEquals(Optional.of("Ignition"), JwtTokenParser.getCollectorName(payload));
+    }
+
+    @Test
+    void getCollectorName_missing_returnsEmpty() {
+        JsonObject payload = parseJson("{\"uuid\":\"x\"}");
+        assertTrue(JwtTokenParser.getCollectorName(payload).isEmpty());
+    }
+
+    @Test
+    void getCollectorName_blank_returnsEmpty() {
+        JsonObject payload = parseJson("{\"name\":\"  \"}");
+        assertTrue(JwtTokenParser.getCollectorName(payload).isEmpty());
+    }
+
     // -- getHost --------------------------------------------------------------
 
     @Test
