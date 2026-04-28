@@ -1,8 +1,9 @@
-# Code Walkthrough
+# Design
 
-A guided tour through the Factry Historian module codebase, organized by category. Designed to be read top-to-bottom with a colleague.
+A guided tour through the Factry Historian architecture, class overview, detailed class infos. 
 
-Terminology:
+# Terminology:
+
   - JVM - Java Virtual Machine or Java engine, this is the runner
   - Java and Kotlin compiled to bytecode. This is a platform independent small instruction set code(~200 opcodes) to run in the JVM, it is in the file .class 
   - extensions:
@@ -69,7 +70,7 @@ Ignition modules have scopes that determine where code runs:
 
 All historian logic (gRPC, storage, queries) is gateway-scoped.
 
-### Class Diagram
+### Class Overview
 
 ![Class Diagram](class_diagram.excalidraw.svg)
 
