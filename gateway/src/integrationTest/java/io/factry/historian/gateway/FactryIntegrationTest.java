@@ -65,7 +65,7 @@ class FactryIntegrationTest {
     // When only historian.name is set, that single name is used.
     private static final String HISTORIAN_NAME_NOSF = System.getProperty("historian.name.nosf", "");
     private static final String HISTORIAN_NAME_SF = System.getProperty("historian.name.sf", "");
-    private static final String HISTORIAN_NAME_SINGLE = System.getProperty("historian.name", "Factry Historian 0.8");
+    private static final String HISTORIAN_NAME_SINGLE = System.getProperty("historian.name", "Factry Historian 1.0");
 
     /** Wait time for the module's batch flush (default 5s interval + margin). */
     private static final int BATCH_FLUSH_WAIT_MS = 8_000;

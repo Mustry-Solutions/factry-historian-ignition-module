@@ -98,7 +98,7 @@ tasks.register<Test>("integrationTest") {
     // Pass system properties from Gradle command line (-P) or env vars
     systemProperty("gateway.url", System.getenv("GATEWAY_URL") ?: "http://localhost:8089")
     systemProperty("webdev.project", System.getenv("WEBDEV_PROJECT") ?: "TestFactry")
-    systemProperty("historian.name", System.getenv("HISTORIAN_NAME") ?: "Factry Historian 0.8")
+    systemProperty("historian.name", System.getenv("HISTORIAN_NAME") ?: "Factry Historian 1.0")
     systemProperty("grpc.host", System.getenv("GRPC_HOST") ?: "localhost")
     systemProperty("grpc.port", System.getenv("GRPC_PORT") ?: "8001")
     systemProperty("collector.uuid", System.getenv("COLLECTOR_UUID") ?: "a16cac76-3272-11f1-b9ed-4a5934d93d4f")
