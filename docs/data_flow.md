@@ -44,12 +44,13 @@ This section documents every Ignition SDK class/interface that the Factry Histor
 
 #### `AbstractStorageEngine`
 - **What**: Base implementation of `StorageEngine`. Handles threading, batching strategy, and delegates to abstract methods.
-- **Responsibility**: Calls our `doStoreAtomic()` and `applySourceChanges()`. Manages `PointStorageStrategy` (immediate vs. batched).
-- **Our impl**: `FactryStorageEngine` — converts `AtomicPoint` values to protobuf `Point` messages and sends them via `FactryGrpcClient.createPoints()`.
+- **Responsibility**: Calls our `doStoreAtomic()`, `doStoreMetadata()`, and `applySourceChanges()`. Manages `PointStorageStrategy` (immediate vs. batched).
+- **Our impl**: `FactryStorageEngine` — converts `AtomicPoint` values to protobuf `Point` messages and sends them via `FactryGrpcClient.createPoints()`. Also caches metadata from `doStoreMetadata()` for use when measurements are first created.
 - **Abstract methods we override**:
   - `doStoreAtomic(List<AtomicPoint<?>>)` → `StorageResult` — the actual write logic
+  - `doStoreMetadata(List<MetadataPoint>)` → `StorageResult` — caches tag metadata (description, attributes) in `MeasurementCache` for application when measurements are created in Factry
   - `applySourceChanges(List<SourceChangePoint>)` → `StorageResult` — tag rename/retire (no-op for us)
-  - `isEngineUnavailable()` → `boolean` — always false (let gRPC errors trigger S&F retry)
+  - `isEngineUnavailable()` → `boolean` — returns `true` when gRPC connection is down, so S&F buffers points
 
 #### `AtomicPoint<V>`
 - **What**: A single timestamped data point. Extends `DataPoint<V>`.
@@ -185,8 +186,8 @@ This section documents every Ignition SDK class/interface that the Factry Histor
 ### 1.6 Supporting Classes
 
 #### `MeasurementCache` (ours, not inherited)
-- **What**: In-memory cache mapping tag paths ↔ Factry measurement UUIDs.
-- **Responsibility**: Central lookup for both storage (tag path → UUID for writing) and query (UUID → measurement metadata for browsing/reading). Calls `GetMeasurements` gRPC to populate.
+- **What**: In-memory cache mapping tag paths ↔ Factry measurement UUIDs, plus pending metadata for new measurements.
+- **Responsibility**: Central lookup for both storage (tag path → UUID for writing) and query (UUID → measurement metadata for browsing/reading). Calls `GetMeasurements` gRPC to populate. Also stores pending metadata (from `doStoreMetadata()`) and applies it as initial `description`/`attributes` when creating new measurements via `getOrCreateUUID()`.
 
 #### `FactryGrpcClient` (ours, not inherited)
 - **What**: gRPC client wrapper for the Factry Historian proxy.
@@ -412,22 +413,27 @@ FactryQueryEngine.lookupNode(QualifiedPath)
                     │                  │
                     │ tagPath → UUID   │
                     │ UUID → Measurement│
+                    │ tagPath → metadata│
+                    │   (pending)      │
                     └──────┬───────────┘
                            │
-          ┌────────────────┼────────────────┐
-          │                │                │
-    ┌─────▼──────┐   ┌────▼─────┐   ┌─────▼──────┐
-    │  Storage   │   │  Query   │   │  Browse    │
-    │  Engine    │   │  Engine  │   │            │
-    │            │   │          │   │            │
-    │getOrCreate │   │ getUUID  │   │ getAll     │
-    │UUID()      │   │()        │   │Measurements│
-    │            │   │getMeas   │   │()          │
-    │(creates if │   │ByName()  │   │            │
-    │ not found) │   │ByUUID()  │   │            │
-    └────────────┘   └──────────┘   └────────────┘
-          │                │                │
-          ▼                ▼                ▼
-    tag path→UUID    tag path→UUID    all active
-    (+ auto-create)  (read only)      measurements
+     ┌─────────────────────┼────────────────┐
+     │                     │                │
+┌────▼───────┐  ┌─────────▼────┐   ┌───────▼────┐
+│  Storage   │  │  Storage     │   │  Query     │
+│  Engine    │  │  Engine      │   │  Engine    │
+│ (atomic)   │  │ (metadata)   │   │            │
+│            │  │              │   │ getUUID()  │
+│getOrCreate │  │storeMetadata │   │ getMeas    │
+│UUID()      │  │()            │   │ ByName()   │
+│            │  │              │   │ ByUUID()   │
+│(creates +  │  │(caches props │   │ getAll     │
+│ applies    │  │ for future   │   │ Measurements│
+│ metadata)  │  │ creates)     │   │()          │
+└────────────┘  └──────────────┘   └────────────┘
+      │                │                  │
+      ▼                ▼                  ▼
+tag path→UUID    cache metadata     tag path→UUID
+(+ auto-create   until measurement  (read only) +
+ with metadata)  is created         all active
 ```
