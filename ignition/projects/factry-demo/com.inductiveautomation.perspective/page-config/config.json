@@ -1,0 +1,10 @@
+{
+  "pages": {
+    "/": {
+      "viewPath": "PowerChart"
+    }
+  },
+  "sharedDocks": {
+    "cornerPriority": "top-bottom"
+  }
+}

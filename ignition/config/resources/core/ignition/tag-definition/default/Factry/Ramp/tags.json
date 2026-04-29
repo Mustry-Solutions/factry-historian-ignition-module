@@ -1,0 +1,108 @@
+[
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Ramp/Ramp1",
+    "dataType": "Float8",
+    "historyProvider": "factry",
+    "name": "Ramp1",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Ramp/Ramp2",
+    "dataType": "Float8",
+    "historyProvider": "factry",
+    "name": "Ramp2",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Ramp/Ramp8",
+    "dataType": "Float8",
+    "historyProvider": "factry",
+    "historicalDeadbandStyle": "Discrete",
+    "name": "Ramp8",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Ramp/Ramp7",
+    "dataType": "Float8",
+    "historyProvider": "factry",
+    "historicalDeadbandStyle": "Discrete",
+    "name": "Ramp7",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Ramp/Ramp5",
+    "dataType": "Float8",
+    "historyProvider": "factry",
+    "historicalDeadbandStyle": "Discrete",
+    "name": "Ramp5",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Ramp/Ramp6",
+    "dataType": "Float8",
+    "historyProvider": "factry",
+    "historicalDeadbandStyle": "Discrete",
+    "name": "Ramp6",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Ramp/Ramp4",
+    "dataType": "Float8",
+    "historyProvider": "factry",
+    "historicalDeadbandStyle": "Discrete",
+    "name": "Ramp4",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Ramp/Ramp3",
+    "dataType": "Float8",
+    "historyProvider": "factry",
+    "name": "Ramp3",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Ramp/Ramp0",
+    "dataType": "Float8",
+    "historyProvider": "factry",
+    "name": "Ramp0",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Ramp/Ramp9",
+    "dataType": "Float8",
+    "historyProvider": "factry",
+    "historicalDeadbandStyle": "Discrete",
+    "name": "Ramp9",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  }
+]

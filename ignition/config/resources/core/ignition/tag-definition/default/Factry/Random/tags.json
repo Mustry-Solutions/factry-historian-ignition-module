@@ -1,0 +1,102 @@
+[
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Random/RandomShort2",
+    "dataType": "Int2",
+    "historyProvider": "factry",
+    "name": "RandomShort2",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Random/RandomDouble2",
+    "dataType": "Float8",
+    "historyProvider": "factry",
+    "name": "RandomDouble2",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Random/RandomLong2",
+    "dataType": "Int8",
+    "historyProvider": "factry",
+    "name": "RandomLong2",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Random/RandomShort1",
+    "dataType": "Int2",
+    "historyProvider": "factry",
+    "name": "RandomShort1",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Random/RandomDouble1",
+    "dataType": "Float8",
+    "historyProvider": "factry",
+    "name": "RandomDouble1",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Random/RandomBoolean2",
+    "dataType": "Boolean",
+    "historyProvider": "factry",
+    "name": "RandomBoolean2",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Random/RandomBoolean1",
+    "dataType": "Boolean",
+    "historyProvider": "factry",
+    "name": "RandomBoolean1",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Random/RandomInteger2",
+    "dataType": "Int4",
+    "historyProvider": "factry",
+    "name": "RandomInteger2",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Random/RandomInteger1",
+    "dataType": "Int4",
+    "historyProvider": "factry",
+    "name": "RandomInteger1",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Random/RandomLong1",
+    "dataType": "Int8",
+    "historyProvider": "factry",
+    "name": "RandomLong1",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  }
+]

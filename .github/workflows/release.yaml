@@ -1,0 +1,81 @@
+name: Release
+run-name: Release
+
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Download module artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ignition-module
+
+      - name: Calculate version
+        run: |
+          VERSION=$(./gradlew -q printVersion)
+          DATE=$(date '+%Y%m%d')
+          BRANCH_NAME=$(echo "${GITHUB_REF#refs/heads/}" | tr '/' '-')
+          RELEASE_NAME="Release_v${VERSION}_${DATE}.${GITHUB_RUN_NUMBER}-${BRANCH_NAME}"
+
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "RELEASE_NAME=${RELEASE_NAME}" >> $GITHUB_ENV
+          echo "BRANCH_NAME=${BRANCH_NAME}" >> $GITHUB_ENV
+
+          echo "Calculated version: ${VERSION}"
+          echo "Release name: ${RELEASE_NAME}"
+
+      - name: Increment build number
+        run: |
+          PREFIX=$(head -1 build-number.txt)
+          CURRENT=$(tail -1 build-number.txt | tr -d '[:space:]')
+          NEXT=$(( CURRENT + 1 ))
+          printf '%s\n%s' "$PREFIX" "$NEXT" > build-number.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add build-number.txt
+          git commit -m "bump build number to ${PREFIX}.${NEXT} [skip ci]"
+          git push origin HEAD:${GITHUB_REF#refs/heads/}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: ${{ env.RELEASE_NAME }}
+          body: |
+            ## Factry Historian Module ${{ env.RELEASE_NAME }}
+
+            ### Version
+            - Module Version: `${{ env.VERSION }}`
+            - Branch: `${{ env.BRANCH_NAME }}`
+
+            ### Installation
+            1. Download the `.modl` file below
+            2. In Ignition Gateway: **Config > System > Modules > Install or Upgrade a Module**
+            3. Upload the `.modl` file
+            4. Accept the certificate if prompted
+
+            ### Requirements
+            - Ignition 8.3+
+            - Factry Historian system
+          files: Factry-Historian.modl
+          draft: false
+          prerelease: ${{ github.ref == 'refs/heads/develop' }}

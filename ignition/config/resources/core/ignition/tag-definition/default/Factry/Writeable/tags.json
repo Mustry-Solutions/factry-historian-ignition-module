@@ -1,0 +1,172 @@
+[
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Writeable/WriteableBoolean2",
+    "dataType": "Boolean",
+    "historyProvider": "factry",
+    "name": "WriteableBoolean2",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Writeable/WriteableShort2",
+    "dataType": "Int2",
+    "historyProvider": "factry",
+    "name": "WriteableShort2",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Writeable/WriteableFloat2",
+    "dataType": "Float4",
+    "historyProvider": "factry",
+    "name": "WriteableFloat2",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Writeable/WriteableLong1",
+    "dataType": "Int8",
+    "historyProvider": "factry",
+    "name": "WriteableLong1",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Writeable/WriteableString1",
+    "dataType": "String",
+    "historyProvider": "factry",
+    "name": "WriteableString1",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Writeable/WriteableShort1",
+    "dataType": "Int2",
+    "historyProvider": "factry",
+    "name": "WriteableShort1",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Writeable/WriteableInteger5",
+    "dataType": "Int4",
+    "historyProvider": "factry",
+    "name": "WriteableInteger5",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Writeable/WriteableDouble2",
+    "dataType": "Float8",
+    "historyProvider": "factry",
+    "name": "WriteableDouble2",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Writeable/WriteableInteger3",
+    "dataType": "Int4",
+    "historyProvider": "factry",
+    "name": "WriteableInteger3",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Writeable/WriteableBoolean1",
+    "dataType": "Boolean",
+    "historyProvider": "factry",
+    "name": "WriteableBoolean1",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Writeable/WriteableLong2",
+    "dataType": "Int8",
+    "historyProvider": "factry",
+    "name": "WriteableLong2",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Writeable/WriteableDouble1",
+    "dataType": "Float8",
+    "historyProvider": "factry",
+    "name": "WriteableDouble1",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Writeable/WriteableInteger1",
+    "dataType": "Int4",
+    "historyProvider": "factry",
+    "name": "WriteableInteger1",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Writeable/WriteableFloat1",
+    "dataType": "Float4",
+    "historyProvider": "factry",
+    "name": "WriteableFloat1",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Writeable/WriteableString2",
+    "dataType": "String",
+    "historyProvider": "factry",
+    "name": "WriteableString2",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Writeable/WriteableInteger2",
+    "dataType": "Int4",
+    "historyProvider": "factry",
+    "name": "WriteableInteger2",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  },
+  {
+    "valueSource": "opc",
+    "opcItemPath": "ns\u003d1;s\u003d[Test-PLC]Writeable/WriteableInteger4",
+    "dataType": "Int4",
+    "historyProvider": "factry",
+    "name": "WriteableInteger4",
+    "historyEnabled": true,
+    "tagType": "AtomicTag",
+    "opcServer": "Ignition OPC UA Server"
+  }
+]

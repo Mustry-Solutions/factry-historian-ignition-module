@@ -1,0 +1,102 @@
+services:
+  ignition:
+    image: inductiveautomation/ignition:8.3.3
+    container_name: factry-historian-ignition
+    ports:
+      - "8089:8088"   # HTTP - Gateway web interface
+      - "8044:8043"   # HTTPS
+      - "8061:8060"   # Gateway Network
+      - "8023:8022"    # Java debug port
+    volumes:
+      - ./ignition/data:/usr/local/bin/ignition/data
+    environment:
+      # Accept EULA automatically
+      ACCEPT_IGNITION_EULA: "Y"
+
+      # Gateway admin credentials (change these!)
+      GATEWAY_ADMIN_USERNAME: "admin"
+      GATEWAY_ADMIN_PASSWORD: "password"
+
+
+      # Gateway network settings
+      GATEWAY_NETWORK_0_HOST: "factry-historian-ignition"
+
+    command: -- -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:8022
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8088/StatusPing"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Factry Historian
+  historian:
+    image: registry.gitlab.com/factry/historian/historian-server:v8.2.0-beta-c3c26356e3
+    container_name: factry-historian
+    ports:
+      - "8000:8000"   # Web UI
+      - "8001:8001"   # gRPC
+    environment:
+      HISTORIAN_POSTGRES_HOST: postgres
+      HISTORIAN_POSTGRES_USER: factry
+      HISTORIAN_POSTGRES_PASSWORD: password
+      HISTORIAN_POSTGRES_DB: factry_historian
+      HISTORIAN_INFLUXDB_URL: http://influx:8086
+      HISTORIAN_INFLUXDB_USERNAME: factry
+      HISTORIAN_INFLUXDB_PASSWORD: password
+      AUTO_MIGRATE: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      influx:
+        condition: service_started
+    restart: unless-stopped
+    volumes:
+      - historian_data:/data
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: factry-postgres
+    environment:
+      POSTGRES_USER: factry
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: factry_historian
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U factry -d factry_historian"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  influx:
+    image: influxdb:1.8
+    container_name: factry-influx
+    environment:
+      INFLUXDB_HTTP_AUTH_ENABLED: "true"
+      INFLUXDB_ADMIN_USER: "factry"
+      INFLUXDB_ADMIN_PASSWORD: "password"
+    volumes:
+      - influx_data:/var/lib/influxdb
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: factry-grafana
+    ports:
+      - "3050:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+
+volumes:
+  historian_data:
+  postgres_data:
+  influx_data:
+  grafana_data:
+
+networks:
+  default:
+    name: factry-historian-module
