@@ -17,6 +17,13 @@ If you have multiple Java versions installed, ensure Java 17 is active before bu
 
 ## 1. Start the Docker Services
 
+First, you have to create required files into ignition folder. We mount the ignition folder to the docker, and it needs a lot of different files there. However, commiting those files to the git repo would be overwhelming, this is why we made this script.
+
+```bash
+setup-ignition.sh
+```
+
+
 ```bash
 docker-compose up -d
 ```

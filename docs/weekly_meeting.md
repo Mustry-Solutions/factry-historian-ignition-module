@@ -243,14 +243,26 @@ Next is prepare for version 1.0:
 Meeting at Factry office.
 
 Plan:
-  - test with only downloading the module and installing Ignition
+  + create factry own certificate and add to the cicd
+  + test with only downloading the module and installing Ignition
+  
 
-  - Make Demo working on on Wannes's computer
+  - Make Demo working on on Wannes's computer (running docker compose)
   - Tests:
       - manual
       - automated tests
   - Doc/Code Review
   - Making follow-up list
 
+Follow-ups:
+  - Wannes: make licence html
+  - Gabor: add suggested values for batch_size 10 and batch interval 5000
+  - Gabor: ignition projects didn't appear
+  - running integrationTest need to be smoother, some failed
 
+  - two ignitions with two different collectors  ( same collector doesn't define unique name: coll1/default/var1 can come form two different ignition)
+  - two ignitions, one with factry historian, one with remote historian
+  - more integrationTest, more unitTest
+------
 
+  - automatize the setup for integration test. 

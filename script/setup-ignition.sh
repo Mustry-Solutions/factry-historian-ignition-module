@@ -33,7 +33,7 @@ cat > docker-compose.temp.yml << 'EOF'
 
 services:
   ignition:
-    image: inductiveautomation/ignition:8.3.1
+    image: inductiveautomation/ignition:8.3.3
     container_name: ignition-init-temp
     ports:
       - "8088:8088"
@@ -108,6 +108,10 @@ echo ""
 echo "🛑 Step 3: Stopping temporary container..."
 docker compose -f docker-compose.temp.yml down
 rm docker-compose.temp.yml
+
+echo ""
+echo "📂 Step 4: Restoring git-tracked project files..."
+git checkout -- ignition/data/projects/ 2>/dev/null || true
 
 echo ""
 echo "=========================================="
