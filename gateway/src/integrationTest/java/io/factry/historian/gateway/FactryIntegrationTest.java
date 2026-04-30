@@ -56,16 +56,14 @@ class FactryIntegrationTest {
     private static final String WEBDEV_PROJECT = System.getProperty("webdev.project", "TestFactry");
     private static final String GRPC_HOST = System.getProperty("grpc.host", "localhost");
     private static final int GRPC_PORT = Integer.parseInt(System.getProperty("grpc.port", "8001"));
-    private static final String COLLECTOR_UUID = System.getProperty("collector.uuid", "");
     private static final String COLLECTOR_TOKEN = System.getProperty("collector.token", "");
-    private static final String GATEWAY_SYSTEM_NAME = System.getProperty("gateway.system.name", "Ignition-296a8ca4b6cd");
+    private static final String COLLECTOR_UUID = extractFromToken(COLLECTOR_TOKEN, "uuid");
+    private static final String GATEWAY_SYSTEM_NAME = System.getProperty("gateway.system.name", "Ignition-FactryTest");
     private static final String COLLECTOR_NAME = System.getProperty("collector.name", "Ignition");
 
-    // Dual-historian config: when both are set, tests run twice (nested classes).
-    // When only historian.name is set, that single name is used.
-    private static final String HISTORIAN_NAME_NOSF = System.getProperty("historian.name.nosf", "");
-    private static final String HISTORIAN_NAME_SF = System.getProperty("historian.name.sf", "");
-    private static final String HISTORIAN_NAME_SINGLE = System.getProperty("historian.name", "Factry Historian 1.0");
+    // Dual-historian mode: tests run against both historians.
+    private static final String HISTORIAN_NAME_NOSF = System.getProperty("historian.name.nosf", "Factry Historian NoSF");
+    private static final String HISTORIAN_NAME_SF = System.getProperty("historian.name.sf", "Factry Historian SF");
 
     /** Wait time for the module's batch flush (default 5s interval + margin). */
     private static final int BATCH_FLUSH_WAIT_MS = 8_000;
@@ -114,11 +112,7 @@ class FactryIntegrationTest {
         log("Collector:  " + COLLECTOR_NAME);
         log("Prefix:     " + TEST_PREFIX);
 
-        if (!HISTORIAN_NAME_NOSF.isEmpty() && !HISTORIAN_NAME_SF.isEmpty()) {
-            log("Dual mode:  NoS&F='" + HISTORIAN_NAME_NOSF + "'  S&F='" + HISTORIAN_NAME_SF + "'");
-        } else {
-            log("Historian:  " + HISTORIAN_NAME_SINGLE);
-        }
+        log("Historian:  NoSF='" + HISTORIAN_NAME_NOSF + "'  SF='" + HISTORIAN_NAME_SF + "'");
 
         httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
@@ -172,7 +166,7 @@ class FactryIntegrationTest {
         }
 
         // Verify WebDev endpoint is reachable
-        String probeHistorian = !HISTORIAN_NAME_NOSF.isEmpty() ? HISTORIAN_NAME_NOSF : HISTORIAN_NAME_SINGLE;
+        String probeHistorian = HISTORIAN_NAME_NOSF;
         try {
             Map<String, Object> probe = webdevPost("test/queryRaw", Map.of(
                     "paths", List.of("histprov:" + probeHistorian + ":/sys:probe:/prov:default:/tag:probe"),
@@ -200,8 +194,23 @@ class FactryIntegrationTest {
     // Determine which historians to test
     // =========================================================================
 
-    private static boolean isDualMode() {
-        return !HISTORIAN_NAME_NOSF.isEmpty() && !HISTORIAN_NAME_SF.isEmpty();
+    /** Extract a field from the JWT token payload (base64-decoded JSON). */
+    private static String extractFromToken(String token, String field) {
+        if (token == null || token.isEmpty()) return "";
+        try {
+            String[] parts = token.split("\\.");
+            if (parts.length < 2) return "";
+            String payload = new String(Base64.getUrlDecoder().decode(parts[1]));
+            // Simple JSON field extraction without a JSON library
+            String pattern = "\"" + field + "\":\"";
+            int start = payload.indexOf(pattern);
+            if (start < 0) return "";
+            start += pattern.length();
+            int end = payload.indexOf("\"", start);
+            return end > start ? payload.substring(start, end) : "";
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     // =========================================================================
@@ -614,17 +623,17 @@ class FactryIntegrationTest {
 
         @Override
         String historianName() {
-            return isDualMode() ? HISTORIAN_NAME_NOSF : HISTORIAN_NAME_SINGLE;
+            return HISTORIAN_NAME_NOSF;
         }
 
         @Override
         String label() {
-            return isDualMode() ? "NoS&F" : "Single";
+            return "NoS&F";
         }
     }
 
     // =========================================================================
-    // Nested class: tests with Store & Forward (only runs in dual mode)
+    // Nested class: tests with Store & Forward
     // =========================================================================
 
     @Nested
@@ -635,20 +644,12 @@ class FactryIntegrationTest {
 
         @Override
         String historianName() {
-            return isDualMode() ? HISTORIAN_NAME_SF : HISTORIAN_NAME_SINGLE;
+            return HISTORIAN_NAME_SF;
         }
 
         @Override
         String label() {
-            return isDualMode() ? "S&F" : "Single";
-        }
-
-        /** Skip all tests in this class when not in dual mode. */
-        @BeforeAll
-        void skipIfSingleMode() {
-            Assumptions.assumeTrue(isDualMode(),
-                    "Skipping S&F tests: dual-historian not configured. " +
-                    "Set historian.name.nosf and historian.name.sf to enable.");
+            return "S&F";
         }
     }
 
@@ -663,7 +664,7 @@ class FactryIntegrationTest {
     class ErrorCases {
 
         private String defaultHistorian() {
-            return isDualMode() ? HISTORIAN_NAME_NOSF : HISTORIAN_NAME_SINGLE;
+            return HISTORIAN_NAME_NOSF;
         }
 
         @Test
