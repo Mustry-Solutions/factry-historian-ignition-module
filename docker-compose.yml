@@ -2,6 +2,7 @@ services:
   ignition:
     image: inductiveautomation/ignition:8.3.3
     container_name: factry-historian-ignition
+    hostname: FactryTest
     ports:
       - "8089:8088"   # HTTP - Gateway web interface
       - "8044:8043"   # HTTPS

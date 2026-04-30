@@ -115,6 +115,7 @@ ignition/data/*
 ignition/data/projects/*
 !ignition/data/projects/TestFactry/
 ignition/data/projects/TestFactry/*
+!ignition/data/projects/TestFactry/project.json
 !ignition/data/projects/TestFactry/com.inductiveautomation.webdev/
 
 # Ignition module binaries are build artifacts
