@@ -11,8 +11,10 @@ public class FactryHistorianSettings implements HistorianSettings {
     private String collectorName = "";
     private int batchSize = 100;
     private int batchIntervalMs = 5000;
-    private String grpcHost = "localhost";
-    private int grpcPort = 9876;
+    private static final String DEFAULT_GRPC_HOST = "localhost";
+    private static final int DEFAULT_GRPC_PORT = 9876;
+    private String grpcHost = DEFAULT_GRPC_HOST;
+    private int grpcPort = DEFAULT_GRPC_PORT;
     private boolean debugLogging = false;
     private boolean useTls = false;
     private boolean skipTlsVerification = false;
@@ -136,13 +138,27 @@ public class FactryHistorianSettings implements HistorianSettings {
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Invalid token: missing collector name. Ensure this is a Factry collector token."));
 
-        this.grpcHost = JwtTokenParser.getHost(payload)
+        // Only apply host/port from token if config still has defaults.
+        // This allows the config to override the token for Docker environments
+        // where the token's aud claim (e.g. "http://localhost") doesn't match
+        // the actual Docker service name (e.g. "historian").
+        String tokenHost = JwtTokenParser.getHost(payload)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Invalid token: missing host (aud claim). Ensure this is a Factry collector token."));
+        if (DEFAULT_GRPC_HOST.equals(this.grpcHost)) {
+            this.grpcHost = tokenHost;
+        } else {
+            logger.info("Config grpcHost '{}' overrides token host '{}'", this.grpcHost, tokenHost);
+        }
 
-        this.grpcPort = JwtTokenParser.getGrpcPort(payload)
+        int tokenPort = JwtTokenParser.getGrpcPort(payload)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Invalid token: missing or invalid gRPC port. Ensure this is a Factry collector token."));
+        if (DEFAULT_GRPC_PORT == this.grpcPort) {
+            this.grpcPort = tokenPort;
+        } else {
+            logger.info("Config grpcPort '{}' overrides token port '{}'", this.grpcPort, tokenPort);
+        }
 
         logger.info("Extracted from token: collectorName={}, collectorUUID={}, host={}, port={}",
                 collectorName, collectorUUID, grpcHost, grpcPort);

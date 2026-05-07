@@ -36,6 +36,7 @@ import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 
 import io.factry.historian.proto.Aggregation;
 import io.factry.historian.proto.Asset;
+import io.factry.historian.proto.AssetProperty;
 import io.factry.historian.proto.Measurement;
 import io.factry.historian.proto.QueryTimeseriesRequest;
 import io.factry.historian.proto.QueryTimeseriesResponse;
@@ -120,16 +121,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 }
                 browsePaths(collectMeasurementDisplayToStoredMap(), measPrefix, publisher);
             } else if (TagPathUtil.CATEGORY_ASSETS.equals(category)) {
-                // Assets: hierarchical by "/" in name
                 String assetPrefix = TagPathUtil.stripCategory(prefix);
-                if (!assetPrefix.isEmpty() && !assetPrefix.endsWith("/")) {
-                    assetPrefix += "/";
-                }
-                Map<String, String> assetDisplayToStored = new HashMap<>();
-                for (Asset a : measurementCache.getAllAssets()) {
-                    assetDisplayToStored.put(a.getName(), a.getName());
-                }
-                browsePaths(assetDisplayToStored, assetPrefix, publisher);
+                browseAssets(assetPrefix, publisher);
             } else {
                 // Legacy fallback: browse measurements without category prefix
                 browsePaths(collectMeasurementDisplayToStoredMap(), prefix, publisher);
@@ -183,6 +176,73 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         }
 
         logger.debug("Browse: published " + folders.size() + " folders, " + leafDisplayNameToFullPath.size() + " tags");
+    }
+
+    /**
+     * Browse the asset tree. Uses assetPath for hierarchy and shows asset properties
+     * as leaf tags under each asset.
+     *
+     * @param prefix path segments already navigated (e.g. "" for root, "alma/" for inside asset alma)
+     */
+    private void browseAssets(String prefix, BrowsePublisher publisher) {
+        // Build a map: assetPath → Asset for quick lookup
+        Map<String, Asset> pathToAsset = new HashMap<>();
+        for (Asset a : measurementCache.getAllAssets()) {
+            String path = a.getAssetPath().isEmpty() ? a.getName() : a.getAssetPath();
+            pathToAsset.put(path, a);
+        }
+
+        Set<String> folders = new LinkedHashSet<>();
+        Map<String, Asset> leafAssets = new HashMap<>();
+
+        for (Map.Entry<String, Asset> entry : pathToAsset.entrySet()) {
+            String path = entry.getKey();
+            if (!prefix.isEmpty()) {
+                if (!path.startsWith(prefix)) continue;
+                path = path.substring(prefix.length());
+            }
+            int slashPos = path.indexOf('/');
+            if (slashPos >= 0) {
+                // Nested asset — show as folder
+                folders.add(path.substring(0, slashPos));
+            } else if (!path.isEmpty()) {
+                // Direct child asset
+                leafAssets.put(path, entry.getValue());
+            }
+        }
+
+        // Assets are always folders (they can have properties underneath)
+        for (String folder : folders) {
+            publisher.newNode("folder", folder).hasChildren(true).add();
+        }
+        for (Map.Entry<String, Asset> leaf : leafAssets.entrySet()) {
+            String assetName = leaf.getKey();
+            Asset asset = leaf.getValue();
+            List<AssetProperty> props = measurementCache.getPropertiesForAsset(asset.getUuid());
+            boolean hasChildren = !props.isEmpty();
+            publisher.newNode("folder", assetName).hasChildren(hasChildren).add();
+        }
+
+        // If prefix points to a specific asset, also show its properties as leaf tags
+        if (!prefix.isEmpty()) {
+            String assetPath = prefix.endsWith("/") ? prefix.substring(0, prefix.length() - 1) : prefix;
+            Asset asset = pathToAsset.get(assetPath);
+            if (asset != null) {
+                List<AssetProperty> props = measurementCache.getPropertiesForAsset(asset.getUuid());
+                for (AssetProperty prop : props) {
+                    // Use the measurement UUID as the stored path so queries can resolve it
+                    Measurement m = measurementCache.getMeasurementByUUID(prop.getMeasurementUUID());
+                    String storedPath = m != null ? m.getName() : prop.getMeasurementUUID();
+                    publisher.newNode("tag", storedPath)
+                            .displayPath(StringPath.of(prop.getName()))
+                            .hasChildren(false)
+                            .add();
+                }
+                logger.debug("Browse assets: published " + props.size() + " properties for asset '" + assetPath + "'");
+            }
+        }
+
+        logger.debug("Browse assets: prefix='" + prefix + "', " + folders.size() + " folders, " + leafAssets.size() + " leaf assets");
     }
 
     /**
