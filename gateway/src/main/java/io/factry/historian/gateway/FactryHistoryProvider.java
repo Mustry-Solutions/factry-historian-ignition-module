@@ -79,6 +79,29 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         logger.debug("Name: {}", historianName);
         logger.debug("Settings: {}", settings);
 
+        // Register this collector with Factry so it shows as active
+        try {
+            var schema = io.factry.historian.proto.RegisterCollectorSchema.newBuilder()
+                    .setCollectorType("ignition")
+                    .setBuildVersion(FactryHistorianModule.MODULE_VERSION)
+                    .setBuildOs(System.getProperty("os.name", "unknown"))
+                    .setBuildArch(System.getProperty("os.arch", "unknown"))
+                    .build();
+            grpcClient.registerCollector(schema);
+            logger.info("Collector registered with Factry");
+
+            // Set collector state to active/collecting
+            var state = com.google.protobuf.Struct.newBuilder()
+                    .putFields("status", com.google.protobuf.Value.newBuilder()
+                            .setStringValue("Active").build())
+                    .putFields("health", com.google.protobuf.Value.newBuilder()
+                            .setStringValue("Collecting").build())
+                    .build();
+            grpcClient.updateCollectorState(state);
+        } catch (Exception e) {
+            logger.warn("Failed to register collector with Factry: " + e.getMessage());
+        }
+
         measurementCache.refresh(grpcClient);
         logger.info("Measurement cache pre-populated with {} entries", measurementCache.size());
 
@@ -147,6 +170,10 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
             scheduledExecutor.scheduleWithFixedDelay(
                     this::refreshMeasurementCache, refreshInterval, refreshInterval, TimeUnit.SECONDS);
         }
+
+        // Send periodic health updates to Factry (heartbeat)
+        scheduledExecutor.scheduleWithFixedDelay(
+                this::sendHealthUpdate, 0, 30, TimeUnit.SECONDS);
 
         logger.info("Factry Historian - Startup Complete");
     }
@@ -276,6 +303,21 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
             }
         } catch (Exception e) {
             logger.debug("Error retrying quarantined data", e);
+        }
+    }
+
+    private void sendHealthUpdate() {
+        try {
+            var update = io.factry.historian.proto.HealthUpdate.newBuilder()
+                    .setHealth("Collecting")
+                    .setTimestamp(com.google.protobuf.util.Timestamps.fromMillis(System.currentTimeMillis()))
+                    .build();
+            var updates = io.factry.historian.proto.HealthUpdates.newBuilder()
+                    .addHealthUpdates(update)
+                    .build();
+            grpcClient.updateHealth(updates);
+        } catch (Exception e) {
+            logger.debug("Failed to send health update: " + e.getMessage());
         }
     }
 

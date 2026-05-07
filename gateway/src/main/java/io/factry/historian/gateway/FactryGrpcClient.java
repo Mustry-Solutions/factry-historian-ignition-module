@@ -1,16 +1,25 @@
 package io.factry.historian.gateway;
 
+import io.factry.historian.proto.AssetProperties;
 import io.factry.historian.proto.Assets;
+import io.factry.historian.proto.Collector;
 import io.factry.historian.proto.CreateMeasurementsReply;
 import io.factry.historian.proto.CreateMeasurementsRequest;
 import io.factry.historian.proto.CreatePointsReply;
+import io.factry.historian.proto.GetAssetPropertiesRequest;
 import io.factry.historian.proto.GetAssetsRequest;
+import io.factry.historian.proto.HealthUpdate;
+import io.factry.historian.proto.HealthUpdateReply;
+import io.factry.historian.proto.HealthUpdates;
+import com.google.protobuf.Empty;
+import com.google.protobuf.Struct;
 import io.factry.historian.proto.HistorianGrpc;
 import io.factry.historian.proto.MeasurementRequest;
 import io.factry.historian.proto.Measurements;
 import io.factry.historian.proto.Points;
 import io.factry.historian.proto.QueryTimeseriesRequest;
 import io.factry.historian.proto.QueryTimeseriesResponse;
+import io.factry.historian.proto.RegisterCollectorSchema;
 import io.grpc.ManagedChannel;
 import io.grpc.Metadata;
 import io.grpc.Status;
@@ -101,6 +110,46 @@ public class FactryGrpcClient {
         channelLock.readLock().lock();
         try {
             return blockingStub.getAssets(GetAssetsRequest.newBuilder().build());
+        } finally {
+            channelLock.readLock().unlock();
+        }
+    }
+
+    public AssetProperties getAssetProperties(GetAssetPropertiesRequest request) {
+        logger.debug("Sending GetAssetProperties for {} assets", request.getAssetUUIDsCount());
+        channelLock.readLock().lock();
+        try {
+            return blockingStub.getAssetProperties(request);
+        } finally {
+            channelLock.readLock().unlock();
+        }
+    }
+
+    public Collector registerCollector(RegisterCollectorSchema schema) {
+        logger.debug("Sending RegisterCollector");
+        channelLock.readLock().lock();
+        try {
+            return blockingStub.registerCollector(schema);
+        } finally {
+            channelLock.readLock().unlock();
+        }
+    }
+
+    public HealthUpdateReply updateHealth(HealthUpdates updates) {
+        logger.debug("Sending UpdateHealth");
+        channelLock.readLock().lock();
+        try {
+            return blockingStub.updateHealth(updates);
+        } finally {
+            channelLock.readLock().unlock();
+        }
+    }
+
+    public void updateCollectorState(Struct state) {
+        logger.debug("Sending UpdateCollectorState");
+        channelLock.readLock().lock();
+        try {
+            blockingStub.updateCollectorState(state);
         } finally {
             channelLock.readLock().unlock();
         }

@@ -3,9 +3,12 @@ package io.factry.historian.gateway;
 import com.google.protobuf.Struct;
 import com.google.protobuf.Value;
 import io.factry.historian.proto.Asset;
+import io.factry.historian.proto.AssetProperties;
+import io.factry.historian.proto.AssetProperty;
 import io.factry.historian.proto.Assets;
 import io.factry.historian.proto.CreateMeasurement;
 import io.factry.historian.proto.CreateMeasurementsRequest;
+import io.factry.historian.proto.GetAssetPropertiesRequest;
 import io.factry.historian.proto.GetAssetsRequest;
 import io.factry.historian.proto.Measurement;
 import io.factry.historian.proto.MeasurementRequest;
@@ -13,8 +16,11 @@ import io.factry.historian.proto.Measurements;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -28,6 +34,8 @@ public class MeasurementCache {
 
     private final ConcurrentHashMap<String, String> assetNameToUUID = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Asset> uuidToAsset = new ConcurrentHashMap<>();
+    /** Asset UUID → list of properties belonging to that asset. */
+    private final ConcurrentHashMap<String, List<AssetProperty>> assetProperties = new ConcurrentHashMap<>();
 
     /** Metadata properties cached from doStoreMetadata, applied when creating measurements. */
     private final ConcurrentHashMap<String, Map<String, String>> pendingMetadata = new ConcurrentHashMap<>();
@@ -57,20 +65,43 @@ public class MeasurementCache {
             logger.debug("Measurement cache refreshed, {} active of {} total from Factry, {} in cache",
                     freshPaths.size(), total, tagPathToUUID.size());
 
-            // Fetch assets
+            // Fetch assets and their properties
             try {
                 Assets assetsResponse = grpcClient.getAssets();
                 Map<String, String> freshAssetNames = new HashMap<>();
                 Map<String, Asset> freshAssets = new HashMap<>();
+                List<String> assetUUIDs = new ArrayList<>();
                 for (Asset a : assetsResponse.getAssetsList()) {
                     freshAssetNames.put(a.getName(), a.getUuid());
                     freshAssets.put(a.getUuid(), a);
+                    assetUUIDs.add(a.getUuid());
                 }
                 assetNameToUUID.clear();
                 assetNameToUUID.putAll(freshAssetNames);
                 uuidToAsset.clear();
                 uuidToAsset.putAll(freshAssets);
-                logger.debug("Asset cache refreshed, {} active", freshAssetNames.size());
+
+                // Fetch properties for all assets
+                Map<String, List<AssetProperty>> freshProps = new HashMap<>();
+                if (!assetUUIDs.isEmpty()) {
+                    try {
+                        GetAssetPropertiesRequest propReq = GetAssetPropertiesRequest.newBuilder()
+                                .addAllAssetUUIDs(assetUUIDs)
+                                .setRecursive(true)
+                                .build();
+                        AssetProperties propsResponse = grpcClient.getAssetProperties(propReq);
+                        for (AssetProperty prop : propsResponse.getAssetPropertiesList()) {
+                            freshProps.computeIfAbsent(prop.getAssetUUID(), k -> new ArrayList<>()).add(prop);
+                        }
+                    } catch (Exception pe) {
+                        logger.error("Failed to refresh asset properties cache", pe);
+                    }
+                }
+                assetProperties.clear();
+                assetProperties.putAll(freshProps);
+
+                logger.debug("Asset cache refreshed, {} assets, {} properties",
+                        freshAssetNames.size(), freshProps.values().stream().mapToInt(List::size).sum());
             } catch (Exception ae) {
                 logger.error("Failed to refresh asset cache", ae);
             }
@@ -213,6 +244,10 @@ public class MeasurementCache {
 
     public Collection<Asset> getAllAssets() {
         return uuidToAsset.values();
+    }
+
+    public List<AssetProperty> getPropertiesForAsset(String assetUUID) {
+        return assetProperties.getOrDefault(assetUUID, Collections.emptyList());
     }
 
     /**
