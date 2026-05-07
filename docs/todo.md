@@ -2,6 +2,9 @@
      
 
 
+
+
+
   [] So metadata flows one direction only: 
          Factry → Ignition create tag with metadata in Ignition 
          Other direction: we can't change the metadata, but we can send what we have
@@ -22,11 +25,13 @@
         - Figure out how to set org context (header? user association? TSDB ownership?)
         - Or create collector manually in Factry UI, then script only needs to generate token
         - Once collector exists: run setup-historians.sh with token, restart Ignition, run tests
-
+  
   [] TSDB created via API
       "Influx" TSDB UUID: ff6392ac-4872-11f1-bd09-e69c80a3afdc (host: influx:8086, db: factry)
       Created under Root organization. May need to be under "Mustry" org instead.
 
+
+  [] Auto store&forward
 
 
 ## Wannes's items:
@@ -46,8 +51,8 @@
   - This is also in the logs but I remember there being an issue with making this field a secret right? The 'token' field in class class io.factry.historian.gateway.FactryHistorianConfig is named such that it implies that it might contain a secret, but the type is not SecretConfig. It is suggested that fields that contain a secret be of type SecretConfig in order to secure the secret. If this field does not contain a secret, use the @NonSecret annotation to indicate that it does not contain a secret and silence this warning.
 
   Short look at the code, some remarks:
-  - statusToQuality function in FactryQueryEngine does not seem to be used
-  - when parsing points return from the historian it looks like you always set quality to Good, the Status we return on a point could potentially be used for this
+   
+  [?] when parsing points return from the historian it looks like you always set quality to Good, the Status we return on a point could potentially be used for this (statusToQuality function in FactryQueryEngine does not seem to be used)
 
 
 
