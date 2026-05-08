@@ -3,10 +3,12 @@ package io.factry.historian.gateway;
 import io.factry.historian.proto.AssetProperties;
 import io.factry.historian.proto.Assets;
 import io.factry.historian.proto.Collector;
+import io.factry.historian.proto.Collectors;
 import io.factry.historian.proto.CreateMeasurementsReply;
 import io.factry.historian.proto.CreateMeasurementsRequest;
 import io.factry.historian.proto.CreatePointsReply;
 import io.factry.historian.proto.GetAssetPropertiesRequest;
+import io.factry.historian.proto.GetCollectorsRequest;
 import io.factry.historian.proto.GetMeasurementsByFilterRequest;
 import io.factry.historian.proto.GetAssetsRequest;
 import io.factry.historian.proto.HealthUpdate;
@@ -135,6 +137,16 @@ public class FactryGrpcClient {
         channelLock.readLock().lock();
         try {
             return blockingStub.getAssetProperties(request);
+        } finally {
+            channelLock.readLock().unlock();
+        }
+    }
+
+    public Collectors getCollectors() {
+        logger.debug("Sending GetCollectors");
+        channelLock.readLock().lock();
+        try {
+            return blockingStub.getCollectors(GetCollectorsRequest.newBuilder().build());
         } finally {
             channelLock.readLock().unlock();
         }

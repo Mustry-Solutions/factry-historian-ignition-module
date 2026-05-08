@@ -8,6 +8,7 @@ import io.factry.historian.proto.AssetProperty;
 import io.factry.historian.proto.Assets;
 import io.factry.historian.proto.CreateMeasurement;
 import io.factry.historian.proto.CreateMeasurementsRequest;
+import io.factry.historian.proto.Collector;
 import io.factry.historian.proto.GetAssetPropertiesRequest;
 import io.factry.historian.proto.GetAssetsRequest;
 import io.factry.historian.proto.GetMeasurementsByFilterRequest;
@@ -37,6 +38,9 @@ public class MeasurementCache {
     /** Asset UUID → list of properties belonging to that asset. */
     private final ConcurrentHashMap<String, List<AssetProperty>> assetProperties = new ConcurrentHashMap<>();
 
+    /** Measurement UUID → collector name, for grouping in the browse tree. */
+    private final ConcurrentHashMap<String, String> measurementToCollectorName = new ConcurrentHashMap<>();
+
     /** Metadata properties cached from doStoreMetadata, applied when creating measurements. */
     private final ConcurrentHashMap<String, Map<String, String>> pendingMetadata = new ConcurrentHashMap<>();
 
@@ -64,6 +68,32 @@ public class MeasurementCache {
             uuidToMeasurement.putAll(freshMeasurements);
             logger.debug("Measurement cache refreshed, {} active of {} total from Factry, {} in cache",
                     freshPaths.size(), total, tagPathToUUID.size());
+
+            // Build measurement → collector name mapping
+            try {
+                var collectors = grpcClient.getCollectors();
+                Map<String, String> freshCollectorMap = new HashMap<>();
+                for (Collector c : collectors.getCollectorsList()) {
+                    GetMeasurementsByFilterRequest collectorFilter = GetMeasurementsByFilterRequest.newBuilder()
+                            .addCollectorUUIDs(c.getUuid())
+                            .build();
+                    Measurements collectorMeasurements = grpcClient.getMeasurementsByFilter(collectorFilter);
+                    // Proto has no 'name' field — use short UUID prefix as fallback
+                    String collectorName = c.getUuid().length() >= 8
+                            ? c.getUuid().substring(0, 8)
+                            : c.getUuid();
+                    logger.debug("Collector: uuid={}, type={}, desc='{}', displayName='{}'",
+                            c.getUuid(), c.getType(), c.getDescription(), collectorName);
+                    for (Measurement cm : collectorMeasurements.getMeasurementsList()) {
+                        freshCollectorMap.put(cm.getUuid(), collectorName);
+                    }
+                }
+                measurementToCollectorName.clear();
+                measurementToCollectorName.putAll(freshCollectorMap);
+                logger.debug("Collector mapping refreshed: {} measurements mapped to collectors", freshCollectorMap.size());
+            } catch (Exception ce) {
+                logger.error("Failed to refresh collector mapping", ce);
+            }
 
             // Fetch assets and their properties
             try {
@@ -255,6 +285,10 @@ public class MeasurementCache {
 
     public Collection<Asset> getAllAssets() {
         return uuidToAsset.values();
+    }
+
+    public String getCollectorName(String measurementUUID) {
+        return measurementToCollectorName.get(measurementUUID);
     }
 
     public List<AssetProperty> getPropertiesForAsset(String assetUUID) {

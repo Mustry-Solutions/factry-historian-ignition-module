@@ -1,7 +1,8 @@
 
 # TODO
-  [] use GetMeasurementByFilter to get all the measurements of different collectors
-  [] query grouped by the status=good << let's plot only the good quality data   
+  [.] use GetMeasurementByFilter to get all the measurements of different collectors
+  []create the store&forward engine automatic
+  [] FactryQueryEngine query grouped by the status=good << let's plot only the good quality data   
 
 
 ------ 

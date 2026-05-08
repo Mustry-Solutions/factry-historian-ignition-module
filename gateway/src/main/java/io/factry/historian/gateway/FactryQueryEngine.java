@@ -136,9 +136,13 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     private Map<String, String> collectMeasurementDisplayToStoredMap() {
         Map<String, String> displayToStored = new HashMap<>();
         for (Measurement m : measurementCache.getAllMeasurements()) {
-            // Measurement names are already slash-separated (collectorName/prov/tag),
-            // so display path == stored path.
-            displayToStored.put(m.getName(), m.getName());
+            // Prefix the display path with the collector name so measurements
+            // are grouped under their collector in the browse tree.
+            String collectorName = measurementCache.getCollectorName(m.getUuid());
+            String displayPath = collectorName != null
+                    ? collectorName + "/" + m.getName()
+                    : m.getName();
+            displayToStored.put(displayPath, m.getName());
         }
         return displayToStored;
     }
