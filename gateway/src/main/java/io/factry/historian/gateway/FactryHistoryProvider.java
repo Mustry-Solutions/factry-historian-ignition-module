@@ -146,10 +146,6 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
             scheduledExecutor.scheduleWithFixedDelay(
                     () -> retryQuarantinedData(sfEngine), 30, 30, TimeUnit.SECONDS);
 
-            // Log metrics summary every 30 seconds
-            scheduledExecutor.scheduleWithFixedDelay(
-                    metrics::logSummary, 30, 30, TimeUnit.SECONDS);
-
             // Periodic measurement cache refresh to detect deleted measurements
             long refreshInterval = ModuleProperties.getMeasurementCacheRefreshSeconds();
             scheduledExecutor.scheduleWithFixedDelay(
@@ -164,9 +160,6 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
                 t.setDaemon(true);
                 return t;
             });
-            scheduledExecutor.scheduleWithFixedDelay(
-                    metrics::logSummary, 30, 30, TimeUnit.SECONDS);
-
             long refreshInterval = ModuleProperties.getMeasurementCacheRefreshSeconds();
             scheduledExecutor.scheduleWithFixedDelay(
                     this::refreshMeasurementCache, refreshInterval, refreshInterval, TimeUnit.SECONDS);

@@ -37,7 +37,7 @@
 ## Wannes's items:
   
   [] I've been testing the module a bit today and will list below what I noticed.
-  Tag browser in power chart doesnt reflect the asset tree properly and doesnt display the asset properties(which is what is actually linked to the measurement), looks like a flat list of assets currently, should be a tree like in the historian (see screenshot asset-tree.png)
+  [+]Tag browser in power chart doesnt reflect the asset tree properly and doesnt display the asset properties(which is what is actually linked to the measurement), looks like a flat list of assets currently, should be a tree like in the historian (see screenshot asset-tree.png)
   
   - Related to the next thing, here's a guide to setup a collector that generates some data already
   

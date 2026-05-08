@@ -269,10 +269,15 @@ Follow-ups:
  
 
 Changes:
-  + Gabor: add suggested values for batch_size 10 and batch interval 5000  
-  + I added an numeric array tag to the tag browser and populated it using the script console, it appeared in historian but as a separate measurement for each index (see screenshot array-test.png)
-  + Had a peek in the logs in ignition for metrics
-  + This is also in the logs but I remember there being an issue with making this field a secret right? The 'token' field in class class io.factry.historian.gateway.FactryHistorianConfig is named such that it implies that it might contain a secret, but the type is not SecretConfig. It is suggested that fields that contain a secret be of type SecretConfig in order to secure the secret. If this field does not contain a secret, use the @NonSecret annotation to indicate that it does not contain a secret and silence this warning.
+  + Gabor: add suggested values for batch_size 10 and batch interval 5000 on the **config**
+  + I added an **numeric array tag** to the tag browser and populated it using the script console, it appeared in historian but as a separate measurement for each index (see screenshot array-test.png)
+  + strange numbers in the metrics logs in ignition << **removed** this was for debugging
+  + warnig for the token, solved with **@NonSecret**
+
+  + assets in powerchart tag browser in power chart d
+
+Working on:
+   - better auto setup, but not ready
 
 Question: 
     

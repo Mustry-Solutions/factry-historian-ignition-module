@@ -111,7 +111,18 @@ public class MeasurementCache {
         }
     }
 
+    /**
+     * Get or create a measurement UUID, with an explicit Factry data type (e.g. "string" for arrays).
+     */
+    public String getOrCreateUUID(String tagPath, FactryGrpcClient grpcClient, String explicitDataType) {
+        return getOrCreateUUID(tagPath, grpcClient, (Object) null, explicitDataType);
+    }
+
     public String getOrCreateUUID(String tagPath, FactryGrpcClient grpcClient, Object value) {
+        return getOrCreateUUID(tagPath, grpcClient, value, null);
+    }
+
+    private String getOrCreateUUID(String tagPath, FactryGrpcClient grpcClient, Object value, String explicitDataType) {
         // Fast path: already cached
         String uuid = tagPathToUUID.get(tagPath);
         if (uuid != null) {
@@ -121,7 +132,7 @@ public class MeasurementCache {
         logger.debug("Cache miss for '{}', cache size={}, keys={}", tagPath, tagPathToUUID.size(), tagPathToUUID.keySet());
 
         // Determine data type from value — refuse to create without it
-        String dataType = toFactryDataType(value);
+        String dataType = explicitDataType != null ? explicitDataType : toFactryDataType(value);
         if (dataType == null) {
             logger.debug("Skipping measurement creation for '{}': value is null or unknown type", tagPath);
             return "";
