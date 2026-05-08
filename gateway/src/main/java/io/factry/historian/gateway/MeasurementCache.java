@@ -10,8 +10,8 @@ import io.factry.historian.proto.CreateMeasurement;
 import io.factry.historian.proto.CreateMeasurementsRequest;
 import io.factry.historian.proto.GetAssetPropertiesRequest;
 import io.factry.historian.proto.GetAssetsRequest;
+import io.factry.historian.proto.GetMeasurementsByFilterRequest;
 import io.factry.historian.proto.Measurement;
-import io.factry.historian.proto.MeasurementRequest;
 import io.factry.historian.proto.Measurements;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,8 +42,8 @@ public class MeasurementCache {
 
     public void refresh(FactryGrpcClient grpcClient) {
         try {
-            MeasurementRequest request = MeasurementRequest.newBuilder().build();
-            Measurements response = grpcClient.getAllMeasurements(request);
+            GetMeasurementsByFilterRequest request = GetMeasurementsByFilterRequest.newBuilder().build();
+            Measurements response = grpcClient.getMeasurementsByFilter(request);
 
             Map<String, String> freshPaths = new HashMap<>();
             Map<String, Measurement> freshMeasurements = new HashMap<>();

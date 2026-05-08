@@ -1,5 +1,11 @@
+
 # TODO
-     
+  [] use GetMeasurementByFilter to get all the measurements of different collectors
+  [] query grouped by the status=good << let's plot only the good quality data   
+
+
+------ 
+
 
   [] So metadata flows one direction only: 
          Factry → Ignition create tag with metadata in Ignition 
