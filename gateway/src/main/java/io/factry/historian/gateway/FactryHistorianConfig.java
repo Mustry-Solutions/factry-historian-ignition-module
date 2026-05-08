@@ -36,22 +36,22 @@ public record FactryHistorianConfig(
         @FormCategory("Advanced")
         @Label("Batch Size")
         @FormField(FormFieldType.NUMBER)
-        @DefaultValue("100")
-        @Description("Data points are buffered and written in batches. A write is triggered when this many points have accumulated, or when the batch interval expires — whichever comes first.")
+        @DefaultValue("10")
+        @Description("Data points are buffered and written in batches. A write is triggered when this many points have accumulated, or when the batch interval expires — whichever comes first. (default: 10)")
         int batchSize,
 
         @FormCategory("Advanced")
         @Label("Batch Interval (ms)")
         @FormField(FormFieldType.NUMBER)
         @DefaultValue("5000")
-        @Description("Maximum time in milliseconds to wait before writing buffered data points. A write is triggered when this interval expires, or when the batch size is reached — whichever comes first.")
+        @Description("Maximum time in milliseconds to wait before writing buffered data points. A write is triggered when this interval expires, or when the batch size is reached — whichever comes first. (default: 5000)")
         int batchIntervalMs,
 
         @FormCategory("Advanced")
         @Label("Debug Logging")
         @FormField(FormFieldType.CHECKBOX)
         @DefaultValue("false")
-        @Description("Enable detailed debug logging")
+        @Description("Enable detailed debug logging.")
         boolean debugLogging,
 
         @FormCategory("Advanced")

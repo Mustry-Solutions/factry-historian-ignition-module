@@ -54,7 +54,6 @@ public class FactryStorageEngine extends AbstractStorageEngine {
             logger.debug("doStoreAtomic called with " + points.size() + " points");
         }
 
-        long startMs = System.currentTimeMillis();
         try {
             return sendPoints(points, true);
         } catch (StatusRuntimeException e) {

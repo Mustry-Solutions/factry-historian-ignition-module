@@ -263,6 +263,28 @@ Follow-ups:
   - two ignitions with two different collectors  ( same collector doesn't define unique name: coll1/default/var1 can come form two different ignition)
   - two ignitions, one with factry historian, one with remote historian
   - more integrationTest, more unitTest
-------
-
   - automatize the setup for integration test. 
+------
+# 7/05/2026
+ 
+
+Changes:
+  + Gabor: add suggested values for batch_size 10 and batch interval 5000  
+  + I added an numeric array tag to the tag browser and populated it using the script console, it appeared in historian but as a separate measurement for each index (see screenshot array-test.png)
+  + Had a peek in the logs in ignition for metrics
+  + This is also in the logs but I remember there being an issue with making this field a secret right? The 'token' field in class class io.factry.historian.gateway.FactryHistorianConfig is named such that it implies that it might contain a secret, but the type is not SecretConfig. It is suggested that fields that contain a secret be of type SecretConfig in order to secure the secret. If this field does not contain a secret, use the @NonSecret annotation to indicate that it does not contain a secret and silence this warning.
+
+Question: 
+    
+  - Wannes: make licence html
+
+  - What![alt text](image.png)
+     Wannes: collector has to call RegisterCollector to move the from status Initial <br/>
+     grpcClient.registerCollector is called, what is still missing. 
+
+  - new idea: create the store&forward engine automatic, always use it
+     right now: - create db 
+                - every db can be used as store and forward engine
+                - explicitely use it
+      
+      
