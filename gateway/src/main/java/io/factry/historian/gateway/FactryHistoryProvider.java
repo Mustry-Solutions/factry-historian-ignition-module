@@ -87,8 +87,9 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
                     .setBuildOs(System.getProperty("os.name", "unknown"))
                     .setBuildArch(System.getProperty("os.arch", "unknown"))
                     .build();
-            grpcClient.registerCollector(schema);
-            logger.info("Collector registered with Factry");
+            var collector = grpcClient.registerCollector(schema);
+            logger.info("Collector registered with Factry: uuid={}, type={}, status={}",
+                    collector.getUuid(), collector.getType(), collector.getStatus());
 
             // Set collector state to active/collecting
             var state = com.google.protobuf.Struct.newBuilder()
@@ -317,7 +318,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
                     .build();
             grpcClient.updateHealth(updates);
         } catch (Exception e) {
-            logger.debug("Failed to send health update: " + e.getMessage());
+            logger.warn("Failed to send health update: " + e.getMessage());
         }
     }
 
