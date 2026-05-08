@@ -56,6 +56,8 @@ public class FactryGrpcClient {
 
     private volatile ManagedChannel channel;
     private volatile HistorianGrpc.HistorianBlockingStub blockingStub;
+    /** Stub without collectorUUID header — for read/browse operations that need all measurements. */
+    private volatile HistorianGrpc.HistorianBlockingStub browseStub;
     private volatile boolean connected = true;
 
     public FactryGrpcClient(String host, int port, String collectorUUID, String token,
@@ -95,11 +97,25 @@ public class FactryGrpcClient {
         }
     }
 
+    /**
+     * Fetch all measurements across all collectors (no collector scoping).
+     * Used for browsing/querying where the user should see all available data.
+     */
+    public Measurements getAllMeasurements(MeasurementRequest request) {
+        logger.debug("Sending GetMeasurements (all collectors)");
+        channelLock.readLock().lock();
+        try {
+            return browseStub.getMeasurements(request);
+        } finally {
+            channelLock.readLock().unlock();
+        }
+    }
+
     public QueryTimeseriesResponse queryTimeseries(QueryTimeseriesRequest request) {
         logger.debug("Sending QueryTimeseries for {} measurements", request.getMeasurementUUIDsCount());
         channelLock.readLock().lock();
         try {
-            return blockingStub.queryTimeseries(request);
+            return browseStub.queryTimeseries(request);
         } finally {
             channelLock.readLock().unlock();
         }
@@ -109,7 +125,7 @@ public class FactryGrpcClient {
         logger.debug("Sending GetAssets");
         channelLock.readLock().lock();
         try {
-            return blockingStub.getAssets(GetAssetsRequest.newBuilder().build());
+            return browseStub.getAssets(GetAssetsRequest.newBuilder().build());
         } finally {
             channelLock.readLock().unlock();
         }
@@ -119,7 +135,7 @@ public class FactryGrpcClient {
         logger.debug("Sending GetAssetProperties for {} assets", request.getAssetUUIDsCount());
         channelLock.readLock().lock();
         try {
-            return blockingStub.getAssetProperties(request);
+            return browseStub.getAssetProperties(request);
         } finally {
             channelLock.readLock().unlock();
         }
@@ -218,6 +234,12 @@ public class FactryGrpcClient {
 
         this.blockingStub = HistorianGrpc.newBlockingStub(channel)
                 .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers));
+
+        // Browse stub: auth only, no collector scoping — returns all measurements
+        Metadata browseHeaders = new Metadata();
+        browseHeaders.put(AUTHORIZATION_KEY, "Bearer " + token);
+        this.browseStub = HistorianGrpc.newBlockingStub(channel)
+                .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(browseHeaders));
     }
 
     private static String tlsLabel(boolean useTls, boolean skipTlsVerification) {

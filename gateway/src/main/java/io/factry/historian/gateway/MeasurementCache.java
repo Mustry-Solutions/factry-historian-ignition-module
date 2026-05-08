@@ -43,7 +43,7 @@ public class MeasurementCache {
     public void refresh(FactryGrpcClient grpcClient) {
         try {
             MeasurementRequest request = MeasurementRequest.newBuilder().build();
-            Measurements response = grpcClient.getMeasurements(request);
+            Measurements response = grpcClient.getAllMeasurements(request);
 
             Map<String, String> freshPaths = new HashMap<>();
             Map<String, Measurement> freshMeasurements = new HashMap<>();

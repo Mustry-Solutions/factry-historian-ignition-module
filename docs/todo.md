@@ -1,10 +1,6 @@
 # TODO
      
 
-
-
-
-
   [] So metadata flows one direction only: 
          Factry → Ignition create tag with metadata in Ignition 
          Other direction: we can't change the metadata, but we can send what we have
@@ -31,11 +27,10 @@
       Created under Root organization. May need to be under "Mustry" org instead.
 
 
-  [] Auto store&forward
 
 
-## Wannes's items:
-  
+
+
   
   
    
