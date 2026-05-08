@@ -275,14 +275,17 @@ Changes:
   + warnig for the token, solved with **@NonSecret**
 
   + assets in powerchart tag browser in power chart d
-
+  + docker-compose.yaml
+      JWT_SECRET: "factry-dev-secret-do-not-use-in-production" 
 Working on:
    - better auto setup, but not ready
 
 Question: 
-    
-  - Wannes: make licence html
+  - the collector token only gives access to its own measurements  
+     I don't get back all the other collectors
 
+  - Wannes: make licence html  
+  - CONTENT NOT FOUND:  https://docs.factry.io/installing-factry-historian-using-docker#installing-your-first-collector
   - What![alt text](image.png)
      Wannes: collector has to call RegisterCollector to move the from status Initial <br/>
      grpcClient.registerCollector is called, what is still missing. 
