@@ -89,8 +89,9 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
         try {
             logger.debug("Sending " + built.pointsBuilder.getPointsCount() + " points via createPoints");
+            long beforeMs = System.currentTimeMillis();
             grpcClient.createPoints(built.pointsBuilder.build());
-            long elapsedMs = System.currentTimeMillis();
+            long elapsedMs = System.currentTimeMillis() - beforeMs;
             metrics.recordStore(built.pointsBuilder.getPointsCount(), elapsedMs);
             logger.debug("createPoints succeeded for " + built.pointsBuilder.getPointsCount() + " points");
 
@@ -131,10 +132,19 @@ public class FactryStorageEngine extends AbstractStorageEngine {
         }
     }
 
+    /** Pattern matching array-indexed tag paths like "some/path[0]", "some/path[123]". */
+    private static final java.util.regex.Pattern ARRAY_INDEX_PATTERN =
+            java.util.regex.Pattern.compile("^(.+)\\[(\\d+)]$");
+
     private BuildResult buildPoints(List<AtomicPoint<?>> points) {
         Points.Builder pointsBuilder = Points.newBuilder();
         Set<String> usedUUIDs = new HashSet<>();
         String collectorName = settings.getCollectorName();
+
+        // Group array-indexed points by base path so they can be sent as a single ListValue.
+        // Non-array points are processed immediately.
+        // Key: base tag path, Value: sorted map of index → (point, tagPath)
+        Map<String, java.util.TreeMap<Integer, AtomicPoint<?>>> arrayGroups = new HashMap<>();
 
         for (AtomicPoint<?> point : points) {
             String tagPath = TagPathUtil.qualifiedPathToStoredPath(point.source().toString(), collectorName);
@@ -144,6 +154,15 @@ public class FactryStorageEngine extends AbstractStorageEngine {
                     + ", value=" + value
                     + ", valueType=" + (value != null ? value.getClass().getName() : "null"));
 
+            java.util.regex.Matcher m = ARRAY_INDEX_PATTERN.matcher(tagPath);
+            if (m.matches()) {
+                String basePath = m.group(1);
+                int index = Integer.parseInt(m.group(2));
+                arrayGroups.computeIfAbsent(basePath, k -> new java.util.TreeMap<>()).put(index, point);
+                continue;
+            }
+
+            // Non-array point — process normally
             String measurementUUID = measurementCache.getOrCreateUUID(tagPath, grpcClient, value);
             if (measurementUUID == null || measurementUUID.isEmpty()) {
                 logger.debug("Skipping point for '" + tagPath + "': no measurement UUID");
@@ -170,6 +189,49 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
             pointsBuilder.addPoints(pb.build());
             usedUUIDs.add(measurementUUID);
+        }
+
+        // Process grouped array points — combine into single points with ListValue
+        for (Map.Entry<String, java.util.TreeMap<Integer, AtomicPoint<?>>> entry : arrayGroups.entrySet()) {
+            String basePath = entry.getKey();
+            java.util.TreeMap<Integer, AtomicPoint<?>> elements = entry.getValue();
+
+            // Use the first element to determine timestamp, quality, and value type for measurement creation
+            AtomicPoint<?> firstElement = elements.firstEntry().getValue();
+
+            // Determine the array datatype from the element type (e.g. "[]number", "[]boolean", "[]string")
+            String elementType = MeasurementCache.toFactryDataType(firstElement.value());
+            String arrayDataType = "[]" + (elementType != null ? elementType : "string");
+            String measurementUUID = measurementCache.getOrCreateUUID(basePath, grpcClient, arrayDataType);
+            if (measurementUUID == null || measurementUUID.isEmpty()) {
+                logger.debug("Skipping array point for '" + basePath + "': no measurement UUID");
+                continue;
+            }
+
+            // Build a ListValue with elements in index order
+            com.google.protobuf.ListValue.Builder listBuilder = com.google.protobuf.ListValue.newBuilder();
+            for (AtomicPoint<?> element : elements.values()) {
+                Object val = element.value();
+                if (val instanceof Boolean) {
+                    listBuilder.addValues(Value.newBuilder().setBoolValue((Boolean) val));
+                } else if (val instanceof Number) {
+                    listBuilder.addValues(Value.newBuilder().setNumberValue(((Number) val).doubleValue()));
+                } else if (val != null) {
+                    listBuilder.addValues(Value.newBuilder().setStringValue(val.toString()));
+                } else {
+                    listBuilder.addValues(Value.newBuilder().setNullValue(com.google.protobuf.NullValue.NULL_VALUE));
+                }
+            }
+
+            Point.Builder pb = Point.newBuilder()
+                    .setMeasurementUUID(measurementUUID)
+                    .setTimestamp(Timestamps.fromMillis(firstElement.timestamp().toEpochMilli()))
+                    .setStatus(qualityToStatus(firstElement.quality().getCode()))
+                    .setValue(Value.newBuilder().setListValue(listBuilder));
+
+            pointsBuilder.addPoints(pb.build());
+            usedUUIDs.add(measurementUUID);
+            logger.debug("Built array point for '" + basePath + "' with " + elements.size() + " elements");
         }
 
         return new BuildResult(pointsBuilder, usedUUIDs);
