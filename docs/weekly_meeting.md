@@ -251,8 +251,8 @@ Plan:
   - Tests:
       - manual
       - automated tests
-  - Doc/Code Review
-  - Making follow-up list
+  + Doc/Code Review
+  + Making follow-up list
 
 Follow-ups:
   - Wannes: make licence html
@@ -273,12 +273,9 @@ Changes:
   + I added an **numeric array tag** to the tag browser and populated it using the script console, it appeared in historian but as a separate measurement for each index (see screenshot array-test.png)
   + strange numbers in the metrics logs in ignition << **removed** this was for debugging
   + warnig for the token, solved with **@NonSecret**
-
   + assets in powerchart tag browser in power chart d
   + docker-compose.yaml
       JWT_SECRET: "factry-dev-secret-do-not-use-in-production" 
-Working on:
-   - better auto setup, but not ready
 
 Question: 
   - the collector token only gives access to its own measurements  
@@ -286,6 +283,8 @@ Question:
 
   - Wannes: make licence html  
   - CONTENT NOT FOUND:  https://docs.factry.io/installing-factry-historian-using-docker#installing-your-first-collector
+  
+  https://docs.factry.io/installing-factry-historian-using-docker-for-testing-purposes
   - What![alt text](image.png)
      Wannes: collector has to call RegisterCollector to move the from status Initial <br/>
      grpcClient.registerCollector is called, what is still missing. 
@@ -294,5 +293,11 @@ Question:
      right now: - create db 
                 - every db can be used as store and forward engine
                 - explicitely use it
-      
-      
+
+  - when parsing points return from the historian it looks like you always set quality to Good, the Status we return on a point could potentially be used for this (statusToQuality function in FactryQueryEngine does not seem to be used)   
+
+Still:
+  - easier setup: combination of scripts and manual step 
+  - more tests: both manual and automated      
+  - two ignitions with two different collectors  ( same collector doesn't define unique name: coll1/default/var1 can come form two different ignition)
+  - two ignitions, one with factry historian, one with remote historian   
