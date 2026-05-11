@@ -1,23 +1,16 @@
 
 # TODO
   [+] use GetMeasurementByFilter to get all the measurements of different collectors
-  [] create the store&forward engine automatic
+  [+] create the store&forward engine automatic
   [] FactryQueryEngine query grouped by the status=good << let's plot only the good quality data   
 
-
+  [] manual test
 ------ 
 
 
   [] So metadata flows one direction only: 
          Factry → Ignition create tag with metadata in Ignition 
          Other direction: we can't change the metadata, but we can send what we have
-
-  [] Integration tests (working on it)
-      webdev module let you to run scripts on the gateway
-
-      call the script
-        check the result (e.g. points arrived to Factry or aggragetation is correct)
-        Null check in FactryGrpcClient.shutdown()
 
   [] Setup automation (setup-factry.sh)
       Status: script updated to use PascalCase fields (UUID, Name, Status) matching Factry API.

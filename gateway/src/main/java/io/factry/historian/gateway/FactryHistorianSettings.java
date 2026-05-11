@@ -20,12 +20,6 @@ public class FactryHistorianSettings implements HistorianSettings {
     private boolean skipTlsVerification = false;
     private String token = "";
 
-    /**
-     * Name of the Store & Forward engine to use for buffering.
-     * If empty, S&F is disabled and writes go directly to the gRPC server.
-     */
-    private String storeAndForwardEngine = "";
-
     public FactryHistorianSettings() {
     }
 
@@ -107,14 +101,6 @@ public class FactryHistorianSettings implements HistorianSettings {
 
     public void setToken(String token) {
         this.token = token;
-    }
-
-    public String getStoreAndForwardEngine() {
-        return storeAndForwardEngine;
-    }
-
-    public void setStoreAndForwardEngine(String storeAndForwardEngine) {
-        this.storeAndForwardEngine = storeAndForwardEngine;
     }
 
     /**
@@ -201,7 +187,6 @@ public class FactryHistorianSettings implements HistorianSettings {
                 ", debugLogging=" + debugLogging +
                 ", useTls=" + useTls +
                 ", skipTlsVerification=" + skipTlsVerification +
-                ", storeAndForwardEngine='" + storeAndForwardEngine + '\'' +
                 '}';
     }
 }

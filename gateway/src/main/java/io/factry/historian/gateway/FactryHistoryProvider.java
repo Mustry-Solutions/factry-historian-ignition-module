@@ -5,11 +5,16 @@ import com.inductiveautomation.historian.gateway.api.query.QueryEngine;
 import com.inductiveautomation.historian.gateway.api.storage.StorageEngine;
 import com.inductiveautomation.historian.gateway.interop.TagHistoryDataSinkBridge;
 import com.inductiveautomation.historian.gateway.interop.TagHistoryStorageEngineBridge;
+import com.inductiveautomation.ignition.common.resourcecollection.ChangeOperation;
+import com.inductiveautomation.ignition.common.resourcecollection.Resource;
+import com.inductiveautomation.ignition.common.resourcecollection.ResourceBuilder;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 import com.inductiveautomation.ignition.gateway.model.ProfileStatus;
 import com.inductiveautomation.ignition.gateway.storeforward.StorageKey;
+import com.inductiveautomation.ignition.gateway.storeforward.engine.EngineInformation;
 import com.inductiveautomation.ignition.gateway.storeforward.quarantine.QuarantineInterface;
 import com.inductiveautomation.ignition.gateway.storeforward.quarantine.QuarantinedDataInfo;
+import com.inductiveautomation.ignition.gateway.storeforward.resource.StoreAndForwardEngineSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,6 +43,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
     private TagHistoryStorageEngineBridge storageBridge;
     private TagHistoryDataSinkBridge dataSinkBridge;
     private ScheduledExecutorService scheduledExecutor;
+    private volatile String sfEngineName;
 
     /** Cached status to avoid hitting gRPC on every gateway UI poll. */
     private volatile ProfileStatus cachedStatus = ProfileStatus.UNKNOWN;
@@ -106,64 +112,60 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         measurementCache.refresh(grpcClient);
         logger.info("Measurement cache pre-populated with {} entries", measurementCache.size());
 
-        // Set up Store & Forward if configured
-        String sfEngine = settings.getStoreAndForwardEngine();
-        if (sfEngine != null && !sfEngine.isBlank()) {
-            StorageKey storageKey = StorageKey.of(sfEngine, historianName);
+        // Set up Store & Forward — always enabled.
+        // The S&F engine name matches the historian profile name because
+        // system.tag.storeTagHistory() looks up the engine by historian name.
+        final String sfEngine = historianName;
 
-            // Sink bridge: wraps our storage engine, receives data from S&F
-            dataSinkBridge = TagHistoryDataSinkBridge.getOrCreate(
-                    context, storageEngine, storageKey);
-            context.getStoreAndForwardManager().registerSink(dataSinkBridge);
+        // Ensure the S&F engine exists — create it if missing
+        ensureStoreAndForwardEngine(sfEngine);
 
-            // Workaround for Ignition 8.3.x: registerSink() only transitions the sink
-            // to STARTED state. The S&F engine doesn't call initialize() on sinks
-            // registered after the engine has started, leaving it stuck in "Storage Only".
-            // Force initialization via reflection so the sink reaches ACCEPTING state.
-            if (!dataSinkBridge.isAccepting()) {
-                try {
-                    Method initMethod = dataSinkBridge.getClass().getSuperclass()
-                            .getDeclaredMethod("initialize");
-                    initMethod.setAccessible(true);
-                    initMethod.invoke(dataSinkBridge);
-                } catch (Exception e) {
-                    logger.error("Failed to initialize S&F data sink bridge", e);
-                }
+        StorageKey storageKey = StorageKey.of(sfEngine, historianName);
+
+        // Sink bridge: wraps our storage engine, receives data from S&F
+        dataSinkBridge = TagHistoryDataSinkBridge.getOrCreate(
+                context, storageEngine, storageKey);
+        context.getStoreAndForwardManager().registerSink(dataSinkBridge);
+
+        // Workaround for Ignition 8.3.x: registerSink() only transitions the sink
+        // to STARTED state. The S&F engine doesn't call initialize() on sinks
+        // registered after the engine has started, leaving it stuck in "Storage Only".
+        // Force initialization via reflection so the sink reaches ACCEPTING state.
+        if (!dataSinkBridge.isAccepting()) {
+            try {
+                Method initMethod = dataSinkBridge.getClass().getSuperclass()
+                        .getDeclaredMethod("initialize");
+                initMethod.setAccessible(true);
+                initMethod.invoke(dataSinkBridge);
+            } catch (Exception e) {
+                logger.error("Failed to initialize S&F data sink bridge", e);
             }
-
-            // Storage bridge: replaces direct storage, routes data into S&F
-            storageBridge = TagHistoryStorageEngineBridge.getOrCreate(
-                    context, historianName, sfEngine);
-
-            // Schedule automatic quarantine retry every 30 seconds.
-            // Quarantined data is never retried automatically by S&F,
-            // so we periodically move it back to pending for re-forwarding.
-            scheduledExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "factry-historian-scheduler");
-                t.setDaemon(true);
-                return t;
-            });
-            scheduledExecutor.scheduleWithFixedDelay(
-                    () -> retryQuarantinedData(sfEngine), 30, 30, TimeUnit.SECONDS);
-
-            // Periodic measurement cache refresh to detect deleted measurements
-            long refreshInterval = ModuleProperties.getMeasurementCacheRefreshSeconds();
-            scheduledExecutor.scheduleWithFixedDelay(
-                    this::refreshMeasurementCache, refreshInterval, refreshInterval, TimeUnit.SECONDS);
-
-            logger.info("Store-and-forward enabled via engine '{}', sink accepting: {}",
-                    sfEngine, dataSinkBridge.isAccepting());
-        } else {
-            // Even without S&F, schedule metrics logging and cache refresh
-            scheduledExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "factry-historian-scheduler");
-                t.setDaemon(true);
-                return t;
-            });
-            long refreshInterval = ModuleProperties.getMeasurementCacheRefreshSeconds();
-            scheduledExecutor.scheduleWithFixedDelay(
-                    this::refreshMeasurementCache, refreshInterval, refreshInterval, TimeUnit.SECONDS);
         }
+
+        // Storage bridge: replaces direct storage, routes data into S&F
+        storageBridge = TagHistoryStorageEngineBridge.getOrCreate(
+                context, historianName, sfEngine);
+
+        // Schedule automatic quarantine retry every 30 seconds.
+        // Quarantined data is never retried automatically by S&F,
+        // so we periodically move it back to pending for re-forwarding.
+        scheduledExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "factry-historian-scheduler");
+            t.setDaemon(true);
+            return t;
+        });
+        scheduledExecutor.scheduleWithFixedDelay(
+                () -> retryQuarantinedData(sfEngine), 30, 30, TimeUnit.SECONDS);
+
+        // Periodic measurement cache refresh to detect deleted measurements
+        long refreshInterval = ModuleProperties.getMeasurementCacheRefreshSeconds();
+        scheduledExecutor.scheduleWithFixedDelay(
+                this::refreshMeasurementCache, refreshInterval, refreshInterval, TimeUnit.SECONDS);
+
+        this.sfEngineName = sfEngine;
+
+        logger.info("Store-and-forward enabled via engine '{}', sink accepting: {}",
+                sfEngine, dataSinkBridge.isAccepting());
 
         // Send periodic health updates to Factry (heartbeat)
         scheduledExecutor.scheduleWithFixedDelay(
@@ -268,6 +270,50 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
                 ? ProfileStatus.RUNNING
                 : ProfileStatus.ERRORED;
         return cachedStatus;
+    }
+
+    /**
+     * Ensure that the named S&F engine exists in the gateway configuration.
+     * If not, creates one with sensible defaults (SQLite-backed, matching
+     * Ignition's default engine settings).
+     */
+    private void ensureStoreAndForwardEngine(String engineName) {
+        Optional<EngineInformation> existing =
+                context.getStoreAndForwardManager().getEngineInformation(engineName, true);
+        if (existing.isPresent()) {
+            logger.debug("S&F engine '{}' already exists", engineName);
+            return;
+        }
+
+        // Also check if a resource already exists (covers engines not yet started)
+        List<Resource> sfResources = context.getConfigurationManager()
+                .getResources(StoreAndForwardEngineSettings.getType());
+        for (Resource r : sfResources) {
+            if (r.getResourceName().equalsIgnoreCase(engineName)) {
+                logger.debug("S&F engine resource '{}' already exists (as '{}')",
+                        engineName, r.getResourceName());
+                return;
+            }
+        }
+
+        logger.info("S&F engine '{}' does not exist — creating it automatically", engineName);
+        try {
+            StoreAndForwardEngineSettings engineSettings = new StoreAndForwardEngineSettings();
+
+            ResourceBuilder builder = Resource.newBuilder();
+            builder.setResourceCollectionName("core");
+            builder.setResourcePath(StoreAndForwardEngineSettings.getType().childPath(engineName));
+            builder.setApplicationScope("G");
+            StoreAndForwardEngineSettings.getMeta().getCodec().encode(engineSettings, builder);
+            Resource resource = builder.build();
+
+            ChangeOperation createOp = ChangeOperation.newCreateOp(resource);
+            context.getConfigurationManager().push(List.of(createOp)).get(10, TimeUnit.SECONDS);
+
+            logger.info("S&F engine '{}' created successfully", engineName);
+        } catch (Exception e) {
+            logger.error("Failed to create S&F engine '{}' — store-and-forward may not work", engineName, e);
+        }
     }
 
     private void retryQuarantinedData(String engineName) {

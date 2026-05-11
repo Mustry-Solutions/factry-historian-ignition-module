@@ -52,14 +52,7 @@ public record FactryHistorianConfig(
         @FormField(FormFieldType.CHECKBOX)
         @DefaultValue("false")
         @Description("Enable detailed debug logging.")
-        boolean debugLogging,
-
-        @FormCategory("Advanced")
-        @Label("Store and Forward Engine")
-        @FormField(FormFieldType.TEXT)
-        @DefaultValue("")
-        @Description("Name of the S&F engine for buffering. Leave empty to disable S&F.")
-        String storeAndForwardEngine
+        boolean debugLogging
 ) {
     public FactryHistorianSettings toSettings() {
         FactryHistorianSettings settings = new FactryHistorianSettings();
@@ -69,7 +62,6 @@ public record FactryHistorianConfig(
         settings.setBatchSize(batchSize);
         settings.setBatchIntervalMs(batchIntervalMs);
         settings.setDebugLogging(debugLogging);
-        settings.setStoreAndForwardEngine(storeAndForwardEngine);
         return settings;
     }
 
@@ -80,8 +72,7 @@ public record FactryHistorianConfig(
                 settings.isSkipTlsVerification(),
                 settings.getBatchSize(),
                 settings.getBatchIntervalMs(),
-                settings.isDebugLogging(),
-                settings.getStoreAndForwardEngine()
+                settings.isDebugLogging()
         );
     }
 }
