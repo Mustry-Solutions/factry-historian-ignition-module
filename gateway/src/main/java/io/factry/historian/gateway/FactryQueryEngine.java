@@ -43,6 +43,8 @@ import io.factry.historian.proto.QueryTimeseriesResponse;
 import io.factry.historian.proto.Series;
 import io.factry.historian.proto.SeriesPoint;
 
+import com.google.protobuf.Struct;
+import com.google.protobuf.Value;
 import com.google.protobuf.util.Timestamps;
 
 import java.time.Instant;
@@ -71,6 +73,11 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             LegacyAggregateAdapter.of(AggregationMode.Variance),
             LegacyAggregateAdapter.of(AggregationMode.StdDev)
     );
+
+    /** Filter queries to only return points with status "Good". */
+    private static final Struct GOOD_STATUS_FILTER = Struct.newBuilder()
+            .putFields("status", Value.newBuilder().setStringValue("Good").build())
+            .build();
 
     private volatile FactryHistorianSettings settings;
     private final FactryGrpcClient grpcClient;
@@ -322,7 +329,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
             // Build gRPC request using QueryTimeseries (no aggregation = raw)
             QueryTimeseriesRequest.Builder reqBuilder = QueryTimeseriesRequest.newBuilder()
-                    .addAllMeasurementUUIDs(measurementUUIDs);
+                    .addAllMeasurementUUIDs(measurementUUIDs)
+                    .setTags(GOOD_STATUS_FILTER);
 
             options.getTimeRange().ifPresent(tr -> {
                 reqBuilder.setStart(Timestamps.fromMillis(tr.startTime().toEpochMilli()));
@@ -522,7 +530,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
         QueryTimeseriesRequest.Builder reqBuilder = QueryTimeseriesRequest.newBuilder()
                 .addMeasurementUUIDs(uuid)
-                .setAggregation(aggregation);
+                .setAggregation(aggregation)
+                .setTags(GOOD_STATUS_FILTER);
 
         options.getTimeRange().ifPresent(tr -> {
             reqBuilder.setStart(Timestamps.fromMillis(tr.startTime().toEpochMilli()));
@@ -559,10 +568,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         // Query min and max separately
         QueryTimeseriesRequest.Builder minReqBuilder = QueryTimeseriesRequest.newBuilder()
                 .addMeasurementUUIDs(uuid)
-                .setAggregation(Aggregation.newBuilder().setName("min").setPeriod(period).setFillType("none").build());
+                .setAggregation(Aggregation.newBuilder().setName("min").setPeriod(period).setFillType("none").build())
+                .setTags(GOOD_STATUS_FILTER);
         QueryTimeseriesRequest.Builder maxReqBuilder = QueryTimeseriesRequest.newBuilder()
                 .addMeasurementUUIDs(uuid)
-                .setAggregation(Aggregation.newBuilder().setName("max").setPeriod(period).setFillType("none").build());
+                .setAggregation(Aggregation.newBuilder().setName("max").setPeriod(period).setFillType("none").build())
+                .setTags(GOOD_STATUS_FILTER);
 
         options.getTimeRange().ifPresent(tr -> {
             long startMs = tr.startTime().toEpochMilli();
