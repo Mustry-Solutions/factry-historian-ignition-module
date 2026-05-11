@@ -6,8 +6,6 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class TagPathUtilTest {
 
-    private static final String COLLECTOR = "Ignition";
-
     // --- extractComponent ---
 
     @Test
@@ -53,99 +51,90 @@ class TagPathUtilTest {
 
     @Test
     void buildStoredPath_standard() {
-        assertEquals("Ignition/default/Temperature",
-                TagPathUtil.buildStoredPath("Ignition", "default", "Temperature"));
+        assertEquals("default/Temperature",
+                TagPathUtil.buildStoredPath("default", "Temperature"));
     }
 
     @Test
     void buildStoredPath_nullProv_defaultsToDefault() {
-        assertEquals("Ignition/default/Temperature",
-                TagPathUtil.buildStoredPath("Ignition", null, "Temperature"));
+        assertEquals("default/Temperature",
+                TagPathUtil.buildStoredPath(null, "Temperature"));
     }
 
     @Test
     void buildStoredPath_nestedTag() {
-        assertEquals("Ignition/default/FactrySim/ff1",
-                TagPathUtil.buildStoredPath("Ignition", "default", "FactrySim/ff1"));
+        assertEquals("default/FactrySim/ff1",
+                TagPathUtil.buildStoredPath("default", "FactrySim/ff1"));
     }
 
     // --- qualifiedPathToStoredPath (storage paths with prov: component) ---
 
     @Test
     void qualifiedPathToStoredPath_fullPath() {
-        assertEquals("Ignition/default/Temperature",
+        assertEquals("default/Temperature",
                 TagPathUtil.qualifiedPathToStoredPath(
-                        "histprov:timescale historian:/sys:Ignition-296a8ca4b6cd:/prov:default:/tag:Temperature",
-                        COLLECTOR));
+                        "histprov:timescale historian:/sys:Ignition-296a8ca4b6cd:/prov:default:/tag:Temperature"));
     }
 
     @Test
     void qualifiedPathToStoredPath_nestedTag() {
-        assertEquals("Ignition/default/Simulation/Pressure",
+        assertEquals("default/Simulation/Pressure",
                 TagPathUtil.qualifiedPathToStoredPath(
-                        "histprov:test:/sys:GW-01:/prov:default:/tag:Simulation/Pressure",
-                        COLLECTOR));
+                        "histprov:test:/sys:GW-01:/prov:default:/tag:Simulation/Pressure"));
     }
 
     @Test
     void qualifiedPathToStoredPath_withoutHistprov() {
-        assertEquals("Ignition/myProvider/Temp",
+        assertEquals("myProvider/Temp",
                 TagPathUtil.qualifiedPathToStoredPath(
-                        "sys:Ignition-abc:/prov:myProvider:/tag:Temp",
-                        COLLECTOR));
+                        "sys:Ignition-abc:/prov:myProvider:/tag:Temp"));
     }
 
     @Test
     void qualifiedPathToStoredPath_noProv_tagOnly_returnsTagAsIs() {
         // No prov: → browse-originated, tag already contains full path
-        assertEquals("Ignition/default/Temperature",
+        assertEquals("default/Temperature",
                 TagPathUtil.qualifiedPathToStoredPath(
-                        "histprov:test:/tag:Ignition/default/Temperature",
-                        COLLECTOR));
+                        "histprov:test:/tag:default/Temperature"));
     }
 
     // --- qualifiedPathToStoredPath with folder: components ---
 
     @Test
     void qualifiedPathToStoredPath_withFolders() {
-        assertEquals("Ignition/default/Simulation/Pressure",
+        assertEquals("default/Simulation/Pressure",
                 TagPathUtil.qualifiedPathToStoredPath(
-                        "histprov:test:/folder:Ignition:/folder:default:/folder:Simulation:/tag:Pressure",
-                        COLLECTOR));
+                        "histprov:test:/folder:default:/folder:Simulation:/tag:Pressure"));
     }
 
     @Test
     void qualifiedPathToStoredPath_withFolders_measurementCategory() {
-        assertEquals("Ignition/default/Temperature",
+        assertEquals("default/Temperature",
                 TagPathUtil.qualifiedPathToStoredPath(
-                        "histprov:test:/folder:Measurements:/folder:Ignition:/folder:default:/tag:Temperature",
-                        COLLECTOR));
+                        "histprov:test:/folder:Measurements:/folder:default:/tag:Temperature"));
     }
 
     @Test
     void qualifiedPathToStoredPath_withFolders_assetCategory() {
         assertEquals("Plant/Line1/Motor1",
                 TagPathUtil.qualifiedPathToStoredPath(
-                        "histprov:test:/folder:Assets:/folder:Plant:/folder:Line1:/tag:Motor1",
-                        COLLECTOR));
+                        "histprov:test:/folder:Assets:/folder:Plant:/folder:Line1:/tag:Motor1"));
     }
 
     // --- qualifiedPathToStoredPath with category prefixes (no folders) ---
 
     @Test
     void qualifiedPathToStoredPath_measurementCategory() {
-        assertEquals("Ignition/default/Temperature",
+        assertEquals("default/Temperature",
                 TagPathUtil.qualifiedPathToStoredPath(
-                        "histprov:test:/tag:Measurements/Ignition/default/Temperature",
-                        COLLECTOR));
+                        "histprov:test:/tag:Measurements/default/Temperature"));
     }
 
     @Test
     void qualifiedPathToStoredPath_assetCategory() {
         assertEquals("Plant/Line1/Motor1",
                 TagPathUtil.qualifiedPathToStoredPath(
-                        "histprov:test:/tag:Assets/Plant/Line1/Motor1",
-                        COLLECTOR));
+                        "histprov:test:/tag:Assets/Plant/Line1/Motor1"));
     }
 
     // --- parseFolderPrefix ---
@@ -167,30 +156,30 @@ class TagPathUtilTest {
 
     @Test
     void parseFolderPrefix_singleFolder() {
-        assertEquals("Ignition/",
+        assertEquals("default/",
                 TagPathUtil.parseFolderPrefix(
-                        "histprov:Timescale historian:/folder:Ignition"));
+                        "histprov:Timescale historian:/folder:default"));
     }
 
     @Test
     void parseFolderPrefix_twoFolders() {
-        assertEquals("Ignition/default/",
+        assertEquals("default/Simulation/",
                 TagPathUtil.parseFolderPrefix(
-                        "histprov:Timescale historian:/folder:Ignition:/folder:default"));
+                        "histprov:Timescale historian:/folder:default:/folder:Simulation"));
     }
 
     @Test
     void parseFolderPrefix_threeFolders() {
-        assertEquals("Ignition/default/Simulation/",
+        assertEquals("default/Simulation/Sub/",
                 TagPathUtil.parseFolderPrefix(
-                        "histprov:Timescale historian:/folder:Ignition:/folder:default:/folder:Simulation"));
+                        "histprov:Timescale historian:/folder:default:/folder:Simulation:/folder:Sub"));
     }
 
     // --- extractCategory ---
 
     @Test
     void extractCategory_measurements() {
-        assertEquals("Measurements", TagPathUtil.extractCategory("Measurements/Ignition/default/Temp"));
+        assertEquals("Measurements", TagPathUtil.extractCategory("Measurements/default/Temp"));
     }
 
     @Test
@@ -200,7 +189,7 @@ class TagPathUtilTest {
 
     @Test
     void extractCategory_noCategory() {
-        assertNull(TagPathUtil.extractCategory("Ignition/default/Temp"));
+        assertNull(TagPathUtil.extractCategory("default/Temp"));
     }
 
     @Test
@@ -212,14 +201,14 @@ class TagPathUtilTest {
 
     @Test
     void stripCategory_measurements() {
-        assertEquals("Ignition/default/Temp",
-                TagPathUtil.stripCategory("Measurements/Ignition/default/Temp"));
+        assertEquals("default/Temp",
+                TagPathUtil.stripCategory("Measurements/default/Temp"));
     }
 
     @Test
     void stripCategory_noCategory() {
-        assertEquals("Ignition/default/Temp",
-                TagPathUtil.stripCategory("Ignition/default/Temp"));
+        assertEquals("default/Temp",
+                TagPathUtil.stripCategory("default/Temp"));
     }
 
     // --- roundtrip: storage → browse query → stored ---
@@ -228,24 +217,24 @@ class TagPathUtilTest {
     void roundtrip_storageAndBrowseBack() {
         // Storage: QualifiedPath with prov: → measurement name
         String stored = TagPathUtil.qualifiedPathToStoredPath(
-                "sys:GW-01:/prov:default:/tag:Simulation/Pressure", COLLECTOR);
-        assertEquals("Ignition/default/Simulation/Pressure", stored);
+                "sys:GW-01:/prov:default:/tag:Simulation/Pressure");
+        assertEquals("default/Simulation/Pressure", stored);
 
         // Browse: user selects tag → framework sends path with tag component
         String browseQuery = "histprov:test:/tag:" + stored;
-        String roundtripped = TagPathUtil.qualifiedPathToStoredPath(browseQuery, COLLECTOR);
+        String roundtripped = TagPathUtil.qualifiedPathToStoredPath(browseQuery);
         assertEquals(stored, roundtripped);
     }
 
     @Test
     void roundtrip_storageAndFolderBrowseBack() {
         String stored = TagPathUtil.qualifiedPathToStoredPath(
-                "sys:GW-01:/prov:default:/tag:Simulation/Pressure", COLLECTOR);
-        assertEquals("Ignition/default/Simulation/Pressure", stored);
+                "sys:GW-01:/prov:default:/tag:Simulation/Pressure");
+        assertEquals("default/Simulation/Pressure", stored);
 
         // Browse tree creates folder: components under Measurements category
-        String browsePath = "histprov:test:/folder:Measurements:/folder:Ignition:/folder:default:/folder:Simulation:/tag:Pressure";
-        String result = TagPathUtil.qualifiedPathToStoredPath(browsePath, COLLECTOR);
+        String browsePath = "histprov:test:/folder:Measurements:/folder:default:/folder:Simulation:/tag:Pressure";
+        String result = TagPathUtil.qualifiedPathToStoredPath(browsePath);
         assertEquals(stored, result);
     }
 }

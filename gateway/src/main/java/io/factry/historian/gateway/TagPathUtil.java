@@ -4,9 +4,9 @@ package io.factry.historian.gateway;
  * Utility methods for converting between Ignition QualifiedPath strings
  * and Factry measurement names.
  * <p>
- * Measurement name format: {@code "collectorName/provider/tagPath"}
+ * Measurement name format: {@code "provider/tagPath"}
  * <p>
- * Example: {@code "Ignition/default/FactrySim/ff1"}
+ * Example: {@code "default/FactrySim/ff1"}
  * <p>
  * No Ignition SDK dependencies — pure string operations, easy to unit test.
  */
@@ -44,13 +44,13 @@ final class TagPathUtil {
 
     /**
      * Build the measurement name from components.
-     * Format: {@code "collectorName/prov/tag"}
+     * Format: {@code "prov/tag"}
      *
-     * @return measurement name, e.g. {@code "Ignition/default/FactrySim/ff1"}
+     * @return measurement name, e.g. {@code "default/FactrySim/ff1"}
      */
-    static String buildStoredPath(String collectorName, String prov, String tag) {
+    static String buildStoredPath(String prov, String tag) {
         if (prov == null) prov = "default";
-        return collectorName + "/" + prov + "/" + tag;
+        return prov + "/" + tag;
     }
 
     /**
@@ -58,24 +58,23 @@ final class TagPathUtil {
      * <p>
      * Handles multiple input formats:
      * <ul>
-     *   <li>Storage path: {@code sys:X:/prov:Y:/tag:Z} → {@code collectorName/Y/Z}</li>
+     *   <li>Storage path: {@code sys:X:/prov:Y:/tag:Z} → {@code Y/Z}</li>
      *   <li>Browse with folders: {@code histprov:xxx:/folder:A:/folder:B:/tag:C} → {@code A/B/C}
      *       (category prefix stripped if present)</li>
-     *   <li>Browse without folders: {@code histprov:xxx:/tag:collectorName/prov/tag}
-     *       → {@code collectorName/prov/tag} (already in correct format)</li>
+     *   <li>Browse without folders: {@code histprov:xxx:/tag:prov/tag}
+     *       → {@code prov/tag} (already in correct format)</li>
      * </ul>
      *
      * @param qualifiedPathStr the QualifiedPath.toString() result
-     * @param collectorName    the collector name from the JWT token
      * @return the Factry measurement name
      */
-    static String qualifiedPathToStoredPath(String qualifiedPathStr, String collectorName) {
+    static String qualifiedPathToStoredPath(String qualifiedPathStr) {
         String prov = extractComponent(qualifiedPathStr, "prov:");
         String tag = extractComponent(qualifiedPathStr, "tag:");
 
-        // 1. Storage path with explicit prov: component → build collectorName/prov/tag
+        // 1. Storage path with explicit prov: component → build prov/tag
         if (prov != null && tag != null) {
-            return buildStoredPath(collectorName, prov, tag);
+            return buildStoredPath(prov, tag);
         }
 
         if (tag != null) {

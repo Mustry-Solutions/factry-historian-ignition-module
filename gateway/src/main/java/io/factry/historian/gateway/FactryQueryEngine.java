@@ -733,7 +733,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     }
 
     private String toStoredTagPath(QualifiedPath path) {
-        return TagPathUtil.qualifiedPathToStoredPath(path.toString(), settings.getCollectorName());
+        return TagPathUtil.qualifiedPathToStoredPath(path.toString());
     }
 
     static QualityCode statusToQuality(String status) {
