@@ -10,12 +10,10 @@ Before starting, ensure the following are in place:
 - **Module installed** and active in **Config > System > Modules**
 - **Factry setup wizard completed** at http://localhost:8000
 - **Time series database created** in Factry (Configuration > Time Series Databases)
-- **Two historian profiles** created in **Config > Tags > History > Historians**:
-  1. **Factry Historian** — direct connection (no S&F engine configured)
-  2. **Factry Historian S&F** — with a Store & Forward engine name configured
-- **S&F engine created** in **Config > Store & Forward > Engines** matching the name in the S&F historian profile
+- **Historian profile** created in **Config > Tags > History > Historians**:
+  - **Factry Historian** — the module automatically creates an S&F engine on startup
 
-Historian profiles should both show **Running** status in the Historians list.
+The historian profile should show **Running** status in the Historians list.
 
 ---
 
@@ -30,7 +28,7 @@ These tests use the Tag Browser (**Config > Tags > Tag Browser**).
 3. Write values to the tag (e.g., 10.0, 20.0, 30.0)
 4. Open Factry web UI > Measurements
 
-**Expected:** A measurement named `<collector>/default/ManualTest/Numeric` appears in Factry with data type `number`. Data points match the written values.
+**Expected:** A measurement named `default/ManualTest/Numeric` appears in Factry with data type `number`. Data points match the written values.
 
 ### T1.2 — Create a boolean tag with history
 
@@ -62,7 +60,7 @@ These tests use the Tag Browser (**Config > Tags > Tag Browser**).
 2. Create a Memory Tag inside it: `ManualTest/Subfolder/Deep`, type=Float8, history enabled
 3. Write a value
 
-**Expected:** Measurement name includes the full path: `<collector>/default/ManualTest/Subfolder/Deep`.
+**Expected:** Measurement name includes the full path: `default/ManualTest/Subfolder/Deep`.
 
 ### T1.6 — Rename a tag with history
 
@@ -79,13 +77,13 @@ These tests use the Tag Browser (**Config > Tags > Tag Browser**).
 
 **Expected:** Same behavior as rename — new measurement created with the new path, old measurement persists.
 
-### T1.8 — Change history provider on a tag
+### T1.8 — Verify Store & Forward is active
 
-1. Take any tag with history on **Factry Historian**
-2. Change its History Provider to **Factry Historian S&F**
-3. Write a value
+1. Create a tag with history on **Factry Historian**
+2. Write a value
+3. Check **Status > Store & Forward**
 
-**Expected:** Data now flows through the S&F engine. Check **Status > Store & Forward** for forwarded count. A new measurement may be created in Factry (the historian name is not part of the measurement path).
+**Expected:** Data flows through the auto-created S&F engine. Forwarded count increases. The S&F engine name matches the historian profile name.
 
 ### T1.9 — Disable and re-enable history
 
@@ -116,7 +114,7 @@ end = system.date.now()
 start = system.date.addHours(end, -1)
 
 ds = system.tag.queryTagHistory(
-    paths=["histprov:<historian>:/tag:<collector>/default/ManualTest/Numeric"],
+    paths=["histprov:<historian>:/tag:default/ManualTest/Numeric"],
     startDate=start,
     endDate=end
 )
@@ -135,7 +133,7 @@ end = system.date.now()
 start = system.date.addHours(end, -1)
 
 ds = system.tag.queryTagHistory(
-    paths=["histprov:<historian>:/tag:<collector>/default/ManualTest/Numeric"],
+    paths=["histprov:<historian>:/tag:default/ManualTest/Numeric"],
     startDate=start,
     endDate=end,
     aggregationMode="Average",
@@ -204,7 +202,7 @@ for r in results:
 
 ```python
 # Browse into the system level
-results = system.historian.browse("histprov:<historian>:/tag:<collector>/default/ManualTest")
+results = system.historian.browse("histprov:<historian>:/tag:default/ManualTest")
 
 for r in results:
     print r
@@ -219,7 +217,7 @@ end = system.date.now()
 start = system.date.addHours(end, -1)
 
 ds = system.historian.queryRawPoints(
-    paths=["histprov:<historian>:/tag:<collector>/default/ManualTest/Numeric"],
+    paths=["histprov:<historian>:/tag:default/ManualTest/Numeric"],
     startTime=start,
     endTime=end
 )
@@ -237,7 +235,7 @@ end = system.date.now()
 start = system.date.addHours(end, -1)
 
 ds = system.historian.queryAggregatedPoints(
-    paths=["histprov:<historian>:/tag:<collector>/default/ManualTest/Numeric"],
+    paths=["histprov:<historian>:/tag:default/ManualTest/Numeric"],
     startTime=start,
     endTime=end,
     aggregates=["Average", "Minimum", "Maximum"],
@@ -254,7 +252,7 @@ for row in ds:
 
 ```python
 ds = system.historian.queryMetadata(
-    paths=["histprov:<historian>:/tag:<collector>/default/ManualTest/Numeric"]
+    paths=["histprov:<historian>:/tag:default/ManualTest/Numeric"]
 )
 
 for row in ds:
@@ -301,9 +299,9 @@ start = system.date.addHours(end, -1)
 
 ds = system.tag.queryTagHistory(
     paths=[
-        "histprov:<historian>:/tag:<collector>/default/ManualTest/Numeric",
-        "histprov:<historian>:/tag:<collector>/default/ManualTest/Boolean",
-        "histprov:<historian>:/tag:<collector>/default/ManualTest/String"
+        "histprov:<historian>:/tag:default/ManualTest/Numeric",
+        "histprov:<historian>:/tag:default/ManualTest/Boolean",
+        "histprov:<historian>:/tag:default/ManualTest/String"
     ],
     startDate=start,
     endDate=end
@@ -319,19 +317,19 @@ print "Rows:", ds.getRowCount()
 
 ## Group 3: Store & Forward
 
-These tests validate data buffering during outages. Use the **Factry Historian S&F** profile.
+These tests validate data buffering during outages. S&F is always enabled — the module automatically creates an S&F engine matching the historian profile name.
 
 ### T3.1 — Normal S&F operation
 
-1. Create a tag with history on **Factry Historian S&F**
+1. Create a tag with history on **Factry Historian**
 2. Write values
 3. Check **Status > Store & Forward** page
 
-**Expected:** Data flows through S&F. Forwarded count increases. Pending and quarantined counts stay at 0.
+**Expected:** Data flows through S&F. Forwarded count increases. Pending and quarantined counts stay at 0. The S&F engine name matches the historian profile name.
 
 ### T3.2 — Factry goes down — data buffered
 
-1. Ensure a tag is actively writing to **Factry Historian S&F**
+1. Ensure a tag is actively writing to **Factry Historian**
 2. Stop the Factry historian container: `docker compose stop historian`
 3. Continue writing values to the tag (at least 10-20 values)
 4. Check **Status > Store & Forward**
@@ -380,23 +378,13 @@ Monitor the historian status in **Config > Tags > History > Historians** during 
 
 **Expected:** Quarantined records should be automatically moved back to pending by the module's 30-second retry task. The quarantine count may briefly increase but should return to 0.
 
-### T3.7 — Direct historian during Factry outage (no S&F)
+### T3.7 — S&F engine auto-creation
 
-1. Ensure a tag is writing to **Factry Historian** (the profile WITHOUT S&F)
-2. Stop Factry: `docker compose stop historian`
-3. Write values
+1. Delete the S&F engine from **Config > Store & Forward > Engines**
+2. Restart the Ignition gateway: `docker compose restart ignition`
+3. Check **Config > Store & Forward > Engines**
 
-**Expected:** Data points are LOST — there is no S&F buffer. Ignition logs show gRPC errors. This confirms why the S&F profile is important for production.
-
-### T3.8 — S&F engine metrics
-
-During normal operation with S&F:
-1. Check Ignition logs for the 30-second metrics line
-
-**Expected:** Metrics show store operations, point counts, points/sec, and query statistics:
-```
-Metrics | store: N ops, N pts (X.X pts/s), ... | raw query: ... | agg query: ...
-```
+**Expected:** The module automatically re-creates the S&F engine on startup. The engine name matches the historian profile name.
 
 ---
 
@@ -459,7 +447,6 @@ Metrics | store: N ops, N pts (X.X pts/s), ... | raw query: ... | agg query: ...
 | T3.5 | | |
 | T3.6 | | |
 | T3.7 | | |
-| T3.8 | | |
 | T4.1 | | |
 | T4.2 | | |
 | T4.3 | | |

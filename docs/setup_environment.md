@@ -159,11 +159,12 @@ The historian profiles are configured via JSON files in:
 ignition/data/config/resources/core/com.inductiveautomation.historian/historian-provider/
 ```
 
-Two profiles are created by `setup-historians.sh`:
-- **Factry Historian NoSF** — Direct writes to Factry (no Store & Forward)
-- **Factry Historian SF** — Buffered writes via Store & Forward
+A profile is created by `setup-historians.sh`:
+- **Factry Historian** — Writes to Factry with automatic Store & Forward buffering
 
-Key settings in each `config.json`:
+The module automatically creates an S&F engine matching the historian profile name on startup.
+
+Key settings in `config.json`:
 
 | Field | Value | Notes |
 |-------|-------|-------|
@@ -206,8 +207,7 @@ Key system properties (configurable via env vars):
 | `grpc.host` | `GRPC_HOST` | `localhost` |
 | `grpc.port` | `GRPC_PORT` | `8001` |
 | `collector.name` | `COLLECTOR_NAME` | `Ignition` |
-| `historian.name.nosf` | `HISTORIAN_NAME_NOSF` | `Factry Historian NoSF` |
-| `historian.name.sf` | `HISTORIAN_NAME_SF` | `Factry Historian SF` |
+| `historian.name` | `HISTORIAN_NAME` | `Factry Historian` |
 
 The integration tests use WebDev endpoints deployed in a `TestFactry` project on the Ignition gateway.
 

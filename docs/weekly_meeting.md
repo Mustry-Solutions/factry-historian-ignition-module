@@ -301,3 +301,7 @@ Still:
   - more tests: both manual and automated      
   - two ignitions with two different collectors  ( same collector doesn't define unique name: coll1/default/var1 can come form two different ignition)
   - two ignitions, one with factry historian, one with remote historian   
+
+# 18/05/2026
+
+

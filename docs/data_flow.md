@@ -35,7 +35,7 @@ FactryHistoryProvider.onStartup()
         │       │
         │       └── gRPC: GetMeasurements() → populate cache
         │
-        └── [if S&F configured]
+        └── ensureStoreAndForwardEngine(historianName)
                 ├── TagHistoryDataSinkBridge.getOrCreate()
                 ├── registerSink() + force initialize()
                 └── TagHistoryStorageEngineBridge.getOrCreate()
@@ -51,23 +51,17 @@ Ignition Tag Subscription
 StorageEngine.storeAtomic(List<AtomicPoint<?>>)
         │
         ▼
-┌─── S&F Enabled? ───┐
-│                     │
-│ YES                 │ NO
-▼                     ▼
-TagHistoryStorage     FactryStorageEngine
-EngineBridge          .doStoreAtomic()
-    │                     │
-    ▼                     │
-S&F Engine                │
-(persist to disk)         │
-    │                     │
-    ▼                     │
-TagHistoryData            │
-SinkBridge                │
-    │                     │
-    ▼                     │
-FactryStorageEngine  ◄────┘
+TagHistoryStorageEngineBridge
+(routes into S&F)
+    │
+    ▼
+S&F Engine (pending queue, persist to disk)
+    │
+    ▼
+TagHistoryDataSinkBridge
+    │
+    ▼
+FactryStorageEngine
 .doStoreAtomic(points)
         │
         │  For each AtomicPoint:
@@ -115,7 +109,7 @@ FactryQueryEngine.doQueryRaw(options, processor)
         │       │ path = key.source()                          │
         │       │ tagPath = toStoredTagPath(path)              │
         │       │   strips Ignition prefix, builds             │
-        │       │   → "collectorName/default/TagName"          │
+        │       │   → "default/TagName"                         │
         │       │ uuid = measurementCache.getUUID(tagPath)     │
         │       └─────────────────────────────────────────────┘
         │
@@ -172,7 +166,7 @@ FactryQueryEngine.doBrowse(root, filter, publisher)
         └── For each active Measurement in cache:
                 │
                 ├── Extract display name from measurement name
-                │   "Ignition/default/Temperature" → "Temperature"
+                │   "default/Temperature" → "Temperature"
                 │
                 └── publisher.newNode("Temperature", "Leaf")
                         .creationTime(m.createdAt)
@@ -196,7 +190,7 @@ AbstractQueryEngine (internal, before query execution)
 FactryQueryEngine.lookupNode(QualifiedPath)
         │
         ├── toStoredTagPath(path)
-        │   "sys:..histprov:Name:/tag:prov:default:/tag:X" → "collectorName/default/X"
+        │   "sys:..histprov:Name:/tag:prov:default:/tag:X" → "default/X"
         │
         ├── measurementCache.getMeasurementByName(tagPath)
         │   (refresh from gRPC if not found)
