@@ -310,3 +310,8 @@ Solved:
   [+] FactryQueryEngine query grouped by the status=good << let's plot only the good quality data   
   [+] array through the store&forward
 
+
+Pending:
+  [] licence html  
+  [] grpcClient.registerCollector (no correct effect)
+  [] Collector names (we use collector's uid )
