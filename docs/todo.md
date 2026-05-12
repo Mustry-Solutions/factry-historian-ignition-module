@@ -1,9 +1,5 @@
 
 # TODO
-  [+] use GetMeasurementByFilter to get all the measurements of different collectors
-  [+] create the store&forward engine automatic
-  [+] FactryQueryEngine query grouped by the status=good << let's plot only the good quality data   
-
   [] manual test
       getting realfakedata from here
       https://docs.factry.io/installing-factry-historian-using-docker-for-testing-purposes
@@ -12,9 +8,6 @@
      - more tests: both manual and automated      
      - two ignitions with two different collectors  ( same collector doesn't define unique name: coll1/default/var1 can come form two different ignition)
       - two ignitions, one with factry historian, one with remote historian   
-
------- 
-
 
   [] So metadata flows one direction only: 
          Factry → Ignition create tag with metadata in Ignition 

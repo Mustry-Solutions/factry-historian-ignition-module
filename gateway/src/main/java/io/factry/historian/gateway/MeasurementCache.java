@@ -137,7 +137,7 @@ public class MeasurementCache {
             }
 
         } catch (Exception e) {
-            logger.error("Failed to refresh measurement cache", e);
+            throw new RuntimeException("Failed to refresh measurement cache", e);
         }
     }
 

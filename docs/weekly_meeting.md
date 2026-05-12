@@ -304,4 +304,9 @@ Still:
 
 # 18/05/2026
 
+Solved:
+  [+] use GetMeasurementByFilter to get all the measurements of different collectors
+  [+] create the store&forward engine automatic
+  [+] FactryQueryEngine query grouped by the status=good << let's plot only the good quality data   
+  [+] array through the store&forward
 

@@ -372,7 +372,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
                 logger.debug("Measurement cache refreshed: {} entries (unchanged)", after);
             }
         } catch (Exception e) {
-            logger.debug("Error refreshing measurement cache", e);
+            logger.warn("Failed to refresh measurement cache: " + e.getMessage());
         }
     }
 
