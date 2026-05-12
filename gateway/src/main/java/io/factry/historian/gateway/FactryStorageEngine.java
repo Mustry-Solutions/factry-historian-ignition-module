@@ -23,6 +23,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class FactryStorageEngine extends AbstractStorageEngine {
     private volatile FactryHistorianSettings settings;
@@ -51,7 +52,11 @@ public class FactryStorageEngine extends AbstractStorageEngine {
     @Override
     protected StorageResult<AtomicPoint<?>> doStoreAtomic(List<AtomicPoint<?>> points) {
         if (settings.isDebugLogging()) {
-            logger.debug("doStoreAtomic called with " + points.size() + " points");
+            StringBuilder sb = new StringBuilder("doStoreAtomic called with " + points.size() + " points: ");
+            for (AtomicPoint<?> p : points) {
+                sb.append(p.source()).append(" ");
+            }
+            logger.info(sb.toString());
         }
 
         try {
@@ -83,6 +88,12 @@ public class FactryStorageEngine extends AbstractStorageEngine {
         BuildResult built = buildPoints(points);
 
         if (built.pointsBuilder.getPointsCount() == 0) {
+            if (built.hasSkippedArrays) {
+                // Array measurements are being created asynchronously — tell S&F to retry
+                logger.debug("No points to send, array measurements pending creation");
+                return StorageResult.exception(
+                        new RuntimeException("Array measurement(s) being created, retry later"), points);
+            }
             logger.debug("No points to send (all skipped)");
             return StorageResult.success(points);
         }
@@ -95,8 +106,13 @@ public class FactryStorageEngine extends AbstractStorageEngine {
             metrics.recordStore(built.pointsBuilder.getPointsCount(), elapsedMs);
             logger.debug("createPoints succeeded for " + built.pointsBuilder.getPointsCount() + " points");
 
-            if (settings.isDebugLogging()) {
-                logger.debug("gRPC createPoints succeeded for " + points.size() + " points");
+            if (built.hasSkippedArrays) {
+                // Non-array points sent successfully, but array points were skipped.
+                // Return exception so S&F retries the whole batch — the non-array points
+                // will be re-sent (idempotent) and the array points will succeed next time.
+                logger.debug("Array measurements pending, requesting S&F retry for array points");
+                return StorageResult.exception(
+                        new RuntimeException("Array measurement(s) being created, retry later"), points);
             }
             return StorageResult.success(points);
 
@@ -125,12 +141,17 @@ public class FactryStorageEngine extends AbstractStorageEngine {
     private static class BuildResult {
         final Points.Builder pointsBuilder;
         final Set<String> usedUUIDs;
+        final boolean hasSkippedArrays;
 
-        BuildResult(Points.Builder pointsBuilder, Set<String> usedUUIDs) {
+        BuildResult(Points.Builder pointsBuilder, Set<String> usedUUIDs, boolean hasSkippedArrays) {
             this.pointsBuilder = pointsBuilder;
             this.usedUUIDs = usedUUIDs;
+            this.hasSkippedArrays = hasSkippedArrays;
         }
     }
+
+    /** Tracks array base paths for which measurement creation is in progress on a background thread. */
+    private final Set<String> asyncArrayCreations = ConcurrentHashMap.newKeySet();
 
     /** Pattern matching array-indexed tag paths like "some/path[0]", "some/path[123]". */
     private static final java.util.regex.Pattern ARRAY_INDEX_PATTERN =
@@ -189,20 +210,35 @@ public class FactryStorageEngine extends AbstractStorageEngine {
             usedUUIDs.add(measurementUUID);
         }
 
-        // Process grouped array points — combine into single points with ListValue
+        // Process grouped array points — combine into single points with ListValue.
+        // Array measurement creation can block for seconds (polling for visibility),
+        // which would stall the S&F forwarding thread. Instead, we only use the cache
+        // for instant lookup and trigger creation asynchronously if missing.
+        boolean hasSkippedArrays = false;
         for (Map.Entry<String, java.util.TreeMap<Integer, AtomicPoint<?>>> entry : arrayGroups.entrySet()) {
             String basePath = entry.getKey();
             java.util.TreeMap<Integer, AtomicPoint<?>> elements = entry.getValue();
-
-            // Use the first element to determine timestamp, quality, and value type for measurement creation
             AtomicPoint<?> firstElement = elements.firstEntry().getValue();
 
-            // Determine the array datatype from the element type (e.g. "[]number", "[]boolean", "[]string")
-            String elementType = MeasurementCache.toFactryDataType(firstElement.value());
-            String arrayDataType = "[]" + (elementType != null ? elementType : "string");
-            String measurementUUID = measurementCache.getOrCreateUUID(basePath, grpcClient, arrayDataType);
+            // Non-blocking: only check the cache, don't create
+            String measurementUUID = measurementCache.getUUID(basePath);
             if (measurementUUID == null || measurementUUID.isEmpty()) {
-                logger.debug("Skipping array point for '" + basePath + "': no measurement UUID");
+                // Trigger async measurement creation if not already in progress
+                if (asyncArrayCreations.add(basePath)) {
+                    String elementType = MeasurementCache.toFactryDataType(firstElement.value());
+                    String arrayDataType = "[]" + (elementType != null ? elementType : "string");
+                    logger.info("Array measurement '" + basePath + "' not in cache, creating asynchronously (" + arrayDataType + ")");
+                    Thread creator = new Thread(() -> {
+                        try {
+                            measurementCache.getOrCreateUUID(basePath, grpcClient, arrayDataType);
+                        } finally {
+                            asyncArrayCreations.remove(basePath);
+                        }
+                    }, "array-measurement-creator-" + basePath);
+                    creator.setDaemon(true);
+                    creator.start();
+                }
+                hasSkippedArrays = true;
                 continue;
             }
 
@@ -232,7 +268,7 @@ public class FactryStorageEngine extends AbstractStorageEngine {
             logger.debug("Built array point for '" + basePath + "' with " + elements.size() + " elements");
         }
 
-        return new BuildResult(pointsBuilder, usedUUIDs);
+        return new BuildResult(pointsBuilder, usedUUIDs, hasSkippedArrays);
     }
 
     @Override
