@@ -17,6 +17,11 @@ The historian profile should show **Running** status in the Historians list.
 
 ---
 
+## Overview of the test environment
+
+![Test Overview](manual_test.excalidraw.svg)
+
+
 ## Group 1: Tag Creation and Metadata
 
 These tests use the Tag Browser (**Config > Tags > Tag Browser**).
