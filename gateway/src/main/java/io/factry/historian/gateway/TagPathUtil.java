@@ -72,9 +72,11 @@ final class TagPathUtil {
         String prov = extractComponent(qualifiedPathStr, "prov:");
         String tag = extractComponent(qualifiedPathStr, "tag:");
 
-        // 1. Storage path with explicit prov: component → build prov/tag
+        // 1. Storage path (has sys: component) → prov + tag
+        //    Binding/query path (no sys:) → tag already contains the full measurement name
         if (prov != null && tag != null) {
-            return buildStoredPath(prov, tag);
+            String sys = extractComponent(qualifiedPathStr, "sys:");
+            return sys != null ? buildStoredPath(prov, tag) : tag;
         }
 
         if (tag != null) {
