@@ -830,6 +830,49 @@ class FactryIntegrationTest {
             assertTrue(rowCount >= 2, "Should return data for the existing tag");
             pass("Partial multi-tag query succeeds with " + rowCount + " rows");
         }
+
+        @Test
+        @Order(80)
+        @Disabled("Factry server caps getMeasurementsByFilter at 100 — waiting for server-side fix")
+        @DisplayName("GetMeasurementsByFilter returns more than 100 measurements")
+        void testGetMeasurementsByFilterNoLimit() throws Exception {
+            section("Error: GetMeasurementsByFilter pagination limit");
+
+            // Count existing measurements
+            int existingCount = grpcStub.getMeasurementsByFilter(
+                    GetMeasurementsByFilterRequest.newBuilder().build()
+            ).getMeasurementsCount();
+            log("Existing measurements via getMeasurementsByFilter: " + existingCount);
+
+            // Create enough to exceed 100 total
+            int toCreate = Math.max(0, 101 - existingCount);
+            log("Creating " + toCreate + " measurements to exceed 100 total");
+
+            for (int i = 0; i < toCreate; i++) {
+                grpcStub.createMeasurements(CreateMeasurementsRequest.newBuilder()
+                        .addMeasurements(CreateMeasurement.newBuilder()
+                                .setName("default/" + TEST_PREFIX + "/Limit/" + i)
+                                .setDataType("number")
+                                .setAutoOnboard(true)
+                                .build())
+                        .build());
+            }
+
+            if (toCreate > 0) {
+                // Wait for measurements to become visible
+                Thread.sleep(3000);
+            }
+
+            // Query again and verify we get more than 100
+            int afterCount = grpcStub.getMeasurementsByFilter(
+                    GetMeasurementsByFilterRequest.newBuilder().build()
+            ).getMeasurementsCount();
+            log("Measurements via getMeasurementsByFilter after creation: " + afterCount);
+
+            assertTrue(afterCount > 100,
+                    "getMeasurementsByFilter should return more than 100 measurements, got " + afterCount);
+            pass("getMeasurementsByFilter returned " + afterCount + " measurements (no 100-record limit)");
+        }
     }
 
     // =========================================================================
