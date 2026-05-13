@@ -137,9 +137,9 @@ tasks.register("printVersion") {
 }
 
 // Deploy tasks — copy module to Ignition and restart the container
-val ignitionModlDir = file("ignition/data/var/ignition/modl")
+val ignitionModlDir = file("ignition-remote/data/var/ignition/modl")
 
-// register<Copy> means it is a copy operation, 'from' 'into' 'rename' are the paramters 
+// register<Copy> means it is a copy operation, 'from' 'into' 'rename' are the paramters
 tasks.register<Copy>("copy") {
     group = "deploy"
     description = "Copy the built module to the Ignition modules directory"
@@ -149,12 +149,12 @@ tasks.register<Copy>("copy") {
     rename { "Factry-Historian.modl" }
 }
 
-// register<Exec> means it is an execution operantion, 'commandLine' is the parameter for the command to execute  
+// register<Exec> means it is an execution operantion, 'commandLine' is the parameter for the command to execute
 tasks.register<Exec>("restart") {
     group = "deploy"
     description = "Restart the Ignition Docker container"
     dependsOn("copy")
-    commandLine("docker", "compose", "restart", "ignition")
+    commandLine("docker", "compose", "restart", "ignition-remote")
 }
 
 // Integration tests — delegates to the gateway subproject

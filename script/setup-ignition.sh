@@ -6,8 +6,9 @@
 set -e
 cd "$(dirname "$0")/.."
 
-IGNITION_DATA_DIR="./ignition/data"
-SYSTEM_NAME="Ignition-FactryTest"
+IGNITION_DATA_DIR="${1:-./ignition/data}"
+SYSTEM_NAME="${2:-Ignition-FactryTest}"
+TEMP_PORT="${3:-8088}"
 IGNITION_IMAGE="inductiveautomation/ignition:8.3.3"
 
 # Check if data directory already exists
@@ -36,7 +37,7 @@ services:
     container_name: ignition-init-temp
     hostname: FactryTest
     ports:
-      - "8088:8088"
+      - "${TEMP_PORT}:8088"
     environment:
       ACCEPT_IGNITION_EULA: "Y"
       GATEWAY_ADMIN_USERNAME: "admin"

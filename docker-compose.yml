@@ -31,6 +31,36 @@ services:
       retries: 3
       start_period: 60s
 
+  # Second Ignition gateway — for testing Factry Historian as a remote historian
+  ignition-remote:
+    image: inductiveautomation/ignition:8.3.3
+    container_name: factry-historian-ignition-remote
+    hostname: FactryRemoteTest
+    ports:
+      - "8095:8088"   # HTTP - Gateway web interface
+      - "8048:8043"   # HTTPS
+      - "8066:8060"   # Gateway Network
+      - "8027:8022"   # Java debug port
+    volumes:
+      - ./ignition-remote/data:/usr/local/bin/ignition/data
+    environment:
+      ACCEPT_IGNITION_EULA: "Y"
+      GATEWAY_ADMIN_USERNAME: "admin"
+      GATEWAY_ADMIN_PASSWORD: "password"
+    command: >
+      -n FactryRemoteTest
+      -m 2048
+      --
+      -Dignition.allowunsignedmodules=true
+      -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:8022
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8088/StatusPing"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
   # Factry Historian
   historian:
     image: registry.gitlab.com/factry/historian/historian-server:v8.2.0-beta-c3c26356e3

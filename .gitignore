@@ -164,3 +164,6 @@ docs/.design/
 
 # Docker image tarballs (loaded locally, not committed)
 docker/
+
+# Remote gateway data (auto-generated)
+ignition-remote/
