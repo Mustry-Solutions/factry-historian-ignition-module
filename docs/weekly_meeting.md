@@ -315,3 +315,4 @@ Pending:
   [] licence html  
   [] grpcClient.registerCollector (no correct effect)
   [] Collector names (we use collector's uid )
+  [] getMeasurementsByFilter returns with  100 results, suspecious
