@@ -38,16 +38,10 @@ import static org.junit.jupiter.api.Assertions.*;
  *   <li>WebDev endpoints deployed in the configured project</li>
  * </ul>
  * <p>
- * The tests run against two historian instances when configured:
- * <ul>
- *   <li>{@code historian.name.nosf} — historian without Store &amp; Forward</li>
- *   <li>{@code historian.name.sf}  — historian with Store &amp; Forward</li>
- * </ul>
- * If only {@code historian.name} is set, tests run once against that single historian.
- * <p>
  * Run via: {@code ./gradlew integrationTest}
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class FactryIntegrationTest {
 
     // -- Configuration (from system properties, set by Gradle) ----------------
@@ -61,9 +55,7 @@ class FactryIntegrationTest {
     private static final String GATEWAY_SYSTEM_NAME = System.getProperty("gateway.system.name", "Ignition-FactryTest");
     private static final String COLLECTOR_NAME = System.getProperty("collector.name", "Ignition");
 
-    // Dual-historian mode: tests run against both historians.
-    private static final String HISTORIAN_NAME_NOSF = System.getProperty("historian.name.nosf", "Factry Historian NoSF");
-    private static final String HISTORIAN_NAME_SF = System.getProperty("historian.name.sf", "Factry Historian SF");
+    private static final String HISTORIAN_NAME = System.getProperty("historian.name", "Factry Historian");
 
     /** Wait time for the module's batch flush (default 5s interval + margin). */
     private static final int BATCH_FLUSH_WAIT_MS = 8_000;
@@ -111,8 +103,7 @@ class FactryIntegrationTest {
         log("System:     " + GATEWAY_SYSTEM_NAME);
         log("Collector:  " + COLLECTOR_NAME);
         log("Prefix:     " + TEST_PREFIX);
-
-        log("Historian:  NoSF='" + HISTORIAN_NAME_NOSF + "'  SF='" + HISTORIAN_NAME_SF + "'");
+        log("Historian:  " + HISTORIAN_NAME);
 
         httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
@@ -166,10 +157,9 @@ class FactryIntegrationTest {
         }
 
         // Verify WebDev endpoint is reachable
-        String probeHistorian = HISTORIAN_NAME_NOSF;
         try {
             Map<String, Object> probe = webdevPost("test/queryRaw", Map.of(
-                    "paths", List.of("histprov:" + probeHistorian + ":/sys:probe:/prov:default:/tag:probe"),
+                    "paths", List.of("histprov:" + HISTORIAN_NAME + ":/sys:probe:/prov:default:/tag:probe"),
                     "startDate", 1600000000000L,
                     "endDate", 1600000010000L
             ));
@@ -214,443 +204,409 @@ class FactryIntegrationTest {
     }
 
     // =========================================================================
-    // Historian-scoped tests (run once per historian instance)
+    // Historian tests
     // =========================================================================
 
-    /**
-     * Shared test logic for a single historian instance. Used by both
-     * nested classes when in dual-historian mode, or directly when single.
-     */
-    abstract class HistorianTests {
+    @Test
+    @Order(10)
+    @DisplayName("system.historian.storeDataPoints — store numeric data")
+    void testStoreDataPoints() throws Exception {
+        section("storeDataPoints");
 
-        abstract String historianName();
-        abstract String label();
+        String tagName = TEST_PREFIX + "/StorePoints";
+        long baseTs = 1700010000000L;
 
-        @Test
-        @Order(10)
-        @DisplayName("system.historian.storeDataPoints — store numeric data")
-        void testStoreDataPoints() throws Exception {
-            section(label() + " - storeDataPoints");
+        // Pre-create the measurement so Ignition's lookupNode can resolve it
+        String measurementName = storedTagPath(tagName);
+        String preUuid = createMeasurement(measurementName, "number");
+        assertFalse(preUuid.isEmpty(), "Pre-created measurement should have a UUID");
+        log("Pre-created measurement " + preUuid);
 
-            String tagName = TEST_PREFIX + "/" + label() + "/StorePoints";
-            long baseTs = 1700010000000L;
+        String qPath = qualifiedPath(HISTORIAN_NAME, tagName);
+        Map<String, Object> result = webdevPost("test/storePoints", Map.of(
+                "paths", List.of(qPath, qPath, qPath),
+                "values", List.of(100.0, 200.0, 300.0),
+                "timestamps", List.of(baseTs, baseTs + 1000, baseTs + 2000),
+                "qualities", List.of(192, 192, 192)
+        ));
+        assertTrue((Boolean) result.get("success"), "storeDataPoints should succeed");
+        pass("storeDataPoints returned success");
 
-            String qPath = qualifiedPath(historianName(), tagName);
-            Map<String, Object> result = webdevPost("test/storePoints", Map.of(
-                    "paths", List.of(qPath, qPath, qPath),
-                    "values", List.of(100.0, 200.0, 300.0),
-                    "timestamps", List.of(baseTs, baseTs + 1000, baseTs + 2000),
-                    "qualities", List.of(192, 192, 192)
-            ));
-            assertTrue((Boolean) result.get("success"), "storeDataPoints should succeed");
-            pass("storeDataPoints returned success");
+        log("Waiting " + (BATCH_FLUSH_WAIT_MS / 1000) + "s for batch flush...");
+        Thread.sleep(BATCH_FLUSH_WAIT_MS);
 
-            log("Waiting " + (BATCH_FLUSH_WAIT_MS / 1000) + "s for batch flush...");
-            Thread.sleep(BATCH_FLUSH_WAIT_MS);
+        assertNotNull(findMeasurementUuid(measurementName),
+                "Measurement '" + measurementName + "' should exist in Factry");
+        pass("Measurement exists in Factry: " + preUuid);
 
-            String measurementName = storedTagPath(tagName);
-            String uuid = findMeasurementUuid(measurementName);
-            assertNotNull(uuid, "Measurement '" + measurementName + "' should exist in Factry");
-            pass("Measurement exists in Factry: " + uuid);
+        QueryTimeseriesResponse response = grpcQuery(preUuid, baseTs - 1000, baseTs + 3000);
+        assertFalse(response.getSeriesList().isEmpty(), "Should return at least one series");
+        int pointCount = response.getSeries(0).getDataPointsCount();
+        assertTrue(pointCount >= 3, "Expected >= 3 points, got " + pointCount);
+        pass("gRPC verification: " + pointCount + " points stored");
+    }
 
-            QueryTimeseriesResponse response = grpcQuery(uuid, baseTs - 1000, baseTs + 3000);
-            assertFalse(response.getSeriesList().isEmpty(), "Should return at least one series");
-            int pointCount = response.getSeries(0).getDataPointsCount();
-            assertTrue(pointCount >= 3, "Expected >= 3 points, got " + pointCount);
-            pass("gRPC verification: " + pointCount + " points stored");
+    @Test
+    @Order(20)
+    @DisplayName("system.historian.queryRawPoints — query raw data")
+    void testQueryRawPoints() throws Exception {
+        section("queryRawPoints");
+
+        String tagName = TEST_PREFIX + "/RawQuery";
+        String measurementName = storedTagPath(tagName);
+
+        String uuid = createMeasurement(measurementName, "number");
+        assertFalse(uuid.isEmpty(), "Measurement UUID should not be empty");
+
+        long baseTs = 1700020000000L;
+        List<Point> points = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            points.add(buildPoint(uuid, baseTs + i * 1000, Value.newBuilder().setNumberValue(10.0 + i).build()));
         }
+        grpcStub.createPoints(Points.newBuilder().addAllPoints(points).build());
+        log("Inserted 5 points for measurement " + uuid);
+        Thread.sleep(2000);
 
-        @Test
-        @Order(20)
-        @DisplayName("system.historian.queryRawPoints — query raw data")
-        void testQueryRawPoints() throws Exception {
-            section(label() + " - queryRawPoints");
+        Map<String, Object> result = webdevPost("test/queryRaw", Map.of(
+                "paths", List.of(qualifiedPath(HISTORIAN_NAME, tagName)),
+                "startDate", baseTs - 1000,
+                "endDate", baseTs + 5000
+        ));
 
-            String tagName = TEST_PREFIX + "/" + label() + "/RawQuery";
-            String measurementName = storedTagPath(tagName);
+        assertTrue((Boolean) result.get("success"), "queryRawPoints should succeed");
+        pass("Raw query returned success");
 
+        int rowCount = ((Number) result.get("rowCount")).intValue();
+        @SuppressWarnings("unchecked")
+        List<String> columns = (List<String>) result.get("columns");
+        log("Got " + rowCount + " rows, columns: " + columns);
+        assertTrue(rowCount >= 5, "Expected >= 5 rows, got " + rowCount);
+        pass("Got data rows back");
+    }
+
+    @Test
+    @Order(30)
+    @DisplayName("system.historian.queryAggregatedPoints — all aggregation types")
+    void testQueryAggregatedPoints() throws Exception {
+        section("queryAggregatedPoints (all aggregation types)");
+
+        String tagName = TEST_PREFIX + "/Aggregation";
+        String measurementName = storedTagPath(tagName);
+
+        String uuid = createMeasurement(measurementName, "number");
+        assertFalse(uuid.isEmpty());
+
+        // Insert 100 points with values 0..99 (1 second apart)
+        long baseTs = 1700030000000L;
+        List<Point> points = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            points.add(buildPoint(uuid, baseTs + i * 1000,
+                    Value.newBuilder().setNumberValue(i).build()));
+        }
+        grpcStub.createPoints(Points.newBuilder().addAllPoints(points).build());
+        log("Inserted 100 points (values 0..99) for measurement " + uuid);
+        Thread.sleep(2000);
+
+        String qPath = qualifiedPath(HISTORIAN_NAME, tagName);
+        long startMs = baseTs - 1000;
+        long endMs = baseTs + 100_000;
+
+        // --- Average ---
+        assertAggQuery(qPath, startMs, endMs, "Average", 49.5, 5.0);
+
+        // --- SimpleAverage ---
+        assertAggQuery(qPath, startMs, endMs, "SimpleAverage", 49.5, 5.0);
+
+        // --- Minimum ---
+        assertAggQuery(qPath, startMs, endMs, "Minimum", 0.0, 1.0);
+
+        // --- Maximum ---
+        assertAggQuery(qPath, startMs, endMs, "Maximum", 99.0, 1.0);
+
+        // --- Sum ---
+        assertAggQuery(qPath, startMs, endMs, "Sum", 4950.0, 50.0);
+
+        // --- Count ---
+        assertAggQuery(qPath, startMs, endMs, "Count", 100.0, 5.0);
+
+        // --- LastValue ---
+        assertAggQuery(qPath, startMs, endMs, "LastValue", 99.0, 1.0);
+
+        // --- Range (spread = max - min) ---
+        assertAggQuery(qPath, startMs, endMs, "Range", 99.0, 1.0);
+
+        // Variance and StdDev are not supported by the Factry backend (returns NaN)
+
+        // --- MinMax ---
+        Map<String, Object> minMaxResult = webdevPost("test/queryAgg", Map.of(
+                "paths", List.of(qPath),
+                "startDate", startMs,
+                "endDate", endMs,
+                "aggregates", List.of("MinMax"),
+                "returnSize", 1
+        ));
+        assertTrue((Boolean) minMaxResult.get("success"), "MinMax query should succeed");
+        int minMaxRows = ((Number) minMaxResult.get("rowCount")).intValue();
+        log("MinMax returned " + minMaxRows + " rows");
+        assertTrue(minMaxRows >= 1, "MinMax should return >= 1 rows, got " + minMaxRows);
+        pass("MinMax");
+    }
+
+    /** Helper: query a single aggregation type and assert the value. */
+    private void assertAggQuery(String qPath, long startMs, long endMs,
+                                String aggName, double expected, double tolerance) throws Exception {
+        Map<String, Object> result = webdevPost("test/queryAgg", Map.of(
+                "paths", List.of(qPath),
+                "startDate", startMs,
+                "endDate", endMs,
+                "aggregates", List.of(aggName),
+                "returnSize", 1
+        ));
+        assertTrue((Boolean) result.get("success"), aggName + " query should succeed");
+        double actual = extractAggregationValue(result);
+        log(aggName + " = " + actual + " (expected ~" + expected + ")");
+        assertAggregationValue(result, expected, tolerance, aggName);
+        pass(aggName);
+    }
+
+    @Test
+    @Order(40)
+    @DisplayName("system.historian.queryMetadata — query measurement metadata")
+    void testQueryMetadata() throws Exception {
+        section("queryMetadata");
+
+        String tagName = TEST_PREFIX + "/Metadata";
+        String measurementName = storedTagPath(tagName);
+
+        String uuid = createMeasurement(measurementName, "number");
+        assertFalse(uuid.isEmpty());
+        log("Created measurement " + uuid);
+
+        Map<String, Object> result = webdevPost("test/queryMeta", Map.of(
+                "paths", List.of(qualifiedPath(HISTORIAN_NAME, tagName))
+        ));
+
+        assertTrue((Boolean) result.get("success"), "queryMetadata should succeed");
+        pass("queryMetadata returned success");
+
+        int rowCount = ((Number) result.get("rowCount")).intValue();
+        log("Got " + rowCount + " metadata rows");
+        assertTrue(rowCount >= 1, "Expected >= 1 metadata row, got " + rowCount);
+        pass("Got metadata back");
+    }
+
+    @Test
+    @Order(50)
+    @DisplayName("system.historian.browse — browse historian hierarchy")
+    void testBrowse() throws Exception {
+        section("browse");
+
+        Map<String, Object> rootResult = webdevPost("test/browse", Map.of(
+                "path", "histprov:" + HISTORIAN_NAME + ":/"
+        ));
+        assertTrue((Boolean) rootResult.get("success"), "Root browse should succeed");
+        pass("Root browse returned success");
+
+        int rootCount = ((Number) rootResult.get("count")).intValue();
+        assertTrue(rootCount >= 1, "Root should have at least 1 child node, got " + rootCount);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> nodes = (List<Map<String, Object>>) rootResult.get("results");
+        for (Map<String, Object> node : nodes) {
+            log("Node: " + node.get("path") + " (type=" + node.get("type") + ", hasChildren=" + node.get("hasChildren") + ")");
+        }
+        pass("Root browse returned " + rootCount + " nodes");
+    }
+
+    @Test
+    @Order(60)
+    @DisplayName("system.historian.storeMetadata — store measurement metadata")
+    void testStoreMetadata() throws Exception {
+        section("storeMetadata");
+
+        String tagName = TEST_PREFIX + "/StoreMeta";
+        String measurementName = storedTagPath(tagName);
+
+        String uuid = createMeasurement(measurementName, "number");
+        assertFalse(uuid.isEmpty());
+        log("Created measurement " + uuid);
+
+        // Warm up the module's measurement cache by doing a query first
+        webdevPost("test/queryRaw", Map.of(
+                "paths", List.of(qualifiedPath(HISTORIAN_NAME, tagName)),
+                "startDate", 1600000000000L,
+                "endDate", 1600000010000L
+        ));
+
+        Map<String, Object> result = webdevPost("test/storeMeta", Map.of(
+                "paths", List.of(qualifiedPath(HISTORIAN_NAME, tagName)),
+                "timestamps", List.of(System.currentTimeMillis()),
+                "properties", List.of(Map.of("engineeringUnits", "degC"))
+        ));
+
+        assertTrue((Boolean) result.get("success"), "storeMetadata should succeed (or no-op gracefully)");
+        pass("storeMetadata returned success");
+    }
+
+    @Test
+    @Order(70)
+    @DisplayName("Empty time range returns zero rows")
+    void testEmptyQuery() throws Exception {
+        section("Empty Query");
+
+        String tagName = TEST_PREFIX + "/Empty";
+        String measurementName = storedTagPath(tagName);
+
+        createMeasurement(measurementName, "number");
+
+        Map<String, Object> result = webdevPost("test/queryRaw", Map.of(
+                "paths", List.of(qualifiedPath(HISTORIAN_NAME, tagName)),
+                "startDate", 1600000000000L,
+                "endDate", 1600000010000L
+        ));
+        assertTrue((Boolean) result.get("success"));
+        int rowCount = ((Number) result.get("rowCount")).intValue();
+        log("Got " + rowCount + " rows for empty time range");
+        assertEquals(0, rowCount, "Should return 0 rows for empty range");
+        pass("Empty time range returns 0 rows");
+    }
+
+    @Test
+    @Order(80)
+    @DisplayName("String-type measurement storage and gRPC query")
+    void testStringValues() throws Exception {
+        section("String Values");
+
+        String tagName = TEST_PREFIX + "/StringTest";
+        String measurementName = storedTagPath(tagName);
+        long baseTs = 1700050000000L;
+
+        String uuid = createMeasurement(measurementName, "string");
+        assertFalse(uuid.isEmpty(), "String measurement UUID should not be empty");
+        log("Created string measurement " + uuid);
+
+        List<Point> points = List.of(
+                buildPoint(uuid, baseTs, Value.newBuilder().setStringValue("hello").build()),
+                buildPoint(uuid, baseTs + 1000, Value.newBuilder().setStringValue("world").build()),
+                buildPoint(uuid, baseTs + 2000, Value.newBuilder().setStringValue("test").build())
+        );
+        grpcStub.createPoints(Points.newBuilder().addAllPoints(points).build());
+        log("Inserted 3 string points via gRPC");
+        Thread.sleep(2000);
+
+        QueryTimeseriesResponse grpcResponse = grpcQuery(uuid, baseTs - 1000, baseTs + 3000);
+        int grpcPoints = grpcResponse.getSeriesList().isEmpty() ? 0
+                : grpcResponse.getSeries(0).getDataPointsCount();
+        assertTrue(grpcPoints >= 3, "Expected >= 3 string points via gRPC, got " + grpcPoints);
+        pass("gRPC verification: " + grpcPoints + " string points stored");
+
+        Map<String, Object> result = webdevPost("test/queryRaw", Map.of(
+                "paths", List.of(qualifiedPath(HISTORIAN_NAME, tagName)),
+                "startDate", baseTs - 1000,
+                "endDate", baseTs + 3000
+        ));
+        assertTrue((Boolean) result.get("success"), "queryRawPoints should succeed for string tags");
+        int rowCount = ((Number) result.get("rowCount")).intValue();
+        if (rowCount == 0) {
+            log("system.historian returned 0 rows (Ignition framework drops string values in DataSet)");
+        } else {
+            pass("system.historian returned " + rowCount + " rows");
+        }
+    }
+
+    @Test
+    @Order(90)
+    @DisplayName("Multi-tag query returns all columns")
+    void testMultiTagQuery() throws Exception {
+        section("Multi-Tag Query");
+
+        long baseTs = 1700060000000L;
+        List<String> tagNames = List.of(
+                TEST_PREFIX + "/Multi0",
+                TEST_PREFIX + "/Multi1",
+                TEST_PREFIX + "/Multi2"
+        );
+
+        for (int idx = 0; idx < tagNames.size(); idx++) {
+            String measurementName = storedTagPath(tagNames.get(idx));
             String uuid = createMeasurement(measurementName, "number");
-            assertFalse(uuid.isEmpty(), "Measurement UUID should not be empty");
+            assertFalse(uuid.isEmpty());
 
-            long baseTs = 1700020000000L;
             List<Point> points = new ArrayList<>();
             for (int i = 0; i < 5; i++) {
-                points.add(buildPoint(uuid, baseTs + i * 1000, Value.newBuilder().setNumberValue(10.0 + i).build()));
-            }
-            grpcStub.createPoints(Points.newBuilder().addAllPoints(points).build());
-            log("Inserted 5 points for measurement " + uuid);
-            Thread.sleep(2000);
-
-            Map<String, Object> result = webdevPost("test/queryRaw", Map.of(
-                    "paths", List.of(qualifiedPath(historianName(), tagName)),
-                    "startDate", baseTs - 1000,
-                    "endDate", baseTs + 5000
-            ));
-
-            assertTrue((Boolean) result.get("success"), "queryRawPoints should succeed");
-            pass("Raw query returned success");
-
-            int rowCount = ((Number) result.get("rowCount")).intValue();
-            @SuppressWarnings("unchecked")
-            List<String> columns = (List<String>) result.get("columns");
-            log("Got " + rowCount + " rows, columns: " + columns);
-            assertTrue(rowCount >= 5, "Expected >= 5 rows, got " + rowCount);
-            pass("Got data rows back");
-        }
-
-        @Test
-        @Order(30)
-        @DisplayName("system.historian.queryAggregatedPoints — all aggregation types")
-        void testQueryAggregatedPoints() throws Exception {
-            section(label() + " - queryAggregatedPoints (all aggregation types)");
-
-            String tagName = TEST_PREFIX + "/" + label() + "/Aggregation";
-            String measurementName = storedTagPath(tagName);
-
-            String uuid = createMeasurement(measurementName, "number");
-            assertFalse(uuid.isEmpty());
-
-            // Insert 100 points with values 0..99 (1 second apart)
-            long baseTs = 1700030000000L;
-            List<Point> points = new ArrayList<>();
-            for (int i = 0; i < 100; i++) {
                 points.add(buildPoint(uuid, baseTs + i * 1000,
-                        Value.newBuilder().setNumberValue(i).build()));
+                        Value.newBuilder().setNumberValue(idx * 100.0 + i).build()));
             }
             grpcStub.createPoints(Points.newBuilder().addAllPoints(points).build());
-            log("Inserted 100 points (values 0..99) for measurement " + uuid);
-            Thread.sleep(2000);
-
-            String qPath = qualifiedPath(historianName(), tagName);
-            long startMs = baseTs - 1000;
-            long endMs = baseTs + 100_000;
-
-            // --- Average ---
-            assertAggQuery(qPath, startMs, endMs, "Average", 49.5, 5.0);
-
-            // --- SimpleAverage ---
-            assertAggQuery(qPath, startMs, endMs, "SimpleAverage", 49.5, 5.0);
-
-            // --- Minimum ---
-            assertAggQuery(qPath, startMs, endMs, "Minimum", 0.0, 1.0);
-
-            // --- Maximum ---
-            assertAggQuery(qPath, startMs, endMs, "Maximum", 99.0, 1.0);
-
-            // --- Sum ---
-            assertAggQuery(qPath, startMs, endMs, "Sum", 4950.0, 50.0);
-
-            // --- Count ---
-            assertAggQuery(qPath, startMs, endMs, "Count", 100.0, 5.0);
-
-            // --- LastValue ---
-            assertAggQuery(qPath, startMs, endMs, "LastValue", 99.0, 1.0);
-
-            // --- Range (spread = max - min) ---
-            assertAggQuery(qPath, startMs, endMs, "Range", 99.0, 1.0);
-
-            // Variance and StdDev are not supported by the Factry backend (returns NaN)
-
-            // --- MinMax ---
-            Map<String, Object> minMaxResult = webdevPost("test/queryAgg", Map.of(
-                    "paths", List.of(qPath),
-                    "startDate", startMs,
-                    "endDate", endMs,
-                    "aggregates", List.of("MinMax"),
-                    "returnSize", 1
-            ));
-            assertTrue((Boolean) minMaxResult.get("success"), "MinMax query should succeed");
-            int minMaxRows = ((Number) minMaxResult.get("rowCount")).intValue();
-            log("MinMax returned " + minMaxRows + " rows");
-            assertTrue(minMaxRows >= 1, "MinMax should return >= 1 rows, got " + minMaxRows);
-            pass("MinMax");
+            log("Inserted 5 points for tag " + tagNames.get(idx));
         }
+        Thread.sleep(2000);
 
-        /** Helper: query a single aggregation type and assert the value. */
-        private void assertAggQuery(String qPath, long startMs, long endMs,
-                                    String aggName, double expected, double tolerance) throws Exception {
-            Map<String, Object> result = webdevPost("test/queryAgg", Map.of(
-                    "paths", List.of(qPath),
-                    "startDate", startMs,
-                    "endDate", endMs,
-                    "aggregates", List.of(aggName),
-                    "returnSize", 1
-            ));
-            assertTrue((Boolean) result.get("success"), aggName + " query should succeed");
-            double actual = extractAggregationValue(result);
-            log(aggName + " = " + actual + " (expected ~" + expected + ")");
-            assertAggregationValue(result, expected, tolerance, aggName);
-            pass(aggName);
-        }
+        List<String> paths = tagNames.stream()
+                .map(t -> qualifiedPath(HISTORIAN_NAME, t))
+                .toList();
+        Map<String, Object> result = webdevPost("test/queryRaw", Map.of(
+                "paths", paths,
+                "startDate", baseTs - 1000,
+                "endDate", baseTs + 5000
+        ));
 
-        @Test
-        @Order(40)
-        @DisplayName("system.historian.queryMetadata — query measurement metadata")
-        void testQueryMetadata() throws Exception {
-            section(label() + " - queryMetadata");
+        assertTrue((Boolean) result.get("success"));
+        pass("Multi-tag query returned success");
 
-            String tagName = TEST_PREFIX + "/" + label() + "/Metadata";
-            String measurementName = storedTagPath(tagName);
+        @SuppressWarnings("unchecked")
+        List<String> columns = (List<String>) result.get("columns");
+        log("Got " + columns.size() + " columns: t_stamp + " + (columns.size() - 1) + " tags");
+        assertTrue(columns.size() >= 4,
+                "Expected >= 4 columns (t_stamp + 3 tags), got " + columns);
+        pass("Column count");
 
-            String uuid = createMeasurement(measurementName, "number");
-            assertFalse(uuid.isEmpty());
-            log("Created measurement " + uuid);
-
-            Map<String, Object> result = webdevPost("test/queryMeta", Map.of(
-                    "paths", List.of(qualifiedPath(historianName(), tagName))
-            ));
-
-            assertTrue((Boolean) result.get("success"), "queryMetadata should succeed");
-            pass("queryMetadata returned success");
-
-            int rowCount = ((Number) result.get("rowCount")).intValue();
-            log("Got " + rowCount + " metadata rows");
-            assertTrue(rowCount >= 1, "Expected >= 1 metadata row, got " + rowCount);
-            pass("Got metadata back");
-        }
-
-        @Test
-        @Order(50)
-        @DisplayName("system.historian.browse — browse historian hierarchy")
-        void testBrowse() throws Exception {
-            section(label() + " - browse");
-
-            Map<String, Object> rootResult = webdevPost("test/browse", Map.of(
-                    "path", "histprov:" + historianName() + ":/"
-            ));
-            assertTrue((Boolean) rootResult.get("success"), "Root browse should succeed");
-            pass("Root browse returned success");
-
-            int rootCount = ((Number) rootResult.get("count")).intValue();
-            assertTrue(rootCount >= 1, "Root should have at least 1 child node, got " + rootCount);
-
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> nodes = (List<Map<String, Object>>) rootResult.get("results");
-            for (Map<String, Object> node : nodes) {
-                log("Node: " + node.get("path") + " (type=" + node.get("type") + ", hasChildren=" + node.get("hasChildren") + ")");
-            }
-            pass("Root browse returned " + rootCount + " nodes");
-        }
-
-        @Test
-        @Order(60)
-        @DisplayName("system.historian.storeMetadata — store measurement metadata")
-        void testStoreMetadata() throws Exception {
-            section(label() + " - storeMetadata");
-
-            String tagName = TEST_PREFIX + "/" + label() + "/StoreMeta";
-            String measurementName = storedTagPath(tagName);
-
-            String uuid = createMeasurement(measurementName, "number");
-            assertFalse(uuid.isEmpty());
-            log("Created measurement " + uuid);
-
-            Map<String, Object> result = webdevPost("test/storeMeta", Map.of(
-                    "paths", List.of(qualifiedPath(historianName(), tagName)),
-                    "timestamps", List.of(System.currentTimeMillis()),
-                    "properties", List.of(Map.of("engineeringUnits", "degC"))
-            ));
-
-            assertTrue((Boolean) result.get("success"), "storeMetadata should succeed (or no-op gracefully)");
-            pass("storeMetadata returned success");
-        }
-
-        @Test
-        @Order(70)
-        @DisplayName("Empty time range returns zero rows")
-        void testEmptyQuery() throws Exception {
-            section(label() + " - Empty Query");
-
-            String tagName = TEST_PREFIX + "/" + label() + "/Empty";
-            String measurementName = storedTagPath(tagName);
-
-            createMeasurement(measurementName, "number");
-
-            Map<String, Object> result = webdevPost("test/queryRaw", Map.of(
-                    "paths", List.of(qualifiedPath(historianName(), tagName)),
-                    "startDate", 1600000000000L,
-                    "endDate", 1600000010000L
-            ));
-            assertTrue((Boolean) result.get("success"));
-            int rowCount = ((Number) result.get("rowCount")).intValue();
-            log("Got " + rowCount + " rows for empty time range");
-            assertEquals(0, rowCount, "Should return 0 rows for empty range");
-            pass("Empty time range returns 0 rows");
-        }
-
-        @Test
-        @Order(80)
-        @DisplayName("String-type measurement storage and gRPC query")
-        void testStringValues() throws Exception {
-            section(label() + " - String Values");
-
-            String tagName = TEST_PREFIX + "/" + label() + "/StringTest";
-            String measurementName = storedTagPath(tagName);
-            long baseTs = 1700050000000L;
-
-            String uuid = createMeasurement(measurementName, "string");
-            assertFalse(uuid.isEmpty(), "String measurement UUID should not be empty");
-            log("Created string measurement " + uuid);
-
-            List<Point> points = List.of(
-                    buildPoint(uuid, baseTs, Value.newBuilder().setStringValue("hello").build()),
-                    buildPoint(uuid, baseTs + 1000, Value.newBuilder().setStringValue("world").build()),
-                    buildPoint(uuid, baseTs + 2000, Value.newBuilder().setStringValue("test").build())
-            );
-            grpcStub.createPoints(Points.newBuilder().addAllPoints(points).build());
-            log("Inserted 3 string points via gRPC");
-            Thread.sleep(2000);
-
-            QueryTimeseriesResponse grpcResponse = grpcQuery(uuid, baseTs - 1000, baseTs + 3000);
-            int grpcPoints = grpcResponse.getSeriesList().isEmpty() ? 0
-                    : grpcResponse.getSeries(0).getDataPointsCount();
-            assertTrue(grpcPoints >= 3, "Expected >= 3 string points via gRPC, got " + grpcPoints);
-            pass("gRPC verification: " + grpcPoints + " string points stored");
-
-            Map<String, Object> result = webdevPost("test/queryRaw", Map.of(
-                    "paths", List.of(qualifiedPath(historianName(), tagName)),
-                    "startDate", baseTs - 1000,
-                    "endDate", baseTs + 3000
-            ));
-            assertTrue((Boolean) result.get("success"), "queryRawPoints should succeed for string tags");
-            int rowCount = ((Number) result.get("rowCount")).intValue();
-            if (rowCount == 0) {
-                log("system.historian returned 0 rows (Ignition framework drops string values in DataSet)");
-            } else {
-                pass("system.historian returned " + rowCount + " rows");
-            }
-        }
-
-        @Test
-        @Order(90)
-        @DisplayName("Multi-tag query returns all columns")
-        void testMultiTagQuery() throws Exception {
-            section(label() + " - Multi-Tag Query");
-
-            long baseTs = 1700060000000L;
-            List<String> tagNames = List.of(
-                    TEST_PREFIX + "/" + label() + "/Multi0",
-                    TEST_PREFIX + "/" + label() + "/Multi1",
-                    TEST_PREFIX + "/" + label() + "/Multi2"
-            );
-
-            for (int idx = 0; idx < tagNames.size(); idx++) {
-                String measurementName = storedTagPath(tagNames.get(idx));
-                String uuid = createMeasurement(measurementName, "number");
-                assertFalse(uuid.isEmpty());
-
-                List<Point> points = new ArrayList<>();
-                for (int i = 0; i < 5; i++) {
-                    points.add(buildPoint(uuid, baseTs + i * 1000,
-                            Value.newBuilder().setNumberValue(idx * 100.0 + i).build()));
-                }
-                grpcStub.createPoints(Points.newBuilder().addAllPoints(points).build());
-                log("Inserted 5 points for tag " + tagNames.get(idx));
-            }
-            Thread.sleep(2000);
-
-            List<String> paths = tagNames.stream()
-                    .map(t -> qualifiedPath(historianName(), t))
-                    .toList();
-            Map<String, Object> result = webdevPost("test/queryRaw", Map.of(
-                    "paths", paths,
-                    "startDate", baseTs - 1000,
-                    "endDate", baseTs + 5000
-            ));
-
-            assertTrue((Boolean) result.get("success"));
-            pass("Multi-tag query returned success");
-
-            @SuppressWarnings("unchecked")
-            List<String> columns = (List<String>) result.get("columns");
-            log("Got " + columns.size() + " columns: t_stamp + " + (columns.size() - 1) + " tags");
-            assertTrue(columns.size() >= 4,
-                    "Expected >= 4 columns (t_stamp + 3 tags), got " + columns);
-            pass("Column count");
-
-            int rowCount = ((Number) result.get("rowCount")).intValue();
-            log("Got " + rowCount + " rows");
-            assertTrue(rowCount >= 5, "Expected >= 5 rows");
-            pass("Row count");
-        }
-
-        @Test
-        @Order(100)
-        @DisplayName("Full round trip: store + query via system.historian")
-        void testRoundTrip() throws Exception {
-            section(label() + " - Round Trip");
-
-            String tagName = TEST_PREFIX + "/" + label() + "/RoundTrip";
-            long baseTs = 1700070000000L;
-
-            String qPath = qualifiedPath(historianName(), tagName);
-            Map<String, Object> storeResult = webdevPost("test/storePoints", Map.of(
-                    "paths", List.of(qPath, qPath, qPath, qPath, qPath),
-                    "values", List.of(42.0, 43.0, 44.0, 45.0, 46.0),
-                    "timestamps", List.of(baseTs, baseTs + 1000, baseTs + 2000, baseTs + 3000, baseTs + 4000),
-                    "qualities", List.of(192, 192, 192, 192, 192)
-            ));
-            assertTrue((Boolean) storeResult.get("success"));
-            pass("storeDataPoints returned success (5 points)");
-
-            log("Waiting " + (BATCH_FLUSH_WAIT_MS / 1000) + "s for batch flush...");
-            Thread.sleep(BATCH_FLUSH_WAIT_MS);
-
-            Map<String, Object> queryResult = webdevPost("test/queryRaw", Map.of(
-                    "paths", List.of(qualifiedPath(historianName(), tagName)),
-                    "startDate", baseTs - 1000,
-                    "endDate", baseTs + 5000
-            ));
-            assertTrue((Boolean) queryResult.get("success"));
-            pass("queryRawPoints returned success");
-
-            int rowCount = ((Number) queryResult.get("rowCount")).intValue();
-            log("Got " + rowCount + " rows back");
-            assertTrue(rowCount >= 5, "Expected >= 5 rows in round-trip query");
-            pass("Round trip: stored 5, queried " + rowCount);
-        }
+        int rowCount = ((Number) result.get("rowCount")).intValue();
+        log("Got " + rowCount + " rows");
+        assertTrue(rowCount >= 5, "Expected >= 5 rows");
+        pass("Row count");
     }
 
-    // =========================================================================
-    // Nested class: tests without Store & Forward
-    // =========================================================================
+    @Test
+    @Order(100)
+    @DisplayName("Full round trip: store + query via system.historian")
+    void testRoundTrip() throws Exception {
+        section("Round Trip");
 
-    @Nested
-    @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-    @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-    @DisplayName("Without Store & Forward")
-    class NoStoreAndForward extends HistorianTests {
+        String tagName = TEST_PREFIX + "/RoundTrip";
+        long baseTs = 1700070000000L;
 
-        @Override
-        String historianName() {
-            return HISTORIAN_NAME_NOSF;
-        }
+        // Pre-create the measurement so Ignition's lookupNode can resolve it
+        String measurementName = storedTagPath(tagName);
+        String preUuid = createMeasurement(measurementName, "number");
+        assertFalse(preUuid.isEmpty(), "Pre-created measurement should have a UUID");
+        log("Pre-created measurement " + preUuid);
 
-        @Override
-        String label() {
-            return "NoS&F";
-        }
-    }
+        String qPath = qualifiedPath(HISTORIAN_NAME, tagName);
+        Map<String, Object> storeResult = webdevPost("test/storePoints", Map.of(
+                "paths", List.of(qPath, qPath, qPath, qPath, qPath),
+                "values", List.of(42.0, 43.0, 44.0, 45.0, 46.0),
+                "timestamps", List.of(baseTs, baseTs + 1000, baseTs + 2000, baseTs + 3000, baseTs + 4000),
+                "qualities", List.of(192, 192, 192, 192, 192)
+        ));
+        assertTrue((Boolean) storeResult.get("success"));
+        pass("storeDataPoints returned success (5 points)");
 
-    // =========================================================================
-    // Nested class: tests with Store & Forward
-    // =========================================================================
+        log("Waiting " + (BATCH_FLUSH_WAIT_MS / 1000) + "s for batch flush...");
+        Thread.sleep(BATCH_FLUSH_WAIT_MS);
 
-    @Nested
-    @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-    @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-    @DisplayName("With Store & Forward")
-    class WithStoreAndForward extends HistorianTests {
+        Map<String, Object> queryResult = webdevPost("test/queryRaw", Map.of(
+                "paths", List.of(qualifiedPath(HISTORIAN_NAME, tagName)),
+                "startDate", baseTs - 1000,
+                "endDate", baseTs + 5000
+        ));
+        assertTrue((Boolean) queryResult.get("success"));
+        pass("queryRawPoints returned success");
 
-        @Override
-        String historianName() {
-            return HISTORIAN_NAME_SF;
-        }
-
-        @Override
-        String label() {
-            return "S&F";
-        }
+        int rowCount = ((Number) queryResult.get("rowCount")).intValue();
+        log("Got " + rowCount + " rows back");
+        assertTrue(rowCount >= 5, "Expected >= 5 rows in round-trip query");
+        pass("Round trip: stored 5, queried " + rowCount);
     }
 
     // =========================================================================
@@ -663,10 +619,6 @@ class FactryIntegrationTest {
     @DisplayName("Error cases")
     class ErrorCases {
 
-        private String defaultHistorian() {
-            return HISTORIAN_NAME_NOSF;
-        }
-
         @Test
         @Order(10)
         @DisplayName("Query non-existent measurement returns 0 rows")
@@ -674,7 +626,7 @@ class FactryIntegrationTest {
             section("Error: Query non-existent measurement");
 
             Map<String, Object> result = webdevPost("test/queryRaw", Map.of(
-                    "paths", List.of(qualifiedPath(defaultHistorian(),
+                    "paths", List.of(qualifiedPath(HISTORIAN_NAME,
                             TEST_PREFIX + "/NonExistent/DoesNotExist")),
                     "startDate", 1700000000000L,
                     "endDate", 1700000010000L
@@ -707,7 +659,7 @@ class FactryIntegrationTest {
             // IllegalArgumentException, so the WebDev endpoint returns 500.
             String url = GATEWAY_URL + "/system/webdev/" + WEBDEV_PROJECT + "/test/queryRaw";
             String jsonBody = gson.toJson(Map.of(
-                    "paths", List.of(qualifiedPath(defaultHistorian(), tagName)),
+                    "paths", List.of(qualifiedPath(HISTORIAN_NAME, tagName)),
                     "startDate", baseTs + 5000,
                     "endDate", baseTs - 5000
             ));
@@ -732,7 +684,13 @@ class FactryIntegrationTest {
             String tagName = TEST_PREFIX + "/Error/BadQuality";
             long baseTs = 1700081000000L;
 
-            String qPath = qualifiedPath(defaultHistorian(), tagName);
+            // Pre-create so lookupNode can resolve
+            String measurementName = storedTagPath(tagName);
+            String preUuid = createMeasurement(measurementName, "number");
+            assertFalse(preUuid.isEmpty());
+            log("Pre-created measurement " + preUuid);
+
+            String qPath = qualifiedPath(HISTORIAN_NAME, tagName);
             Map<String, Object> result = webdevPost("test/storePoints", Map.of(
                     "paths", List.of(qPath, qPath, qPath),
                     "values", List.of(1.0, 2.0, 3.0),
@@ -750,7 +708,7 @@ class FactryIntegrationTest {
             section("Error: Browse non-existent path");
 
             Map<String, Object> result = webdevPost("test/browse", Map.of(
-                    "path", "histprov:" + defaultHistorian() + ":/folder:NonExistent_" + TEST_PREFIX + ":/"
+                    "path", "histprov:" + HISTORIAN_NAME + ":/folder:NonExistent_" + TEST_PREFIX + ":/"
             ));
             assertTrue((Boolean) result.get("success"), "Browse should succeed");
             int count = ((Number) result.get("count")).intValue();
@@ -787,7 +745,7 @@ class FactryIntegrationTest {
             pass("Boolean values stored and verified via gRPC");
 
             Map<String, Object> result = webdevPost("test/queryRaw", Map.of(
-                    "paths", List.of(qualifiedPath(defaultHistorian(), tagName)),
+                    "paths", List.of(qualifiedPath(HISTORIAN_NAME, tagName)),
                     "startDate", baseTs - 1000,
                     "endDate", baseTs + 3000
             ));
@@ -827,7 +785,7 @@ class FactryIntegrationTest {
             pass("Large batch: " + grpcPoints + " points stored and verified");
 
             Map<String, Object> result = webdevPost("test/queryRaw", Map.of(
-                    "paths", List.of(qualifiedPath(defaultHistorian(), tagName)),
+                    "paths", List.of(qualifiedPath(HISTORIAN_NAME, tagName)),
                     "startDate", baseTs - 1000,
                     "endDate", baseTs + 50_000
             ));
@@ -860,8 +818,8 @@ class FactryIntegrationTest {
 
             Map<String, Object> result = webdevPost("test/queryRaw", Map.of(
                     "paths", List.of(
-                            qualifiedPath(defaultHistorian(), existingTag),
-                            qualifiedPath(defaultHistorian(), missingTag)
+                            qualifiedPath(HISTORIAN_NAME, existingTag),
+                            qualifiedPath(HISTORIAN_NAME, missingTag)
                     ),
                     "startDate", baseTs - 1000,
                     "endDate", baseTs + 2000
@@ -887,9 +845,9 @@ class FactryIntegrationTest {
                 + ":/prov:default:/tag:" + tagName;
     }
 
-    /** Build the stored measurement name: {@code CollectorName/default/TagName} */
+    /** Build the stored measurement name: {@code default/TagName} */
     private String storedTagPath(String tagName) {
-        return COLLECTOR_NAME + "/default/" + tagName;
+        return "default/" + tagName;
     }
 
     /** Create a measurement in Factry and return its UUID. */

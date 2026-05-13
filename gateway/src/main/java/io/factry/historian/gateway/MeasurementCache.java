@@ -13,6 +13,7 @@ import io.factry.historian.proto.GetAssetPropertiesRequest;
 import io.factry.historian.proto.GetAssetsRequest;
 import io.factry.historian.proto.GetMeasurementsByFilterRequest;
 import io.factry.historian.proto.Measurement;
+import io.factry.historian.proto.MeasurementRequest;
 import io.factry.historian.proto.Measurements;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -66,7 +67,7 @@ public class MeasurementCache {
             tagPathToUUID.putAll(freshPaths);
             uuidToMeasurement.clear();
             uuidToMeasurement.putAll(freshMeasurements);
-            logger.debug("Measurement cache refreshed, {} active of {} total from Factry, {} in cache",
+            logger.info("Measurement cache refreshed, {} active of {} total from Factry, {} in cache",
                     freshPaths.size(), total, tagPathToUUID.size());
 
             // Build measurement → collector name mapping

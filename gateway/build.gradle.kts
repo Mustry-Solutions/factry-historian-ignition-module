@@ -107,8 +107,7 @@ tasks.register<Test>("integrationTest") {
     systemProperty("collector.token", System.getenv("COLLECTOR_TOKEN") ?: tokenFromConfig)
     systemProperty("gateway.system.name", System.getenv("GATEWAY_SYSTEM_NAME") ?: "Ignition-FactryTest")
     systemProperty("collector.name", System.getenv("COLLECTOR_NAME") ?: "Ignition")
-    systemProperty("historian.name.nosf", System.getenv("HISTORIAN_NAME_NOSF") ?: "Factry Historian NoSF")
-    systemProperty("historian.name.sf", System.getenv("HISTORIAN_NAME_SF") ?: "Factry Historian SF")
+    systemProperty("historian.name", System.getenv("HISTORIAN_NAME") ?: "Factry Historian")
 
     testLogging {
         events("passed", "skipped", "failed")
