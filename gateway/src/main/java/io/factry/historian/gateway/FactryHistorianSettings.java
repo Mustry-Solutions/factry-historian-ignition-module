@@ -131,6 +131,11 @@ public class FactryHistorianSettings implements HistorianSettings {
         String tokenHost = JwtTokenParser.getHost(payload)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Invalid token: missing host (aud claim). Ensure this is a Factry collector token."));
+        // TODO: remove this hack once Factry supports configuring the aud hostname
+        if ("localhost".equals(tokenHost)) {
+            logger.warn("Token aud contains 'localhost', overriding with 'historian' for Docker networking");
+            tokenHost = "historian";
+        }
         if (DEFAULT_GRPC_HOST.equals(this.grpcHost)) {
             this.grpcHost = tokenHost;
         } else {
