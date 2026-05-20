@@ -73,6 +73,7 @@ message Collector {
   bool updateAvailable=10;
   string updateToVersion=11;
   google.protobuf.Struct state = 12;
+  string name = 13;
 }
 
 message RegisterCollectorSchema {
@@ -110,6 +111,7 @@ message Measurement {
   google.protobuf.Struct settings = 6;
   string datatype = 7;
   EngineeringSpecs engineeringSpecs = 8;
+  string collectorUUID = 9;
 }
 
 message EngineeringSpecs {
@@ -127,6 +129,7 @@ message MeasurementRequest {
 
 message Measurements {
   repeated Measurement measurements = 1;
+  optional int64 total = 2;
 }
 
 message Log {
@@ -338,6 +341,12 @@ message AssetProperties {
   repeated AssetProperty assetProperties = 1;
 }
 
+message Pagination {
+  optional int64 limit = 1;
+  optional int64 offset = 2;
+  optional int64 page = 3;
+}
+
 message GetMeasurementsByFilterRequest {
   optional string keyword = 1;
   optional string quality = 2;
@@ -349,6 +358,7 @@ message GetMeasurementsByFilterRequest {
   repeated string datatypes = 8;
   optional bool excludeCalculations = 9;
   optional bool includeDependencies = 10;
+  optional Pagination pagination = 11;
 }
 
 message GetCollectorsRequest {
