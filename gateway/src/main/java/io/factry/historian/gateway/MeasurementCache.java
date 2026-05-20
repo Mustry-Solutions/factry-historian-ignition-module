@@ -15,6 +15,7 @@ import io.factry.historian.proto.GetMeasurementsByFilterRequest;
 import io.factry.historian.proto.Measurement;
 import io.factry.historian.proto.MeasurementRequest;
 import io.factry.historian.proto.Measurements;
+import io.factry.historian.proto.Pagination;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,50 +46,90 @@ public class MeasurementCache {
     /** Metadata properties cached from doStoreMetadata, applied when creating measurements. */
     private final ConcurrentHashMap<String, Map<String, String>> pendingMetadata = new ConcurrentHashMap<>();
 
+    private static final int PAGE_SIZE = 500;
+
     public void refresh(FactryGrpcClient grpcClient) {
         try {
-            GetMeasurementsByFilterRequest request = GetMeasurementsByFilterRequest.newBuilder().build();
-            Measurements response = grpcClient.getMeasurementsByFilter(request);
-
+            // Fetch all measurements using pagination
             Map<String, String> freshPaths = new HashMap<>();
             Map<String, Measurement> freshMeasurements = new HashMap<>();
-            int total = 0;
-            for (Measurement m : response.getMeasurementsList()) {
-                total++;
-                if ("active".equalsIgnoreCase(m.getStatus())) {
-                    freshPaths.put(m.getName(), m.getUuid());
-                    freshMeasurements.put(m.getUuid(), m);
-                } else {
-                    logger.debug("Skipping measurement '{}' with status '{}'", m.getName(), m.getStatus());
+            long offset = 0;
+            long serverTotal = Long.MAX_VALUE;
+
+            while (offset < serverTotal) {
+                GetMeasurementsByFilterRequest request = GetMeasurementsByFilterRequest.newBuilder()
+                        .setPagination(Pagination.newBuilder()
+                                .setLimit(PAGE_SIZE)
+                                .setOffset(offset)
+                                .build())
+                        .build();
+                Measurements response = grpcClient.getMeasurementsByFilter(request);
+
+                if (response.hasTotal()) {
+                    serverTotal = response.getTotal();
                 }
+
+                int pageCount = response.getMeasurementsCount();
+                if (pageCount == 0) {
+                    break;
+                }
+
+                for (Measurement m : response.getMeasurementsList()) {
+                    if ("active".equalsIgnoreCase(m.getStatus())) {
+                        freshPaths.put(m.getName(), m.getUuid());
+                        freshMeasurements.put(m.getUuid(), m);
+                    } else {
+                        logger.debug("Skipping measurement '{}' with status '{}'", m.getName(), m.getStatus());
+                    }
+                }
+                offset += pageCount;
             }
+
             // Replace maps entirely so deleted measurements don't linger
             tagPathToUUID.clear();
             tagPathToUUID.putAll(freshPaths);
             uuidToMeasurement.clear();
             uuidToMeasurement.putAll(freshMeasurements);
-            logger.info("Measurement cache refreshed, {} active of {} total from Factry, {} in cache",
-                    freshPaths.size(), total, tagPathToUUID.size());
+            logger.info("Measurement cache refreshed, {} active of {} total from Factry",
+                    freshPaths.size(), serverTotal == Long.MAX_VALUE ? offset : serverTotal);
 
             // Build measurement → collector name mapping
             try {
                 var collectors = grpcClient.getCollectors();
-                Map<String, String> freshCollectorMap = new HashMap<>();
+                Map<String, String> collectorUUIDToName = new HashMap<>();
                 for (Collector c : collectors.getCollectorsList()) {
-                    GetMeasurementsByFilterRequest collectorFilter = GetMeasurementsByFilterRequest.newBuilder()
-                            .addCollectorUUIDs(c.getUuid())
-                            .build();
-                    Measurements collectorMeasurements = grpcClient.getMeasurementsByFilter(collectorFilter);
-                    // Proto has no 'name' field — use short UUID prefix as fallback
-                    String collectorName = c.getUuid().length() >= 8
-                            ? c.getUuid().substring(0, 8)
-                            : c.getUuid();
-                    logger.debug("Collector: uuid={}, type={}, desc='{}', displayName='{}'",
-                            c.getUuid(), c.getType(), c.getDescription(), collectorName);
-                    for (Measurement cm : collectorMeasurements.getMeasurementsList()) {
-                        freshCollectorMap.put(cm.getUuid(), collectorName);
+                    String collectorName = !c.getName().isEmpty() ? c.getName() : c.getUuid();
+                    collectorUUIDToName.put(c.getUuid(), collectorName);
+                }
+
+                // Try using Measurement.collectorUUID first (new field)
+                Map<String, String> freshCollectorMap = new HashMap<>();
+                boolean hasCollectorUUID = false;
+                for (Measurement m : freshMeasurements.values()) {
+                    String collectorUUID = m.getCollectorUUID();
+                    if (!collectorUUID.isEmpty()) {
+                        hasCollectorUUID = true;
+                        String collectorName = collectorUUIDToName.getOrDefault(collectorUUID, collectorUUID);
+                        freshCollectorMap.put(m.getUuid(), collectorName);
                     }
                 }
+
+                // Fallback: query per collector if collectorUUID field is not populated
+                if (!hasCollectorUUID) {
+                    logger.debug("Measurement.collectorUUID not populated, falling back to per-collector queries");
+                    for (Collector c : collectors.getCollectorsList()) {
+                        GetMeasurementsByFilterRequest collectorFilter = GetMeasurementsByFilterRequest.newBuilder()
+                                .addCollectorUUIDs(c.getUuid())
+                                .setPagination(Pagination.newBuilder().setLimit(PAGE_SIZE).build())
+                                .build();
+                        Measurements collectorMeasurements = grpcClient.getMeasurementsByFilter(collectorFilter);
+                        String collectorName = collectorUUIDToName.get(c.getUuid());
+                        for (Measurement cm : collectorMeasurements.getMeasurementsList()) {
+                            freshCollectorMap.put(cm.getUuid(), collectorName);
+                        }
+                    }
+                }
+
                 measurementToCollectorName.clear();
                 measurementToCollectorName.putAll(freshCollectorMap);
                 logger.debug("Collector mapping refreshed: {} measurements mapped to collectors", freshCollectorMap.size());

@@ -833,16 +833,19 @@ class FactryIntegrationTest {
 
         @Test
         @Order(80)
-        @Disabled("Factry server caps getMeasurementsByFilter at 100 — waiting for server-side fix")
         @DisplayName("GetMeasurementsByFilter returns more than 100 measurements")
         void testGetMeasurementsByFilterNoLimit() throws Exception {
             section("Error: GetMeasurementsByFilter pagination limit");
 
-            // Count existing measurements
-            int existingCount = grpcStub.getMeasurementsByFilter(
-                    GetMeasurementsByFilterRequest.newBuilder().build()
-            ).getMeasurementsCount();
-            log("Existing measurements via getMeasurementsByFilter: " + existingCount);
+            // Count existing measurements using pagination with a high limit
+            Measurements initial = grpcStub.getMeasurementsByFilter(
+                    GetMeasurementsByFilterRequest.newBuilder()
+                            .setPagination(Pagination.newBuilder().setLimit(1000).build())
+                            .build()
+            );
+            int existingCount = initial.getMeasurementsCount();
+            log("Existing measurements via getMeasurementsByFilter: " + existingCount
+                    + (initial.hasTotal() ? " (total: " + initial.getTotal() + ")" : ""));
 
             // Create enough to exceed 100 total
             int toCreate = Math.max(0, 101 - existingCount);
@@ -863,15 +866,61 @@ class FactryIntegrationTest {
                 Thread.sleep(3000);
             }
 
-            // Query again and verify we get more than 100
-            int afterCount = grpcStub.getMeasurementsByFilter(
-                    GetMeasurementsByFilterRequest.newBuilder().build()
-            ).getMeasurementsCount();
-            log("Measurements via getMeasurementsByFilter after creation: " + afterCount);
+            // Query again with pagination and verify we get more than 100
+            Measurements after = grpcStub.getMeasurementsByFilter(
+                    GetMeasurementsByFilterRequest.newBuilder()
+                            .setPagination(Pagination.newBuilder().setLimit(1000).build())
+                            .build()
+            );
+            int afterCount = after.getMeasurementsCount();
+            log("Measurements via getMeasurementsByFilter after creation: " + afterCount
+                    + (after.hasTotal() ? " (total: " + after.getTotal() + ")" : ""));
 
             assertTrue(afterCount > 100,
                     "getMeasurementsByFilter should return more than 100 measurements, got " + afterCount);
             pass("getMeasurementsByFilter returned " + afterCount + " measurements (no 100-record limit)");
+        }
+
+        @Test
+        @Order(81)
+        @DisplayName("Collector.name and Measurement.collectorUUID are populated")
+        void testCollectorNameAndMeasurementCollectorUUID() {
+            section("Proto: Collector.name and Measurement.collectorUUID");
+
+            // Verify Collector has a name
+            Collectors collectors = grpcStub.getCollectors(GetCollectorsRequest.newBuilder().build());
+            assertFalse(collectors.getCollectorsList().isEmpty(), "Expected at least one collector");
+            for (Collector c : collectors.getCollectorsList()) {
+                log("Collector: uuid=" + c.getUuid() + ", name='" + c.getName() + "'");
+                assertFalse(c.getName().isEmpty(),
+                        "Collector name should not be empty for uuid=" + c.getUuid());
+            }
+            pass("All collectors have a name");
+
+            // Verify Measurement.collectorUUID (new field, may not be populated in all server versions)
+            Measurements measurements = grpcStub.getMeasurementsByFilter(
+                    GetMeasurementsByFilterRequest.newBuilder()
+                            .addCollectorUUIDs(COLLECTOR_UUID)
+                            .setPagination(Pagination.newBuilder().setLimit(10).build())
+                            .build()
+            );
+            assertFalse(measurements.getMeasurementsList().isEmpty(),
+                    "Expected at least one measurement for collector " + COLLECTOR_UUID);
+            int withCollectorUUID = 0;
+            for (Measurement m : measurements.getMeasurementsList()) {
+                log("Measurement: uuid=" + m.getUuid() + ", name='" + m.getName()
+                        + "', collectorUUID='" + m.getCollectorUUID() + "'");
+                if (!m.getCollectorUUID().isEmpty()) {
+                    withCollectorUUID++;
+                }
+            }
+            if (withCollectorUUID == 0) {
+                log("WARNING: Measurement.collectorUUID not populated by this server version — "
+                        + "falling back to per-collector queries for collector name mapping");
+            } else {
+                pass(withCollectorUUID + " of " + measurements.getMeasurementsCount()
+                        + " measurements have collectorUUID");
+            }
         }
     }
 
