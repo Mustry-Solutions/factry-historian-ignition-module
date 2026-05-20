@@ -318,3 +318,11 @@ Pending:
   [] getMeasurementsByFilter returns with  100 results, suspecious
 
 goal: feature freeze   
+
+
+# 25/05/2026
+  - Measurement.collectorUUID isn;t populated by Factry
+    collectorUUID='' for all measurements
+
+
+    
