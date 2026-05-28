@@ -109,8 +109,13 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
             logger.warn("Failed to register collector with Factry: " + e.getMessage());
         }
 
-        measurementCache.refresh(grpcClient);
-        logger.info("Measurement cache pre-populated with {} entries", measurementCache.size());
+        try {
+            measurementCache.refresh(grpcClient);
+            logger.info("Measurement cache pre-populated with {} entries", measurementCache.size());
+        } catch (Exception e) {
+            logger.warn("Initial measurement cache refresh failed (Factry may still be starting): {}. " +
+                    "Will retry via scheduled refresh.", e.getMessage());
+        }
 
         // Set up Store & Forward — always enabled.
         // The S&F engine name matches the historian profile name because
