@@ -267,7 +267,6 @@ Follow-ups:
 ------
 # 8/05/2026
  
-
 Changes:
   + Gabor: add suggested values for batch_size 10 and batch interval 5000 on the **config**
   + I added an **numeric array tag** to the tag browser and populated it using the script console, it appeared in historian but as a separate measurement for each index (see screenshot array-test.png)
@@ -319,10 +318,19 @@ Pending:
 
 goal: feature freeze   
 
+# 28/05/2026
 
-# 25/05/2026
+Done:
+  [+] Collector names (we use collector's uid )
+  [+] pagination for getMeasurementsByFilter
+  [+] test with realfakedata
+
+Questions:
+  
   - Measurement.collectorUUID isn;t populated by Factry
     collectorUUID='' for all measurements
-
+  - licence html  < add placeholder
+  
+  - remove 'hack' to use historian when the host is localhost
 
     

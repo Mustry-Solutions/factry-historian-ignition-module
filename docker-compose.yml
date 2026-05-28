@@ -81,6 +81,7 @@ services:
       HISTORIAN_INFLUXDB_PASSWORD: password
       AUTO_MIGRATE: "true"
       JWT_SECRET: "factry-dev-secret-do-not-use-in-production"
+      OPENAPI_VALIDATION_ENABLED: "false"
     depends_on:
       postgres:
         condition: service_healthy

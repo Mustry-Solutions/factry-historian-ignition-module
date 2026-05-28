@@ -1,6 +1,6 @@
 
 # TODO
-  [] manual test
+  [+] manual test
       getting realfakedata from here
       https://docs.factry.io/installing-factry-historian-using-docker-for-testing-purposes
 

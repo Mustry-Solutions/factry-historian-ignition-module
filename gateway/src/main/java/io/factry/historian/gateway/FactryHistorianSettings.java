@@ -125,17 +125,9 @@ public class FactryHistorianSettings implements HistorianSettings {
                         "Invalid token: missing collector name. Ensure this is a Factry collector token."));
 
         // Only apply host/port from token if config still has defaults.
-        // This allows the config to override the token for Docker environments
-        // where the token's aud claim (e.g. "http://localhost") doesn't match
-        // the actual Docker service name (e.g. "historian").
         String tokenHost = JwtTokenParser.getHost(payload)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Invalid token: missing host (aud claim). Ensure this is a Factry collector token."));
-        // TODO: remove this hack once Factry supports configuring the aud hostname
-        if ("localhost".equals(tokenHost)) {
-            logger.warn("Token aud contains 'localhost', overriding with 'historian' for Docker networking");
-            tokenHost = "historian";
-        }
         if (DEFAULT_GRPC_HOST.equals(this.grpcHost)) {
             this.grpcHost = tokenHost;
         } else {
