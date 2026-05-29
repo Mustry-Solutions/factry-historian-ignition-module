@@ -304,16 +304,24 @@ Still:
 # 18/05/2026
 
 Solved:
+
   [+] use GetMeasurementByFilter to get all the measurements of different collectors
+
   [+] create the store&forward engine automatic
+  
   [+] FactryQueryEngine query grouped by the status=good << let's plot only the good quality data   
+  
   [+] array through the store&forward
 
 
 Pending:
+
   [] licence html  
+  
   [] grpcClient.registerCollector (no correct effect)
+  
   [] Collector names (we use collector's uid )
+  
   [] getMeasurementsByFilter returns with  100 results, suspecious
 
 goal: feature freeze   
@@ -321,6 +329,7 @@ goal: feature freeze
 # 28/05/2026
 
 Done:
+
   [+] Collector names (we use collector's uid )
   [+] pagination for getMeasurementsByFilter
   [+] test with realfakedata
@@ -333,4 +342,4 @@ Questions:
   
   - remove 'hack' to use historian when the host is localhost
 
-    
+# 01/06/2026

@@ -4,10 +4,11 @@
       getting realfakedata from here
       https://docs.factry.io/installing-factry-historian-using-docker-for-testing-purposes
 
-     - easier setup: combination of scripts and manual step 
+     
      - more tests: both manual and automated      
-     - two ignitions with two different collectors  ( same collector doesn't define unique name: coll1/default/var1 can come form two different ignition)
-      - two ignitions, one with factry historian, one with remote historian   
+     - two ignitions with two different collectors  ( same collector doesn't defi
+     - ne unique name: coll1/default/var1 can come form two different ignition)
+     - two ignitions, one with factry historian, one with remote historian   
 
   [] So metadata flows one direction only: 
          Factry → Ignition create tag with metadata in Ignition 
@@ -22,13 +23,13 @@
         - Figure out how to set org context (header? user association? TSDB ownership?)
         - Or create collector manually in Factry UI, then script only needs to generate token
         - Once collector exists: run setup-historians.sh with token, restart Ignition, run tests
+    - easier setup: combination of scripts and manual step 
   
   [] TSDB created via API
       "Influx" TSDB UUID: ff6392ac-4872-11f1-bd09-e69c80a3afdc (host: influx:8086, db: factry)
       Created under Root organization. May need to be under "Mustry" org instead.
 
 
-  [] remove hack to use historian when the host is localhost
 
 
 

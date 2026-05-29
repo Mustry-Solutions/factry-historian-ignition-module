@@ -115,11 +115,8 @@ ignitionModule {
      * assembled module, and specify the path to the index.html file inside that folder. In this commented-out
      * example, the html files being collected are located in the module root project in `src/docs/`
      */
-    // the files to collect into the documentation dir, with example implementation
-    // documentationFiles.from(project.file("src/docs/"))
-
-    /* The path from the root documentation dir to the index file, or filename if in the root doc dir. */
-    // documentationIndex.set("index.html")
+    documentationFiles.from(project.file("src/docs/"))
+    documentationIndex.set("license.html")
 
     /*
      * Optional unsigned modl settings. If true, modl signing will be skipped. This is not for production and should
