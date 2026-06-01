@@ -102,31 +102,12 @@ public class MeasurementCache {
                     collectorUUIDToName.put(c.getUuid(), collectorName);
                 }
 
-                // Try using Measurement.collectorUUID first (new field)
                 Map<String, String> freshCollectorMap = new HashMap<>();
-                boolean hasCollectorUUID = false;
                 for (Measurement m : freshMeasurements.values()) {
                     String collectorUUID = m.getCollectorUUID();
                     if (!collectorUUID.isEmpty()) {
-                        hasCollectorUUID = true;
                         String collectorName = collectorUUIDToName.getOrDefault(collectorUUID, collectorUUID);
                         freshCollectorMap.put(m.getUuid(), collectorName);
-                    }
-                }
-
-                // Fallback: query per collector if collectorUUID field is not populated
-                if (!hasCollectorUUID) {
-                    logger.debug("Measurement.collectorUUID not populated, falling back to per-collector queries");
-                    for (Collector c : collectors.getCollectorsList()) {
-                        GetMeasurementsByFilterRequest collectorFilter = GetMeasurementsByFilterRequest.newBuilder()
-                                .addCollectorUUIDs(c.getUuid())
-                                .setPagination(Pagination.newBuilder().setLimit(PAGE_SIZE).build())
-                                .build();
-                        Measurements collectorMeasurements = grpcClient.getMeasurementsByFilter(collectorFilter);
-                        String collectorName = collectorUUIDToName.get(c.getUuid());
-                        for (Measurement cm : collectorMeasurements.getMeasurementsList()) {
-                            freshCollectorMap.put(cm.getUuid(), collectorName);
-                        }
                     }
                 }
 
