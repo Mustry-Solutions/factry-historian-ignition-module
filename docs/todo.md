@@ -29,9 +29,10 @@
       "Influx" TSDB UUID: ff6392ac-4872-11f1-bd09-e69c80a3afdc (host: influx:8086, db: factry)
       Created under Root organization. May need to be under "Mustry" org instead.
 
-
-
-
+  [] Support legacy system.tag.* historian methods (currently PyList error in S&F bridge)
+    - system.tag.storeTagHistory
+    - system.tag.queryTagHistory
+    - system.tag.queryTagCalculations
 
 
 

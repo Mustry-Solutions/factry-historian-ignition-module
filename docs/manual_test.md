@@ -348,41 +348,5 @@ Monitor the historian status in **Config > Tags > History > Historians** during 
 
 **Expected:** Chart displays historical data points. Zooming in/out updates the query.
 
----
 
-## Test Results
 
-| Test | Pass/Fail | Notes |
-|------|-----------|-------|
-| T1.1 | | |
-| T1.2 | | |
-| T1.3 | | |
-| T1.4 | | |
-| T1.5 | | |
-| T1.6 | | |
-| T1.7 | | |
-| T1.8 | | |
-| T1.9 | | |
-| T1.10 | | |
-| T2.1 | | |
-| T2.2 | | |
-| T2.3 | | |
-| T2.4 | | |
-| T2.5 | | |
-| T2.6 | | |
-| T2.7 | | |
-| T2.8 | | |
-| T2.9 | | |
-| T2.10 | | |
-| T2.11 | | |
-| T2.12 | | |
-| T3.1 | | |
-| T3.2 | | |
-| T3.3 | | |
-| T3.4 | | |
-| T3.5 | | |
-| T3.6 | | |
-| T3.7 | | |
-| T4.1 | | |
-| T4.2 | | |
-| T4.3 | | |
