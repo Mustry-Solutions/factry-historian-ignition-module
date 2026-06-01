@@ -65,7 +65,7 @@ public class MeasurementCache {
                         .build();
                 Measurements response = grpcClient.getMeasurementsByFilter(request);
 
-                if (response.hasTotal()) {
+                if (response.getTotal() > 0) {
                     serverTotal = response.getTotal();
                 }
 

@@ -4,9 +4,6 @@ import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/struct.proto";
 
-option java_multiple_files = true;
-option java_package = "io.factry.historian.proto";
-option java_outer_classname = "HistorianProto";
 option go_package = "github.com/factrylabs/historian-proto/v2/historian;historian";
 
 package proto;

@@ -845,7 +845,7 @@ class FactryIntegrationTest {
             );
             int existingCount = initial.getMeasurementsCount();
             log("Existing measurements via getMeasurementsByFilter: " + existingCount
-                    + (initial.hasTotal() ? " (total: " + initial.getTotal() + ")" : ""));
+                    + (initial.getTotal() > 0 ? " (total: " + initial.getTotal() + ")" : ""));
 
             // Create enough to exceed 100 total
             int toCreate = Math.max(0, 101 - existingCount);
@@ -874,7 +874,7 @@ class FactryIntegrationTest {
             );
             int afterCount = after.getMeasurementsCount();
             log("Measurements via getMeasurementsByFilter after creation: " + afterCount
-                    + (after.hasTotal() ? " (total: " + after.getTotal() + ")" : ""));
+                    + (after.getTotal() > 0 ? " (total: " + after.getTotal() + ")" : ""));
 
             assertTrue(afterCount > 100,
                     "getMeasurementsByFilter should return more than 100 measurements, got " + afterCount);
