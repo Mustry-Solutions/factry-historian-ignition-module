@@ -1,17 +1,14 @@
 # Manual Test Plan
 
-Manual verification of the Factry Historian module. Work through each test case, recording pass/fail.
 
 ## Prerequisites
-
-Before starting, ensure the following are in place:
 
 - **Docker environment running** (`docker compose up -d`) with all containers healthy
 - **Module installed** and active in **Config > System > Modules**
 - **Factry setup wizard completed** at http://localhost:8000
 - **Time series database created** in Factry (Configuration > Time Series Databases)
 - **Historian profile** created in **Config > Tags > History > Historians**:
-  - **Factry Historian** — the module automatically creates an S&F engine on startup
+- **Factry Historian** — the module automatically creates an S&F engine on startup
 
 The historian profile should show **Running** status in the Historians list.
 
@@ -24,87 +21,21 @@ The historian profile should show **Running** status in the Historians list.
 
 ## Group 1: Tag Creation and Metadata
 
-These tests use the Tag Browser (**Config > Tags > Tag Browser**).
+These tests use the Tag Browser in the Designer (**Config > Tags > Tag Browser**).
+Open your designer and create tags with historian and parameters:
+   [] T1.1 — name=`ManualTest/ff1`, type=Float8, write values 10.0, 20.0, 30.0, etc..
+   [] T1.2 — name=`ManualTest/bb1`, type=Boolean, toggle a few times
+   [] T1.3 — name=`ManualTest/ss1`, type=String, write "hello", "world"
+   [] T1.4 — name=`ManualTest/ii1`, type=Int4, write 1, 2, 3
+   [] T1.5 — name=`ManualTest/Subfolder/Deep`, type=Float8, verify full path in Factry
+   [] T1.6 — Rename `ManualTest/ff1` → `ManualTest/ff1Renamed`, write new value, verify new measurement created
+   [] T1.7 — Move `ManualTest/bb1` into `ManualTest/Subfolder/`, write new value, verify new measurement
+   [] T1.8 — Write a value, check Status > Store & Forward, verify data flows through S&F engine
+   [] T1.9 — Disable history on a tag, write values (should NOT appear), re-enable, write again (should appear)
+   [] T1.10 — Create 5 tags with history, write to all quickly, verify all measurements created and batched
 
-### T1.1 — Create a numeric tag with history
+Check the results in Factry Measurements and on PowerChart
 
-1. Create a Memory Tag: name=`ManualTest/Numeric`, type=Float8
-2. Enable history: History Provider = **Factry Historian**, Sample Mode = All Data
-3. Write values to the tag (e.g., 10.0, 20.0, 30.0)
-4. Open Factry web UI > Measurements
-
-**Expected:** A measurement named `default/ManualTest/Numeric` appears in Factry with data type `number`. Data points match the written values.
-
-### T1.2 — Create a boolean tag with history
-
-1. Create a Memory Tag: name=`ManualTest/Boolean`, type=Boolean
-2. Enable history: History Provider = **Factry Historian**, Sample Mode = All Data
-3. Toggle the value a few times (true/false)
-
-**Expected:** Measurement created with data type `boolean`. Points alternate between true/false.
-
-### T1.3 — Create a string tag with history
-
-1. Create a Memory Tag: name=`ManualTest/String`, type=String
-2. Enable history: History Provider = **Factry Historian**, Sample Mode = All Data
-3. Write string values (e.g., "hello", "world")
-
-**Expected:** Measurement created with data type `string`. Points contain the correct string values.
-
-### T1.4 — Create an integer tag with history
-
-1. Create a Memory Tag: name=`ManualTest/Integer`, type=Int4
-2. Enable history: History Provider = **Factry Historian**, Sample Mode = All Data
-3. Write integer values (e.g., 1, 2, 3)
-
-**Expected:** Measurement created with data type `number`. Values stored correctly.
-
-### T1.5 — Tag in a subfolder
-
-1. Create a folder `ManualTest/Subfolder`
-2. Create a Memory Tag inside it: `ManualTest/Subfolder/Deep`, type=Float8, history enabled
-3. Write a value
-
-**Expected:** Measurement name includes the full path: `default/ManualTest/Subfolder/Deep`.
-
-### T1.6 — Rename a tag with history
-
-1. Take `ManualTest/Numeric` from T1.1
-2. Rename it to `ManualTest/NumericRenamed`
-3. Write a new value
-
-**Expected:** A new measurement is created for the new name. The old measurement remains in Factry (data is not migrated). New values go to the new measurement.
-
-### T1.7 — Move a tag to a different folder
-
-1. Move `ManualTest/Boolean` into `ManualTest/Subfolder/`
-2. Write a new value
-
-**Expected:** Same behavior as rename — new measurement created with the new path, old measurement persists.
-
-### T1.8 — Verify Store & Forward is active
-
-1. Create a tag with history on **Factry Historian**
-2. Write a value
-3. Check **Status > Store & Forward**
-
-**Expected:** Data flows through the auto-created S&F engine. Forwarded count increases. The S&F engine name matches the historian profile name.
-
-### T1.9 — Disable and re-enable history
-
-1. Disable history on a tag (History Enabled = false)
-2. Write values — these should NOT appear in Factry
-3. Re-enable history
-4. Write values — these SHOULD appear
-
-**Expected:** No data stored while history is disabled. Data resumes after re-enabling.
-
-### T1.10 — Multiple tags writing simultaneously
-
-1. Create 5 Memory Tags with history enabled, all on **Factry Historian**
-2. Write values to all of them in quick succession
-
-**Expected:** All 5 measurements created. Points batched and stored correctly. Check Ignition logs for batch size in `gRPC store succeeded` messages.
 
 ---
 
