@@ -117,6 +117,7 @@ ignitionModule {
      */
     documentationFiles.from(project.file("src/docs/"))
     documentationIndex.set("license.html")
+    license.set("src/docs/license.html")
 
     /*
      * Optional unsigned modl settings. If true, modl signing will be skipped. This is not for production and should

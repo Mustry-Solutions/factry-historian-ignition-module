@@ -337,9 +337,15 @@ Done:
 Questions:
   
   - Measurement.collectorUUID isn;t populated by Factry
-    collectorUUID='' for all measurements
+    collectorUUID='' for all measuremens
   - licence html  < add placeholder
   
   - remove 'hack' to use historian when the host is localhost
 
 # 01/06/2026
+
++ remove 'hack' to use historian when the host is localhost
++ licence html  < add placeholder
+
+- Measurement.collectorUUID isn;t populated by Factry
+    collectorUUID='' for all measuremens
