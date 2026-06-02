@@ -107,6 +107,15 @@ class TagPathUtilTest {
                         "histprov:Factry Historian:/prov:default:/tag:default/FactrySim/ff1"));
     }
 
+    @Test
+    void qualifiedPathToStoredPath_sysProvTag_tagAlreadyHasProvPrefix() {
+        // Tag history binding from historian browse: [Factry Historian]default/Manual Test/ii1
+        // Ignition sends sys: + prov:default + tag:default/Manual Test/ii1 — don't double the prefix
+        assertEquals("default/Manual Test/ii1",
+                TagPathUtil.qualifiedPathToStoredPath(
+                        "histprov:Factry Historian:/sys:Ignition-FactryTest:/prov:default:/tag:default/Manual Test/ii1"));
+    }
+
     // --- qualifiedPathToStoredPath with folder: components ---
 
     @Test

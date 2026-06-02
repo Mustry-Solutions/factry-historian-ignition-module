@@ -76,7 +76,14 @@ final class TagPathUtil {
         //    Binding/query path (no sys:) → tag already contains the full measurement name
         if (prov != null && tag != null) {
             String sys = extractComponent(qualifiedPathStr, "sys:");
-            return sys != null ? buildStoredPath(prov, tag) : tag;
+            if (sys != null) {
+                // Guard: if tag already starts with "prov/", don't duplicate
+                if (tag.startsWith(prov + "/")) {
+                    return tag;
+                }
+                return buildStoredPath(prov, tag);
+            }
+            return tag;
         }
 
         if (tag != null) {

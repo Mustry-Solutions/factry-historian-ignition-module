@@ -37,6 +37,9 @@ Open your designer and create tags with historian and parameters:
 ---
 
 - [-] T1.11 - Create a calculation in Factry WebUI (remark: Test button broken, reported to Factry)
+
+>     remark: failed to make a calculation in Factry
+
 - [ ] T1.12 - Create assets in Factry WebUI
 
 Check the results in Factry Measurements and on PowerChart. Check if the store & forward shows statistics. 
@@ -53,8 +56,7 @@ Check the results in Factry Measurements and on PowerChart. Check if the store &
 - [ ] T3.2 — Plot the results to a PowerChart
 
 ## Group: 4 Designer
-- [ ] T4.1 — Create a label and assign the value of the historian
-- [ ] T4.2 —
+- [+] T4.1 — Create a label and assign the value of a factry historian
 
 ### Group 5: Use external datasource 
 - [+] T5.1 — use realfakedata, see [realfakedata](fakedata.md)
