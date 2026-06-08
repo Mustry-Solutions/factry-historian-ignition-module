@@ -349,3 +349,17 @@ Questions:
 
 - Measurement.collectorUUID isn;t populated by Factry
     collectorUUID='' for all measuremens
+
+
+# 08/06/2026
++ Measurement.collectorUUID isn;t populated by Factry
+    collectorUUID='' for all measurements
++ Create a label in ignition designer and assign the value of a factry historian
+
+remark:
+  - failed to make a calculation in Factry
+  - Factry accepting the data even without the setup wizard completed? 
+  - still testing the remote factry historian and cases when factry is down
+
+
+  

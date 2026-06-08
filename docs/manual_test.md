@@ -1,6 +1,6 @@
-# Manual Test Plan
+# Manual Tests
 
-
+# Info
 ## Prerequisites
 
 - **Docker environment running** (`docker compose up -d`) with all containers healthy
@@ -12,41 +12,43 @@
 
 The historian profile should show **Running** status in the Historians list.
 
----
-
 ## Overview of the test environment
 
 ![Test Overview](manual_test.excalidraw.svg)
 
+## Annotation
+> - [ ] <- not tested
+> - [x] <- successfully tested
+> - [x] ❌  <-- this means tested but failed
+
+# Tests
 
 ## Group 1: Tag Creation and Metadata
 
 These tests use the Tag Browser in the Designer (**Config > Tags > Tag Browser**).
 Open your designer and create tags with historian and parameters:
 
-- [+] T1.1 — name=`ManualTest/ff1`, type=float, write values 10.0, 20.0, 30.0, etc.
-- [+] T1.2 — name=`ManualTest/bb1`, type=Boolean, toggle a few times
-- [+] T1.3 — name=`ManualTest/ss1`, type=String, write "hello", "world"
-- [+] T1.4 — name=`ManualTest/ii1`, type=Int4, write 1, 2, 3
-- [+] T1.5 — name=`ManualTest/Subfolder/Deep`, type=Float8, verify full path in Factry
-- [+] T1.6 — Rename `ManualTest/ff1` → `ManualTest/ff1Renamed`, write new value, verify new measurement created (old stays there)
-- [+] T1.7 — Move `ManualTest/bb1` into `ManualTest/Subfolder/`, write new value, verify new measurement
-- [+] T1.8 — Write a value, check Status > Store & Forward, verify data flows through S&F engine
-- [+] T1.9 — Disable history on a tag, write values (should NOT appear), re-enable, write again (should appear)
+- [x] T1.1 — name=`ManualTest/ff1`, type=float, write values 10.0, 20.0, 30.0, etc.
+- [x] T1.2 — name=`ManualTest/bb1`, type=Boolean, toggle a few times
+- [x] T1.3 — name=`ManualTest/ss1`, type=String, write "hello", "world"
+- [x] T1.4 — name=`ManualTest/ii1`, type=Int4, write 1, 2, 3
+- [x] T1.5 — name=`ManualTest/Subfolder/Deep`, type=Float8, verify full path in Factry
+- [x] T1.6 — Rename `ManualTest/ff1` → `ManualTest/ff1Renamed`, write new value, verify new measurement created (old stays there)
+- [x] T1.7 — Move `ManualTest/bb1` into `ManualTest/Subfolder/`, write new value, verify new measurement
+- [x] T1.8 — Write a value, check Status > Store & Forward, verify data flows through S&F engine
+- [x] T1.9 — Disable history on a tag, write values (should NOT appear), re-enable, write again (should appear)
 
----
+---> measurements and assets
 
-- [-] T1.11 - Create a calculation in Factry WebUI (remark: Test button broken, reported to Factry)
-
->     remark: failed to make a calculation in Factry
-
-- [ ] T1.12 - Create assets in Factry WebUI
+- [x] ❌ T1.11 - Create a calculation in Factry WebUI (remark: Test button broken, reported to Factry)
+    > error: failed to make a calculation in Factry
+- [x] T1.12 - Create assets in Factry WebUI
 
 Check the results in Factry Measurements and on PowerChart. Check if the store & forward shows statistics. 
 
 ## Group 2: Store and Forward
 
-- [ ] T2.0 - check if there is a store and forward engine
+- [x] T2.0 - check if there is a store and forward engine
 - [-] T2.1 — Factry goes down (`docker compose stop historian`) — data buffered, pending count increases, historian status shows error
 - [ ] T2.2 — Factry comes back (`docker compose start historian`) — data arrives to Factry, historian status shows active (~30 seconds), verify no data loss
   
