@@ -50,7 +50,7 @@ Check the results in Factry Measurements and on PowerChart. Check if the store &
 
 - [x] T2.0 - check if there is a store and forward engine
 - [x] T2.1 — Factry goes down (`docker compose stop historian`) — data buffered, pending count increases, historian status shows error
-- [ ] T2.2 — Factry comes back (`docker compose start historian`) — data arrives to Factry, historian status shows active (~30 seconds), verify no data loss
+- [x] T2.2 — Factry comes back (`docker compose start historian`) — data arrives to Factry, historian status shows active (~30 seconds), verify no data loss
   
 ## Group 3: Remote historian
   

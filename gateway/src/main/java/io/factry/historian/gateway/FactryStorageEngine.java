@@ -94,6 +94,13 @@ public class FactryStorageEngine extends AbstractStorageEngine {
                 return StorageResult.exception(
                         new RuntimeException("Array measurement(s) being created, retry later"), points);
             }
+            if (measurementCache.size() == 0) {
+                // All points skipped because measurement cache is empty (Factry likely down).
+                // Return exception so S&F keeps them in pending for retry.
+                logger.warn("No points to send, measurement cache empty — S&F will retry");
+                return StorageResult.exception(
+                        new RuntimeException("Measurement cache empty, cannot resolve UUIDs"), points);
+            }
             logger.debug("No points to send (all skipped)");
             return StorageResult.success(points);
         }
@@ -306,12 +313,19 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
     @Override
     protected boolean isEngineUnavailable() {
-        // When the gRPC connection is down, return true so S&F buffers points
-        // in the pending queue without attempting the call. This prevents data loss
-        // during the timeout window and avoids unnecessary quarantine.
-        // The connection is marked as available again on the next successful gRPC call
-        // or via the periodic connection test in FactryHistoryProvider.getStatus().
-        return !grpcClient.isConnected();
+        // WARNING: DO NOT change this to return true when the connection is down.
+        //
+        // When isEngineUnavailable() returns true, the SDK's AbstractStorageEngine.processPoints()
+        // returns StorageResult.failure(UNAVAILABLE_QUALITY, points). The TagHistoryDataSinkBridge
+        // then silently drops the points (failure has no error, so no DataStorageException is thrown).
+        //
+        // Buffering during downtime is handled by toggling the S&F sink's accepting state
+        // in FactryHistoryProvider.getStatus(). When the sink is not accepting, S&F keeps
+        // points in pending without attempting to forward them.
+        //
+        // Verified by decompiling AbstractStorageEngine and TagHistoryDataSinkBridge
+        // (historian-gateway-api 1.3.3). See git history: commit e7a5c84 broke this.
+        return false;
     }
 
     void updateSettings(FactryHistorianSettings newSettings) {

@@ -271,9 +271,35 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         }
 
         statusCheckedAt = now;
-        cachedStatus = grpcClient.testConnection()
-                ? ProfileStatus.RUNNING
-                : ProfileStatus.ERRORED;
+        boolean connected = grpcClient.testConnection();
+        cachedStatus = connected ? ProfileStatus.RUNNING : ProfileStatus.ERRORED;
+
+        // Toggle S&F sink: when Factry is down, stop accepting so points stay in pending.
+        // When Factry is back, re-initialize so forwarding resumes.
+        if (dataSinkBridge != null) {
+            if (connected && !dataSinkBridge.isAccepting()) {
+                logger.info("Factry connection restored, re-enabling S&F sink");
+                try {
+                    java.lang.reflect.Method initMethod = dataSinkBridge.getClass().getSuperclass()
+                            .getDeclaredMethod("initialize");
+                    initMethod.setAccessible(true);
+                    initMethod.invoke(dataSinkBridge);
+                } catch (Exception e) {
+                    logger.error("Failed to re-initialize S&F sink", e);
+                }
+            } else if (!connected && dataSinkBridge.isAccepting()) {
+                logger.info("Factry connection lost, pausing S&F sink to buffer points");
+                try {
+                    java.lang.reflect.Method uninitMethod = dataSinkBridge.getClass().getSuperclass()
+                            .getDeclaredMethod("uninitialize");
+                    uninitMethod.setAccessible(true);
+                    uninitMethod.invoke(dataSinkBridge);
+                } catch (Exception e) {
+                    logger.error("Failed to uninitialize S&F sink", e);
+                }
+            }
+        }
+
         return cachedStatus;
     }
 
