@@ -189,52 +189,38 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      * @param prefix path segments already navigated (e.g. "" for root, "alma/" for inside asset alma)
      */
     private void browseAssets(String prefix, BrowsePublisher publisher) {
-        // Build a map: assetPath → Asset for quick lookup
+        // Build lookup maps by UUID and parentUUID
+        Map<String, Asset> uuidToAsset = new HashMap<>();
+        Map<String, List<Asset>> childrenByParent = new HashMap<>();
+        // Computed full path (using forward slashes) → Asset
         Map<String, Asset> pathToAsset = new HashMap<>();
+
         for (Asset a : measurementCache.getAllAssets()) {
-            String path = a.getAssetPath().isEmpty() ? a.getName() : a.getAssetPath();
-            pathToAsset.put(path, a);
+            uuidToAsset.put(a.getUuid(), a);
         }
 
-        Set<String> folders = new LinkedHashSet<>();
-        Map<String, Asset> leafAssets = new HashMap<>();
-
-        for (Map.Entry<String, Asset> entry : pathToAsset.entrySet()) {
-            String path = entry.getKey();
-            if (!prefix.isEmpty()) {
-                if (!path.startsWith(prefix)) continue;
-                path = path.substring(prefix.length());
-            }
-            int slashPos = path.indexOf('/');
-            if (slashPos >= 0) {
-                // Nested asset — show as folder
-                folders.add(path.substring(0, slashPos));
-            } else if (!path.isEmpty()) {
-                // Direct child asset
-                leafAssets.put(path, entry.getValue());
-            }
+        // Build parent→children map and compute full paths
+        for (Asset a : measurementCache.getAllAssets()) {
+            String parentUUID = a.getParentUUID();
+            childrenByParent.computeIfAbsent(parentUUID, k -> new ArrayList<>()).add(a);
         }
+        computeAssetPaths(uuidToAsset, childrenByParent, "", "", pathToAsset);
 
-        // Assets are always folders (they can have properties underneath)
-        for (String folder : folders) {
-            publisher.newNode("folder", folder).hasChildren(true).add();
-        }
-        for (Map.Entry<String, Asset> leaf : leafAssets.entrySet()) {
-            String assetName = leaf.getKey();
-            Asset asset = leaf.getValue();
-            List<AssetProperty> props = measurementCache.getPropertiesForAsset(asset.getUuid());
-            boolean hasChildren = !props.isEmpty();
-            publisher.newNode("folder", assetName).hasChildren(hasChildren).add();
-        }
-
-        // If prefix points to a specific asset, also show its properties as leaf tags
-        if (!prefix.isEmpty()) {
+        // Determine which assets are direct children at the current prefix level
+        List<Asset> children;
+        if (prefix.isEmpty()) {
+            // Root level: show assets with no parent
+            children = childrenByParent.getOrDefault("", Collections.emptyList());
+        } else {
+            // Find the asset matching this prefix, then show its children
             String assetPath = prefix.endsWith("/") ? prefix.substring(0, prefix.length() - 1) : prefix;
-            Asset asset = pathToAsset.get(assetPath);
-            if (asset != null) {
-                List<AssetProperty> props = measurementCache.getPropertiesForAsset(asset.getUuid());
+            Asset parentAsset = pathToAsset.get(assetPath);
+            if (parentAsset != null) {
+                children = childrenByParent.getOrDefault(parentAsset.getUuid(), Collections.emptyList());
+
+                // Show properties of the current asset as leaf tags
+                List<AssetProperty> props = measurementCache.getPropertiesForAsset(parentAsset.getUuid());
                 for (AssetProperty prop : props) {
-                    // Use the measurement UUID as the stored path so queries can resolve it
                     Measurement m = measurementCache.getMeasurementByUUID(prop.getMeasurementUUID());
                     String storedPath = m != null ? m.getName() : prop.getMeasurementUUID();
                     publisher.newNode("tag", storedPath)
@@ -243,10 +229,37 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                             .add();
                 }
                 logger.debug("Browse assets: published " + props.size() + " properties for asset '" + assetPath + "'");
+            } else {
+                children = Collections.emptyList();
             }
         }
 
-        logger.debug("Browse assets: prefix='" + prefix + "', " + folders.size() + " folders, " + leafAssets.size() + " leaf assets");
+        // Publish child assets as folders
+        for (Asset child : children) {
+            List<AssetProperty> props = measurementCache.getPropertiesForAsset(child.getUuid());
+            List<Asset> grandChildren = childrenByParent.getOrDefault(child.getUuid(), Collections.emptyList());
+            boolean hasChildren = !props.isEmpty() || !grandChildren.isEmpty();
+            publisher.newNode("folder", child.getName()).hasChildren(hasChildren).add();
+        }
+
+        logger.debug("Browse assets: prefix='" + prefix + "', " + children.size() + " child assets");
+    }
+
+    /**
+     * Recursively compute full paths for all assets using the parent-child hierarchy.
+     */
+    private void computeAssetPaths(
+            Map<String, Asset> uuidToAsset,
+            Map<String, List<Asset>> childrenByParent,
+            String parentUUID,
+            String parentPath,
+            Map<String, Asset> pathToAsset) {
+        List<Asset> children = childrenByParent.getOrDefault(parentUUID, Collections.emptyList());
+        for (Asset child : children) {
+            String fullPath = parentPath.isEmpty() ? child.getName() : parentPath + "/" + child.getName();
+            pathToAsset.put(fullPath, child);
+            computeAssetPaths(uuidToAsset, childrenByParent, child.getUuid(), fullPath, pathToAsset);
+        }
     }
 
     /**

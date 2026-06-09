@@ -42,7 +42,8 @@ Open your designer and create tags with historian and parameters:
 
 - [x] ❌ T1.11 - Create a calculation in Factry WebUI (remark: Test button broken, reported to Factry)
     > error: failed to make a calculation in Factry
-- [x] T1.12 - Create assets in Factry WebUI
+- [x] T1.12 - Create assets in Factry WebUI: use nested assets, it should be shown up nested in PowerChart
+
 
 Check the results in Factry Measurements and on PowerChart. Check if the store & forward shows statistics. 
 
