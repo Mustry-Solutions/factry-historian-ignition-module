@@ -68,6 +68,16 @@ final class TagPathUtil {
      * @param qualifiedPathStr the QualifiedPath.toString() result
      * @return the Factry measurement name
      */
+    /**
+     * Restore unicode fraction slash (U+2044) back to real '/' in stored paths.
+     * Used for external collector measurements where '/' was replaced to prevent
+     * the browse tree from splitting the path into segments.
+     */
+    static String restoreFractionSlash(String path) {
+        if (path == null) return null;
+        return path.replace(" \u2215 ", "/").replace('\u2215', '/').replace('\u2044', '/');
+    }
+
     static String qualifiedPathToStoredPath(String qualifiedPathStr) {
         String prov = extractComponent(qualifiedPathStr, "prov:");
         String tag = extractComponent(qualifiedPathStr, "tag:");

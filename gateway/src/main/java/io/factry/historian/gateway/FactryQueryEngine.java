@@ -114,12 +114,19 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             }
 
             if (TagPathUtil.CATEGORY_MEASUREMENTS.equals(category)) {
-                // Measurements: existing hierarchical browse with sys/prov/tag structure
                 String measPrefix = TagPathUtil.stripCategory(prefix);
                 if (!measPrefix.isEmpty() && !measPrefix.endsWith("/")) {
                     measPrefix += "/";
                 }
-                browsePaths(collectMeasurementDisplayToStoredMap(), measPrefix, publisher);
+                // Check if we're inside a non-Ignition (external) collector folder
+                String externalCollector = getExternalCollectorFromPrefix(measPrefix, settings.getCollectorName());
+                if (externalCollector != null) {
+                    // External collector: show measurements as flat tags (no path splitting)
+                    browseFlatCollectorMeasurements(externalCollector, publisher);
+                } else {
+                    // Root level or Ignition collector: hierarchical browse
+                    browsePaths(collectMeasurementDisplayToStoredMap(), measPrefix, publisher);
+                }
             } else if (TagPathUtil.CATEGORY_ASSETS.equals(category)) {
                 String assetPrefix = TagPathUtil.stripCategory(prefix);
                 browseAssets(assetPrefix, publisher);
@@ -145,6 +152,47 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             displayToStored.put(displayPath, m.getName());
         }
         return displayToStored;
+    }
+
+    /**
+     * If the prefix is inside a non-Ignition collector folder, return the collector name.
+     * Returns null if the prefix is empty (root level) or inside our own Ignition collector.
+     */
+    static String getExternalCollectorFromPrefix(String measPrefix, String ownCollectorName) {
+        if (measPrefix.isEmpty()) {
+            return null;
+        }
+        int slashPos = measPrefix.indexOf('/');
+        if (slashPos < 0) {
+            return null;
+        }
+        String collectorName = measPrefix.substring(0, slashPos);
+        if (collectorName.equals(ownCollectorName)) {
+            return null; // Our own Ignition collector — use hierarchical browse
+        }
+        return collectorName;
+    }
+
+    /**
+     * Show all measurements for an external collector as flat tags (no path splitting).
+     */
+    private void browseFlatCollectorMeasurements(String collectorName, BrowsePublisher publisher) {
+        int count = 0;
+        for (Measurement m : measurementCache.getAllMeasurements()) {
+            String cn = measurementCache.getCollectorName(m.getUuid());
+            if (collectorName.equals(cn)) {
+                // Replace '/' with division slash (U+2215) in both path and display
+                // so the tree doesn't split it into segments.
+                // The query path resolution restores real '/' via restoreFractionSlash().
+                String safeName = m.getName().replace("/", " \u2215 ");
+                publisher.newNode("tag", safeName)
+                        .displayPath(StringPath.of(safeName))
+                        .hasChildren(false)
+                        .add();
+                count++;
+            }
+        }
+        logger.debug("Browse flat: published " + count + " tags for external collector '" + collectorName + "'");
     }
 
     private void browsePaths(Map<String, String> displayToStored, String prefix, BrowsePublisher publisher) {
@@ -743,7 +791,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     }
 
     private String toStoredTagPath(QualifiedPath path) {
-        return TagPathUtil.qualifiedPathToStoredPath(path.toString());
+        String stored = TagPathUtil.qualifiedPathToStoredPath(path.toString());
+        return TagPathUtil.restoreFractionSlash(stored);
     }
 
     static QualityCode statusToQuality(String status) {
