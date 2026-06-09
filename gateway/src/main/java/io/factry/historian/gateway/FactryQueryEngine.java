@@ -189,22 +189,9 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      * @param prefix path segments already navigated (e.g. "" for root, "alma/" for inside asset alma)
      */
     private void browseAssets(String prefix, BrowsePublisher publisher) {
-        // Build lookup maps by UUID and parentUUID
-        Map<String, Asset> uuidToAsset = new HashMap<>();
-        Map<String, List<Asset>> childrenByParent = new HashMap<>();
-        // Computed full path (using forward slashes) → Asset
+        Map<String, List<Asset>> childrenByParent = buildChildrenByParent(measurementCache.getAllAssets());
         Map<String, Asset> pathToAsset = new HashMap<>();
-
-        for (Asset a : measurementCache.getAllAssets()) {
-            uuidToAsset.put(a.getUuid(), a);
-        }
-
-        // Build parent→children map and compute full paths
-        for (Asset a : measurementCache.getAllAssets()) {
-            String parentUUID = a.getParentUUID();
-            childrenByParent.computeIfAbsent(parentUUID, k -> new ArrayList<>()).add(a);
-        }
-        computeAssetPaths(uuidToAsset, childrenByParent, "", "", pathToAsset);
+        computeAssetPaths(childrenByParent, "", "", pathToAsset);
 
         // Determine which assets are direct children at the current prefix level
         List<Asset> children;
@@ -248,8 +235,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     /**
      * Recursively compute full paths for all assets using the parent-child hierarchy.
      */
-    private void computeAssetPaths(
-            Map<String, Asset> uuidToAsset,
+    static void computeAssetPaths(
             Map<String, List<Asset>> childrenByParent,
             String parentUUID,
             String parentPath,
@@ -258,8 +244,19 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         for (Asset child : children) {
             String fullPath = parentPath.isEmpty() ? child.getName() : parentPath + "/" + child.getName();
             pathToAsset.put(fullPath, child);
-            computeAssetPaths(uuidToAsset, childrenByParent, child.getUuid(), fullPath, pathToAsset);
+            computeAssetPaths(childrenByParent, child.getUuid(), fullPath, pathToAsset);
         }
+    }
+
+    /**
+     * Build a map from parentUUID → list of child assets.
+     */
+    static Map<String, List<Asset>> buildChildrenByParent(Collection<Asset> assets) {
+        Map<String, List<Asset>> childrenByParent = new HashMap<>();
+        for (Asset a : assets) {
+            childrenByParent.computeIfAbsent(a.getParentUUID(), k -> new ArrayList<>()).add(a);
+        }
+        return childrenByParent;
     }
 
     /**
