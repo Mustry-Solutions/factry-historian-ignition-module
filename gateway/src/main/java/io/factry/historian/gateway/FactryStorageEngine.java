@@ -173,7 +173,7 @@ public class FactryStorageEngine extends AbstractStorageEngine {
         Map<String, java.util.TreeMap<Integer, AtomicPoint<?>>> arrayGroups = new HashMap<>();
 
         for (AtomicPoint<?> point : points) {
-            String tagPath = TagPathUtil.qualifiedPathToStoredPath(point.source().toString());
+            String tagPath = TagPathUtil.storagePathToStoredPath(point.source().toString());
             Object value = point.value();
 
             logger.debug("Point: tagPath=" + tagPath
@@ -285,7 +285,7 @@ public class FactryStorageEngine extends AbstractStorageEngine {
         // first created via MeasurementCache.getOrCreateUUID().
         logger.debug("doStoreMetadata called with " + metadataPoints.size() + " points");
         for (MetadataPoint point : metadataPoints) {
-            String tagPath = TagPathUtil.qualifiedPathToStoredPath(point.source().toString());
+            String tagPath = TagPathUtil.storagePathToStoredPath(point.source().toString());
             com.inductiveautomation.ignition.common.config.PropertySet ps = point.value();
             if (ps != null) {
                 Map<String, String> properties = new HashMap<>();

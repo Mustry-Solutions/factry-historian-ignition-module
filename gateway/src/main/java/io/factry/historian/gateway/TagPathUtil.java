@@ -78,16 +78,36 @@ final class TagPathUtil {
         return path.replace(" \u2215 ", "/").replace('\u2215', '/').replace('\u2044', '/');
     }
 
-    static String qualifiedPathToStoredPath(String qualifiedPathStr) {
+    /**
+     * Convert a storage-pipeline QualifiedPath to the Factry measurement name.
+     * <p>
+     * The tag value is always a genuine path relative to the provider.
+     * No composite-path guessing is needed — the components are trusted as-is.
+     */
+    static String storagePathToStoredPath(String qualifiedPathStr) {
         String prov = extractComponent(qualifiedPathStr, "prov:");
         String tag = extractComponent(qualifiedPathStr, "tag:");
 
-        // 1. Storage path (has sys: component) → prov + tag
-        //    Binding/query path (no sys:) → tag already contains the full measurement name
+        if (tag == null) {
+            return qualifiedPathStr;
+        }
+
+        return buildStoredPath(prov, tag);
+    }
+
+    /**
+     * Convert a query/browse QualifiedPath to the Factry measurement name.
+     * <p>
+     * In cross-gateway scenarios the tag value may already be a full measurement
+     * name (prov/tagPath) that must not be wrapped again.
+     */
+    static String queryPathToStoredPath(String qualifiedPathStr) {
+        String prov = extractComponent(qualifiedPathStr, "prov:");
+        String tag = extractComponent(qualifiedPathStr, "tag:");
+
         if (prov != null && tag != null) {
             String sys = extractComponent(qualifiedPathStr, "sys:");
             if (sys != null) {
-                // Guard: if tag already starts with "prov/", don't duplicate
                 if (tag.startsWith(prov + "/")) {
                     return tag;
                 }
@@ -97,7 +117,6 @@ final class TagPathUtil {
         }
 
         if (tag != null) {
-            // 2. Browse with folder: components → reconstruct from folders + tag leaf
             String folderPrefix = parseFolderPrefix(qualifiedPathStr);
             if (!folderPrefix.isEmpty()) {
                 String strippedPrefix = stripCategory(folderPrefix);
@@ -111,8 +130,6 @@ final class TagPathUtil {
                 return folderPrefix + tag;
             }
 
-            // 3. Browse without folders — tag already contains the full measurement name
-            //    Strip category prefix if present
             String category = extractCategory(tag);
             if (category != null) {
                 return stripCategory(tag);

@@ -791,7 +791,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     }
 
     private String toStoredTagPath(QualifiedPath path) {
-        String stored = TagPathUtil.qualifiedPathToStoredPath(path.toString());
+        String stored = TagPathUtil.queryPathToStoredPath(path.toString());
         return TagPathUtil.restoreFractionSlash(stored);
     }
 

@@ -46,7 +46,7 @@ public class MeasurementCache {
     /** Metadata properties cached from doStoreMetadata, applied when creating measurements. */
     private final ConcurrentHashMap<String, Map<String, String>> pendingMetadata = new ConcurrentHashMap<>();
 
-    private static final int PAGE_SIZE = 500;
+    private final int pageSize = ModuleProperties.getMeasurementCachePageSize();
 
     public void refresh(FactryGrpcClient grpcClient) {
         try {
@@ -59,7 +59,7 @@ public class MeasurementCache {
             while (offset < serverTotal) {
                 GetMeasurementsByFilterRequest request = GetMeasurementsByFilterRequest.newBuilder()
                         .setPagination(Pagination.newBuilder()
-                                .setLimit(PAGE_SIZE)
+                                .setLimit(pageSize)
                                 .setOffset(offset)
                                 .build())
                         .build();
