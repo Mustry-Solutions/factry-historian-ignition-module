@@ -32,7 +32,8 @@ Open your designer and create tags with historian and parameters:
 - [x] T1.2 — name=`ManualTest/bb1`, type=Boolean, toggle a few times
 - [x] T1.3 — name=`ManualTest/ss1`, type=String, write "hello", "world"
 - [x] T1.4 — name=`ManualTest/ii1`, type=Int4, write 1, 2, 3
-- [x] T1.5 — name=`ManualTest/Subfolder/Deep`, type=Float8, verify full path in Factry
+- [x] T1.5 — name=`default/Subfolder/Deep`, type=Float8, verify full path in Factry
+          (here the default - the )
 - [x] T1.6 — Rename `ManualTest/ff1` → `ManualTest/ff1Renamed`, write new value, verify new measurement created (old stays there)
 - [x] T1.7 — Move `ManualTest/bb1` into `ManualTest/Subfolder/`, write new value, verify new measurement
 - [x] T1.8 — Write a value, check Status > Store & Forward, verify data flows through S&F engine
@@ -63,7 +64,8 @@ Check the results in Factry Measurements and on PowerChart. Check if the store &
 
 ### Group 5: Use external datasource 
 - [+] T5.1 — use realfakedata, see [realfakedata](fakedata.md)
-
+- [+] T5.2 — flat tag browsing for external collectors ('/' character might not be a path separated)
+    
 
 
 
