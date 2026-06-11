@@ -56,8 +56,8 @@ Check the results in Factry Measurements and on PowerChart. Check if the store &
   
 ## Group 3: Remote historian
   
-- [ ] T3.1 — Create tags using remote historian, check if the data arrives
-- [ ] T3.2 — Plot the results to a PowerChart
+- [x] T3.1 — Create tags using remote historian, check if the data arrives
+- [x] T3.2 — Plot the results to a PowerChart, Remote Factry Historians
 
 ## Group: 4 Designer
 - [+] T4.1 — Create a label and assign the value of a factry historian
