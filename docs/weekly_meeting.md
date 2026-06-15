@@ -361,5 +361,21 @@ remark:
   - Factry accepting the data even without the setup wizard completed? 
   - still testing the remote factry historian and cases when factry is down
 
+# 15/06/2026
 
+done:  
+  + flat list for external 
+  + factry is down tested: the store and forward should go to 'storage only', data goes to 'pending' list
+  + manual test: all good
+
+remarks:
+  - not decided when 6000+ measurements:
+     Measurement 1-100
+     Measurement 101-200
+     Measurement 201-300 
+  - new: the delimiter on the settings page is still coming
+  - tweak: create historian dialog:/replace token to the good, still we have to wait sometimes 20 second 
+  - tweak: check the default values if they work with the new release 8.3.6
+  - development environment auto setup is a bit out of scope, but it could be useful for testing new versions of Factry / Ignition 
+  
   
