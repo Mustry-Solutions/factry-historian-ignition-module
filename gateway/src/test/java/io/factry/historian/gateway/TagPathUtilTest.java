@@ -286,4 +286,108 @@ class TagPathUtilTest {
         String result = TagPathUtil.queryPathToStoredPath(browsePath);
         assertEquals(stored, result);
     }
+
+    // --- toBrowseName: stored measurement name -> browse name ---
+
+    private static final String FS = " ∕ "; // escaped '/' sentinel (U+2215)
+
+    @Test
+    void toBrowseName_slashDelimiter_isNoOp() {
+        // Default '/' : Ignition splits the path into a tree as-is.
+        assertEquals("default/FactrySim/ff1",
+                TagPathUtil.toBrowseName("default/FactrySim/ff1", "/"));
+    }
+
+    @Test
+    void toBrowseName_emptyDelimiter_escapesAllSlashes() {
+        // Flat: every '/' escaped so the whole name stays one leaf.
+        assertEquals("default" + FS + "FactrySim" + FS + "ff1",
+                TagPathUtil.toBrowseName("default/FactrySim/ff1", ""));
+    }
+
+    @Test
+    void toBrowseName_nullDelimiter_treatedAsFlat() {
+        assertEquals("a" + FS + "b",
+                TagPathUtil.toBrowseName("a/b", null));
+    }
+
+    @Test
+    void toBrowseName_otherDelimiter_escapesSlashThenPromotesDelimiter() {
+        // Names that use '.' as separator become a tree; any real '/' is escaped.
+        assertEquals("Plant/Area/Tag",
+                TagPathUtil.toBrowseName("Plant.Area.Tag", "."));
+    }
+
+    @Test
+    void toBrowseName_otherDelimiter_realSlashIsPreserved() {
+        // 'a/b.c' with '.' delimiter: '/' escaped, '.' promoted -> tree split only on the dot.
+        assertEquals("a" + FS + "b/c",
+                TagPathUtil.toBrowseName("a/b.c", "."));
+    }
+
+    // --- fromBrowseName: browse name -> stored measurement name (inverse) ---
+
+    @Test
+    void fromBrowseName_slashDelimiter_isNoOp() {
+        assertEquals("default/FactrySim/ff1",
+                TagPathUtil.fromBrowseName("default/FactrySim/ff1", "/"));
+    }
+
+    @Test
+    void fromBrowseName_emptyDelimiter_restoresSlashes() {
+        assertEquals("default/FactrySim/ff1",
+                TagPathUtil.fromBrowseName("default" + FS + "FactrySim" + FS + "ff1", ""));
+    }
+
+    @Test
+    void fromBrowseName_otherDelimiter_restoresDelimiterThenSlash() {
+        assertEquals("Plant.Area.Tag",
+                TagPathUtil.fromBrowseName("Plant/Area/Tag", "."));
+    }
+
+    // --- round trip: toBrowseName then fromBrowseName == identity ---
+
+    @Test
+    void roundtrip_browseName_slash() {
+        String name = "default/FactrySim/ff1";
+        assertEquals(name, TagPathUtil.fromBrowseName(TagPathUtil.toBrowseName(name, "/"), "/"));
+    }
+
+    @Test
+    void roundtrip_browseName_empty() {
+        String name = "default/FactrySim/ff1";
+        assertEquals(name, TagPathUtil.fromBrowseName(TagPathUtil.toBrowseName(name, ""), ""));
+    }
+
+    @Test
+    void roundtrip_browseName_otherDelimiterWithRealSlash() {
+        String name = "a/b.c.d";
+        assertEquals(name, TagPathUtil.fromBrowseName(TagPathUtil.toBrowseName(name, "."), "."));
+    }
+
+    // --- isAssetQueryPath ---
+
+    @Test
+    void isAssetQueryPath_assetFolders_true() {
+        assertTrue(TagPathUtil.isAssetQueryPath(
+                "histprov:test:/folder:Assets:/folder:Plant:/folder:Line1:/tag:Motor1"));
+    }
+
+    @Test
+    void isAssetQueryPath_assetCategoryInTag_true() {
+        assertTrue(TagPathUtil.isAssetQueryPath(
+                "histprov:test:/tag:Assets/Plant/Line1/Motor1"));
+    }
+
+    @Test
+    void isAssetQueryPath_measurementFolders_false() {
+        assertFalse(TagPathUtil.isAssetQueryPath(
+                "histprov:test:/folder:Measurements:/folder:default:/tag:Temperature"));
+    }
+
+    @Test
+    void isAssetQueryPath_plainMeasurement_false() {
+        assertFalse(TagPathUtil.isAssetQueryPath(
+                "histprov:test:/tag:default/FactrySim/ff1"));
+    }
 }

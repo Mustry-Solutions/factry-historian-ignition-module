@@ -52,7 +52,17 @@ public record FactryHistorianConfig(
         @FormField(FormFieldType.CHECKBOX)
         @DefaultValue("false")
         @Description("Enable detailed debug logging.")
-        boolean debugLogging
+        boolean debugLogging,
+
+        @FormCategory("Advanced")
+        @Label("Tag Path Delimiter")
+        @FormField(FormFieldType.TEXT)
+        @DefaultValue("/")
+        @Description("Character Ignition uses to parse a tag path into a tree view in the Power Chart and tag browser. "
+                + "Default '/' splits the path into a hierarchical tree. "
+                + "Leave empty to show tags as a flat list (any '/' in the path is preserved with a special character so it is not split). "
+                + "Set another character (e.g. '.') to build the tree by splitting on that character instead.")
+        String delimiter
 ) {
     public FactryHistorianSettings toSettings() {
         FactryHistorianSettings settings = new FactryHistorianSettings();
@@ -62,6 +72,7 @@ public record FactryHistorianConfig(
         settings.setBatchSize(batchSize);
         settings.setBatchIntervalMs(batchIntervalMs);
         settings.setDebugLogging(debugLogging);
+        settings.setDelimiter(delimiter);
         return settings;
     }
 
@@ -72,7 +83,8 @@ public record FactryHistorianConfig(
                 settings.isSkipTlsVerification(),
                 settings.getBatchSize(),
                 settings.getBatchIntervalMs(),
-                settings.isDebugLogging()
+                settings.isDebugLogging(),
+                settings.getDelimiter()
         );
     }
 }

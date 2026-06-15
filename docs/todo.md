@@ -15,7 +15,6 @@
 
 ---------------
   some bugs:
-    - create historian dialog:/replace token to the good, still we have to wait sometimes 20 second 
     - check the default values if they work with the new release 8.3.6
   
   

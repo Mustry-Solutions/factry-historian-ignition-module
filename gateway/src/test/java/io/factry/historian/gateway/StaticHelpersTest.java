@@ -208,44 +208,4 @@ class StaticHelpersTest {
             assertEquals(DataType.Float8, FactryRecord.toIgnitionDataType("custom"));
         }
     }
-
-    // =========================================================================
-    // FactryQueryEngine.getExternalCollectorFromPrefix
-    // =========================================================================
-
-    @Nested
-    class GetExternalCollectorFromPrefix {
-
-        @Test
-        void emptyPrefix_returnsNull() {
-            assertNull(FactryQueryEngine.getExternalCollectorFromPrefix("", "MyIgnition"));
-        }
-
-        @Test
-        void noSlash_returnsNull() {
-            assertNull(FactryQueryEngine.getExternalCollectorFromPrefix("SomeCollector", "MyIgnition"));
-        }
-
-        @Test
-        void ownCollector_returnsNull() {
-            assertNull(FactryQueryEngine.getExternalCollectorFromPrefix("MyIgnition/", "MyIgnition"));
-        }
-
-        @Test
-        void ownCollectorDeeper_returnsNull() {
-            assertNull(FactryQueryEngine.getExternalCollectorFromPrefix("MyIgnition/prov/tag/", "MyIgnition"));
-        }
-
-        @Test
-        void externalCollector_returnsName() {
-            assertEquals("ExternalCollector",
-                    FactryQueryEngine.getExternalCollectorFromPrefix("ExternalCollector/", "MyIgnition"));
-        }
-
-        @Test
-        void externalCollectorDeeper_stillReturnsName() {
-            assertEquals("ExternalCollector",
-                    FactryQueryEngine.getExternalCollectorFromPrefix("ExternalCollector/sub/path/", "MyIgnition"));
-        }
-    }
 }

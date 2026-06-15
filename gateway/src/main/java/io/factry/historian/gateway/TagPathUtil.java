@@ -69,13 +69,84 @@ final class TagPathUtil {
      * @return the Factry measurement name
      */
     /**
+     * Sentinel substituted for a literal '/' in a measurement name so the browse
+     * tree (which always splits on '/') does not treat it as a path separator.
+     */
+    static final String FRACTION_SLASH = " \u2215 ";
+
+    /**
      * Restore unicode fraction slash (U+2044) back to real '/' in stored paths.
-     * Used for external collector measurements where '/' was replaced to prevent
-     * the browse tree from splitting the path into segments.
+     * Used for measurements where '/' was replaced to prevent the browse tree
+     * from splitting the path into segments.
      */
     static String restoreFractionSlash(String path) {
         if (path == null) return null;
-        return path.replace(" \u2215 ", "/").replace('\u2215', '/').replace('\u2044', '/');
+        return path.replace(FRACTION_SLASH, "/").replace('\u2215', '/').replace('\u2044', '/');
+    }
+
+    /**
+     * Convert a stored Factry measurement name into the name used for browsing,
+     * driven by the user-configured tag-path {@code delimiter}.
+     * <p>
+     * The browse tree always splits leaf paths on {@code '/'}, so the delimiter
+     * decides what becomes a tree separator:
+     * <ul>
+     *   <li>{@code "/"} (default): no-op \u2014 Ignition splits the path into a tree as-is.</li>
+     *   <li>empty/null: flat \u2014 every {@code '/'} is escaped to {@link #FRACTION_SLASH}
+     *       so the whole name stays a single leaf.</li>
+     *   <li>any other character (e.g. {@code "."}): escape literal {@code '/'} first,
+     *       then promote the delimiter to {@code '/'} so the tree splits on it.</li>
+     * </ul>
+     * Order matters in the last case: escape before promoting, otherwise the freshly
+     * promoted slashes would be re-escaped.
+     *
+     * @see #fromBrowseName(String, String) for the exact inverse
+     */
+    static String toBrowseName(String name, String delimiter) {
+        if (name == null) return null;
+        if ("/".equals(delimiter)) {
+            return name;
+        }
+        String escaped = name.replace("/", FRACTION_SLASH);
+        if (delimiter == null || delimiter.isEmpty()) {
+            return escaped;
+        }
+        return escaped.replace(delimiter, "/");
+    }
+
+    /**
+     * Inverse of {@link #toBrowseName(String, String)}: reconstruct the stored
+     * measurement name from a browse name resolved out of a query path.
+     * <p>
+     * Mirrors the forward transform in reverse order: former-delimiter {@code '/'}
+     * are restored to the delimiter first, then escaped slashes are restored to
+     * real {@code '/'}.
+     */
+    static String fromBrowseName(String browseName, String delimiter) {
+        if (browseName == null) return null;
+        if ("/".equals(delimiter)) {
+            return browseName;
+        }
+        String result = browseName;
+        if (delimiter != null && !delimiter.isEmpty()) {
+            result = result.replace("/", delimiter);
+        }
+        return restoreFractionSlash(result);
+    }
+
+    /**
+     * True if a query QualifiedPath refers to the Assets tree rather than the
+     * Measurements tree. Asset property tags carry their measurement's real name
+     * (which natively contains '/'), so the delimiter reverse-transform must never
+     * be applied to them.
+     */
+    static boolean isAssetQueryPath(String qualifiedPathStr) {
+        if (qualifiedPathStr == null) return false;
+        if (CATEGORY_ASSETS.equals(extractCategory(parseFolderPrefix(qualifiedPathStr)))) {
+            return true;
+        }
+        String tag = extractComponent(qualifiedPathStr, "tag:");
+        return tag != null && CATEGORY_ASSETS.equals(extractCategory(tag));
     }
 
     /**

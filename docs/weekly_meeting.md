@@ -378,4 +378,6 @@ remarks:
   - tweak: check the default values if they work with the new release 8.3.6
   - development environment auto setup is a bit out of scope, but it could be useful for testing new versions of Factry / Ignition 
   
-  
+# 22/06/2026  
+done:
+  - the delimiter on the settings page is still coming

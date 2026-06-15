@@ -118,15 +118,10 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 if (!measPrefix.isEmpty() && !measPrefix.endsWith("/")) {
                     measPrefix += "/";
                 }
-                // Check if we're inside a non-Ignition (external) collector folder
-                String externalCollector = getExternalCollectorFromPrefix(measPrefix, settings.getCollectorName());
-                if (externalCollector != null) {
-                    // External collector: show measurements as flat tags (no path splitting)
-                    browseFlatCollectorMeasurements(externalCollector, publisher);
-                } else {
-                    // Root level or Ignition collector: hierarchical browse
-                    browsePaths(collectMeasurementDisplayToStoredMap(), measPrefix, publisher);
-                }
+                // Tree vs flat is governed uniformly by the configured delimiter
+                // (applied per-measurement in collectMeasurementDisplayToStoredMap),
+                // not by which collector the measurement belongs to.
+                browsePaths(collectMeasurementDisplayToStoredMap(), measPrefix, publisher);
             } else if (TagPathUtil.CATEGORY_ASSETS.equals(category)) {
                 String assetPrefix = TagPathUtil.stripCategory(prefix);
                 browseAssets(assetPrefix, publisher);
@@ -141,58 +136,22 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     }
 
     private Map<String, String> collectMeasurementDisplayToStoredMap() {
-        Map<String, String> displayToStored = new HashMap<>();
+        String delimiter = settings.getDelimiter();
+        // Maps a full display path -> the leaf's browse name (the resolution key
+        // used as the tag node id). The browse name is the stored measurement name
+        // transformed by the configured delimiter; toStoredTagPath reverses it.
+        Map<String, String> displayToBrowse = new HashMap<>();
         for (Measurement m : measurementCache.getAllMeasurements()) {
             // Prefix the display path with the collector name so measurements
             // are grouped under their collector in the browse tree.
             String collectorName = measurementCache.getCollectorName(m.getUuid());
+            String browseName = TagPathUtil.toBrowseName(m.getName(), delimiter);
             String displayPath = collectorName != null
-                    ? collectorName + "/" + m.getName()
-                    : m.getName();
-            displayToStored.put(displayPath, m.getName());
+                    ? collectorName + "/" + browseName
+                    : browseName;
+            displayToBrowse.put(displayPath, browseName);
         }
-        return displayToStored;
-    }
-
-    /**
-     * If the prefix is inside a non-Ignition collector folder, return the collector name.
-     * Returns null if the prefix is empty (root level) or inside our own Ignition collector.
-     */
-    static String getExternalCollectorFromPrefix(String measPrefix, String ownCollectorName) {
-        if (measPrefix.isEmpty()) {
-            return null;
-        }
-        int slashPos = measPrefix.indexOf('/');
-        if (slashPos < 0) {
-            return null;
-        }
-        String collectorName = measPrefix.substring(0, slashPos);
-        if (collectorName.equals(ownCollectorName)) {
-            return null; // Our own Ignition collector — use hierarchical browse
-        }
-        return collectorName;
-    }
-
-    /**
-     * Show all measurements for an external collector as flat tags (no path splitting).
-     */
-    private void browseFlatCollectorMeasurements(String collectorName, BrowsePublisher publisher) {
-        int count = 0;
-        for (Measurement m : measurementCache.getAllMeasurements()) {
-            String cn = measurementCache.getCollectorName(m.getUuid());
-            if (collectorName.equals(cn)) {
-                // Replace '/' with division slash (U+2215) in both path and display
-                // so the tree doesn't split it into segments.
-                // The query path resolution restores real '/' via restoreFractionSlash().
-                String safeName = m.getName().replace("/", " \u2215 ");
-                publisher.newNode("tag", safeName)
-                        .displayPath(StringPath.of(safeName))
-                        .hasChildren(false)
-                        .add();
-                count++;
-            }
-        }
-        logger.debug("Browse flat: published " + count + " tags for external collector '" + collectorName + "'");
+        return displayToBrowse;
     }
 
     private void browsePaths(Map<String, String> displayToStored, String prefix, BrowsePublisher publisher) {
@@ -791,8 +750,14 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     }
 
     private String toStoredTagPath(QualifiedPath path) {
-        String stored = TagPathUtil.queryPathToStoredPath(path.toString());
-        return TagPathUtil.restoreFractionSlash(stored);
+        String pathStr = path.toString();
+        String stored = TagPathUtil.queryPathToStoredPath(pathStr);
+        if (TagPathUtil.isAssetQueryPath(pathStr)) {
+            // Asset property tags carry the measurement's real name (real '/');
+            // never apply the tag-path delimiter reverse to them.
+            return TagPathUtil.restoreFractionSlash(stored);
+        }
+        return TagPathUtil.fromBrowseName(stored, settings.getDelimiter());
     }
 
     static QualityCode statusToQuality(String status) {
