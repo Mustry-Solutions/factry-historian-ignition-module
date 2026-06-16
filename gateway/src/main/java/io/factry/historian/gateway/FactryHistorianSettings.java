@@ -20,8 +20,10 @@ public class FactryHistorianSettings implements HistorianSettings {
     private boolean skipTlsVerification = false;
     private String token = "";
     // Tag-path delimiter for tree-view splitting in the browser/Power Chart.
-    // Default "/" preserves the hierarchical tree behaviour for existing profiles.
-    private String delimiter = "/";
+    // Default is empty (flat list). An Ignition 8.3 bug prevents defaultSettings()
+    // from pre-filling the create form, so a blank field must mean what it shows —
+    // flat — rather than silently falling back to "/" (tree). Set "/" for a tree.
+    private String delimiter = "";
 
     public FactryHistorianSettings() {
     }
