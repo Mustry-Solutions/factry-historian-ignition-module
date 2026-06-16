@@ -1,6 +1,6 @@
 services:
   ignition:
-    image: inductiveautomation/ignition:8.3.3
+    image: inductiveautomation/ignition:8.3.6
     container_name: factry-historian-ignition
     hostname: FactryTest
     ports:
@@ -33,7 +33,7 @@ services:
 
   # Second Ignition gateway — for testing Factry Historian as a remote historian
   ignition-remote:
-    image: inductiveautomation/ignition:8.3.3
+    image: inductiveautomation/ignition:8.3.6
     container_name: factry-historian-ignition-remote
     hostname: FactryRemoteTest
     ports:
