@@ -57,10 +57,10 @@ public record FactryHistorianConfig(
         @FormCategory("Advanced")
         @Label("Tag Path Delimiter")
         @FormField(FormFieldType.TEXT)
-        @DefaultValue("/")
+        @DefaultValue("")
         @Description("Character Ignition uses to parse a tag path into a tree view in the Power Chart and tag browser. "
-                + "Default '/' splits the path into a hierarchical tree. "
-                + "Leave empty to show tags as a flat list (any '/' in the path is preserved with a special character so it is not split). "
+                + "Leave empty (default) to show tags as a flat list (any '/' in the path is preserved with a special character so it is not split). "
+                + "Set '/' to split the path into a hierarchical tree. "
                 + "Set another character (e.g. '.') to build the tree by splitting on that character instead.")
         String delimiter
 ) {
