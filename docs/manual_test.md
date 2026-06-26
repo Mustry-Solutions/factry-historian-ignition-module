@@ -58,6 +58,7 @@ Check the results in Factry Measurements and on PowerChart. Check if the store &
   
 - [x] T3.1 — Create tags using remote historian, check if the data arrives
 - [x] T3.2 — Plot the results to a PowerChart, Remote Factry Historians
+- [ ] T3.3 - Plot tagprovider of the remote ignition having historian
 
 ## Group: 4 Designer
 - [+] T4.1 — Create a label and assign the value of a factry historian

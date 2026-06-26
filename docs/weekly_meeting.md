@@ -380,4 +380,8 @@ remarks:
   
 # 22/06/2026  
 done:
-  - the delimiter on the settings page is still coming
+  + the delimiter on the settings page is still coming
+  + tweak: create historian dialog:/replace token to the good, still we have to wait sometimes 20 second 
+
+remark:
+  - default values still don't work with new release 8.3.6
