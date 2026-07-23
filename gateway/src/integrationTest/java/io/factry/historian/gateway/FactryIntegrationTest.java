@@ -845,7 +845,7 @@ class FactryIntegrationTest {
             );
             int existingCount = initial.getMeasurementsCount();
             log("Existing measurements via getMeasurementsByFilter: " + existingCount
-                    + (initial.hasTotal() ? " (total: " + initial.getTotal() + ")" : ""));
+                    + (initial.getTotal() > 0 ? " (total: " + initial.getTotal() + ")" : ""));
 
             // Create enough to exceed 100 total
             int toCreate = Math.max(0, 101 - existingCount);
@@ -874,7 +874,7 @@ class FactryIntegrationTest {
             );
             int afterCount = after.getMeasurementsCount();
             log("Measurements via getMeasurementsByFilter after creation: " + afterCount
-                    + (after.hasTotal() ? " (total: " + after.getTotal() + ")" : ""));
+                    + (after.getTotal() > 0 ? " (total: " + after.getTotal() + ")" : ""));
 
             assertTrue(afterCount > 100,
                     "getMeasurementsByFilter should return more than 100 measurements, got " + afterCount);
@@ -897,7 +897,7 @@ class FactryIntegrationTest {
             }
             pass("All collectors have a name");
 
-            // Verify Measurement.collectorUUID (new field, may not be populated in all server versions)
+            // Verify Measurement.collectorUUID is populated
             Measurements measurements = grpcStub.getMeasurementsByFilter(
                     GetMeasurementsByFilterRequest.newBuilder()
                             .addCollectorUUIDs(COLLECTOR_UUID)
@@ -906,21 +906,13 @@ class FactryIntegrationTest {
             );
             assertFalse(measurements.getMeasurementsList().isEmpty(),
                     "Expected at least one measurement for collector " + COLLECTOR_UUID);
-            int withCollectorUUID = 0;
             for (Measurement m : measurements.getMeasurementsList()) {
                 log("Measurement: uuid=" + m.getUuid() + ", name='" + m.getName()
                         + "', collectorUUID='" + m.getCollectorUUID() + "'");
-                if (!m.getCollectorUUID().isEmpty()) {
-                    withCollectorUUID++;
-                }
+                assertFalse(m.getCollectorUUID().isEmpty(),
+                        "collectorUUID should not be empty for measurement " + m.getUuid());
             }
-            if (withCollectorUUID == 0) {
-                log("WARNING: Measurement.collectorUUID not populated by this server version — "
-                        + "falling back to per-collector queries for collector name mapping");
-            } else {
-                pass(withCollectorUUID + " of " + measurements.getMeasurementsCount()
-                        + " measurements have collectorUUID");
-            }
+            pass("All " + measurements.getMeasurementsCount() + " measurements have collectorUUID");
         }
     }
 

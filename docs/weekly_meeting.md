@@ -349,3 +349,39 @@ Questions:
 
 - Measurement.collectorUUID isn;t populated by Factry
     collectorUUID='' for all measuremens
+
+
+# 08/06/2026
++ Measurement.collectorUUID isn;t populated by Factry
+    collectorUUID='' for all measurements
++ Create a label in ignition designer and assign the value of a factry historian
+
+remark:
+  - failed to make a calculation in Factry
+  - Factry accepting the data even without the setup wizard completed? 
+  - still testing the remote factry historian and cases when factry is down
+
+# 15/06/2026
+
+done:  
+  + flat list for external 
+  + factry is down tested: the store and forward should go to 'storage only', data goes to 'pending' list
+  + manual test: all good
+
+remarks:
+  - not decided when 6000+ measurements:
+     Measurement 1-100
+     Measurement 101-200
+     Measurement 201-300 
+  - new: the delimiter on the settings page is still coming
+  - tweak: create historian dialog:/replace token to the good, still we have to wait sometimes 20 second 
+  - tweak: check the default values if they work with the new release 8.3.6
+  - development environment auto setup is a bit out of scope, but it could be useful for testing new versions of Factry / Ignition 
+  
+# 22/06/2026  
+done:
+  + the delimiter on the settings page is still coming
+  + tweak: create historian dialog:/replace token to the good, still we have to wait sometimes 20 second 
+
+remark:
+  - default values still don't work with new release 8.3.6

@@ -19,6 +19,11 @@ public class FactryHistorianSettings implements HistorianSettings {
     private boolean useTls = false;
     private boolean skipTlsVerification = false;
     private String token = "";
+    // Tag-path delimiter for tree-view splitting in the browser/Power Chart.
+    // Default is empty (flat list). An Ignition 8.3 bug prevents defaultSettings()
+    // from pre-filling the create form, so a blank field must mean what it shows —
+    // flat — rather than silently falling back to "/" (tree). Set "/" for a tree.
+    private String delimiter = "";
 
     public FactryHistorianSettings() {
     }
@@ -103,6 +108,14 @@ public class FactryHistorianSettings implements HistorianSettings {
         this.token = token;
     }
 
+    public String getDelimiter() {
+        return delimiter;
+    }
+
+    public void setDelimiter(String delimiter) {
+        this.delimiter = delimiter;
+    }
+
     /**
      * Extract collectorUUID, grpcHost, and grpcPort from the JWT token payload.
      * These fields are no longer exposed in the UI — the token is the single
@@ -184,6 +197,7 @@ public class FactryHistorianSettings implements HistorianSettings {
                 ", debugLogging=" + debugLogging +
                 ", useTls=" + useTls +
                 ", skipTlsVerification=" + skipTlsVerification +
+                ", delimiter='" + delimiter + '\'' +
                 '}';
     }
 }

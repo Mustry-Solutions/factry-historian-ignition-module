@@ -176,6 +176,11 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         scheduledExecutor.scheduleWithFixedDelay(
                 this::sendHealthUpdate, 0, 30, TimeUnit.SECONDS);
 
+        // Prime the status cache now that the connection has just been exercised
+        // (registerCollector + cache refresh above), so the gateway UI shows the
+        // real status on its first poll instead of waiting for the cache to expire.
+        refreshConnectionStatus();
+
         logger.info("Factry Historian - Startup Complete");
     }
 
@@ -251,10 +256,17 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
             storageEngine.updateSettings(newSettings);
             this.settings = newSettings;
 
+            // Re-test against the new endpoint and refresh the cached status so the
+            // gateway UI reflects the change on its next poll, not up to STATUS_CACHE_MS later.
+            refreshConnectionStatus();
+
             logger.info("Settings change applied successfully");
             return true;
         } catch (Exception e) {
             logger.error("Failed to apply settings change", e);
+            // Reflect the failure immediately rather than serving a stale cached status.
+            cachedStatus = ProfileStatus.ERRORED;
+            statusCheckedAt = System.currentTimeMillis();
             return false;
         }
     }
@@ -270,10 +282,49 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
             return cachedStatus;
         }
 
-        statusCheckedAt = now;
-        cachedStatus = grpcClient.testConnection()
-                ? ProfileStatus.RUNNING
-                : ProfileStatus.ERRORED;
+        return refreshConnectionStatus();
+    }
+
+    /**
+     * Actively test the Factry connection, update the cached status and its
+     * timestamp, and toggle the S&F sink to match the connection state.
+     * <p>
+     * Called lazily from {@link #getStatus()} when the cache expires, and
+     * eagerly right after startup and settings changes so the gateway UI
+     * reflects the new state on its very next poll instead of waiting out the
+     * {@link #STATUS_CACHE_MS} window (or showing a stale value for up to that long).
+     */
+    private ProfileStatus refreshConnectionStatus() {
+        statusCheckedAt = System.currentTimeMillis();
+        boolean connected = grpcClient.testConnection();
+        cachedStatus = connected ? ProfileStatus.RUNNING : ProfileStatus.ERRORED;
+
+        // Toggle S&F sink: when Factry is down, stop accepting so points stay in pending.
+        // When Factry is back, re-initialize so forwarding resumes.
+        if (dataSinkBridge != null) {
+            if (connected && !dataSinkBridge.isAccepting()) {
+                logger.info("Factry connection restored, re-enabling S&F sink");
+                try {
+                    java.lang.reflect.Method initMethod = dataSinkBridge.getClass().getSuperclass()
+                            .getDeclaredMethod("initialize");
+                    initMethod.setAccessible(true);
+                    initMethod.invoke(dataSinkBridge);
+                } catch (Exception e) {
+                    logger.error("Failed to re-initialize S&F sink", e);
+                }
+            } else if (!connected && dataSinkBridge.isAccepting()) {
+                logger.info("Factry connection lost, pausing S&F sink to buffer points");
+                try {
+                    java.lang.reflect.Method uninitMethod = dataSinkBridge.getClass().getSuperclass()
+                            .getDeclaredMethod("uninitialize");
+                    uninitMethod.setAccessible(true);
+                    uninitMethod.invoke(dataSinkBridge);
+                } catch (Exception e) {
+                    logger.error("Failed to uninitialize S&F sink", e);
+                }
+            }
+        }
+
         return cachedStatus;
     }
 
