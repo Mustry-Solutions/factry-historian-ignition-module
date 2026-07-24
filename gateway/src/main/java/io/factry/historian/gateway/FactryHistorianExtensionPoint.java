@@ -82,8 +82,6 @@ public class FactryHistorianExtensionPoint extends HistorianExtensionPoint<Factr
         // defaults.setToken("");
         // defaults.setUseTls(true);
         // defaults.setSkipTlsVerification(false);
-        // defaults.setBatchSize(10);
-        // defaults.setBatchIntervalMs(5000);
         // defaults.setDebugLogging(false);
         // defaults.setDelimiter("/");
         // return Optional.of(defaults);

@@ -34,20 +34,6 @@ public record FactryHistorianConfig(
         boolean skipTlsVerification,
 
         @FormCategory("Advanced")
-        @Label("Batch Size")
-        @FormField(FormFieldType.NUMBER)
-        @DefaultValue("10")
-        @Description("Data points are buffered and written in batches. A write is triggered when this many points have accumulated, or when the batch interval expires — whichever comes first. (default: 10)")
-        int batchSize,
-
-        @FormCategory("Advanced")
-        @Label("Batch Interval (ms)")
-        @FormField(FormFieldType.NUMBER)
-        @DefaultValue("5000")
-        @Description("Maximum time in milliseconds to wait before writing buffered data points. A write is triggered when this interval expires, or when the batch size is reached — whichever comes first. (default: 5000)")
-        int batchIntervalMs,
-
-        @FormCategory("Advanced")
         @Label("Debug Logging")
         @FormField(FormFieldType.CHECKBOX)
         @DefaultValue("false")
@@ -69,8 +55,6 @@ public record FactryHistorianConfig(
         settings.setToken(token);
         settings.setUseTls(useTls);
         settings.setSkipTlsVerification(skipTlsVerification);
-        settings.setBatchSize(batchSize);
-        settings.setBatchIntervalMs(batchIntervalMs);
         settings.setDebugLogging(debugLogging);
         settings.setDelimiter(delimiter);
         return settings;
@@ -81,8 +65,6 @@ public record FactryHistorianConfig(
                 settings.getToken(),
                 settings.isUseTls(),
                 settings.isSkipTlsVerification(),
-                settings.getBatchSize(),
-                settings.getBatchIntervalMs(),
                 settings.isDebugLogging(),
                 settings.getDelimiter()
         );

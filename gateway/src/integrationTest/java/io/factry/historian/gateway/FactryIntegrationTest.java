@@ -57,7 +57,7 @@ class FactryIntegrationTest {
 
     private static final String HISTORIAN_NAME = System.getProperty("historian.name", "Factry Historian");
 
-    /** Wait time for the module's batch flush (default 5s interval + margin). */
+    /** Wait time for Store &amp; Forward to flush pending points to the sink (+ margin). */
     private static final int BATCH_FLUSH_WAIT_MS = 8_000;
 
     /** Unique prefix per test run to avoid measurement collisions. */

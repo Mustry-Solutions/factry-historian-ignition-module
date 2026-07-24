@@ -9,8 +9,6 @@ public class FactryHistorianSettings implements HistorianSettings {
 
     private String collectorUUID = "";
     private String collectorName = "";
-    private int batchSize = 100;
-    private int batchIntervalMs = 5000;
     private static final String DEFAULT_GRPC_HOST = "localhost";
     private static final int DEFAULT_GRPC_PORT = 9876;
     private String grpcHost = DEFAULT_GRPC_HOST;
@@ -42,22 +40,6 @@ public class FactryHistorianSettings implements HistorianSettings {
 
     public void setCollectorName(String collectorName) {
         this.collectorName = collectorName;
-    }
-
-    public int getBatchSize() {
-        return batchSize;
-    }
-
-    public void setBatchSize(int batchSize) {
-        this.batchSize = batchSize;
-    }
-
-    public int getBatchIntervalMs() {
-        return batchIntervalMs;
-    }
-
-    public void setBatchIntervalMs(int batchIntervalMs) {
-        this.batchIntervalMs = batchIntervalMs;
     }
 
     public String getGrpcHost() {
@@ -177,12 +159,6 @@ public class FactryHistorianSettings implements HistorianSettings {
         if (grpcPort < 1 || grpcPort > 65535) {
             throw new IllegalArgumentException("Port must be between 1 and 65535");
         }
-        if (batchSize < 1) {
-            throw new IllegalArgumentException("Batch size must be at least 1");
-        }
-        if (batchIntervalMs < 100) {
-            throw new IllegalArgumentException("Batch interval must be at least 100 ms");
-        }
     }
 
     @Override
@@ -192,8 +168,6 @@ public class FactryHistorianSettings implements HistorianSettings {
                 ", collectorUUID='" + collectorUUID + '\'' +
                 ", grpcHost='" + grpcHost + '\'' +
                 ", grpcPort=" + grpcPort +
-                ", batchSize=" + batchSize +
-                ", batchIntervalMs=" + batchIntervalMs +
                 ", debugLogging=" + debugLogging +
                 ", useTls=" + useTls +
                 ", skipTlsVerification=" + skipTlsVerification +

@@ -12,8 +12,6 @@ class FactryHistorianSettingsTest {
         s.setCollectorName("Ignition");
         s.setGrpcHost("historian.example.com");
         s.setGrpcPort(8001);
-        s.setBatchSize(100);
-        s.setBatchIntervalMs(5000);
         return s;
     }
 
@@ -107,54 +105,6 @@ class FactryHistorianSettingsTest {
     void validate_portBoundaryHigh() {
         FactryHistorianSettings s = validSettings();
         s.setGrpcPort(65535);
-        assertDoesNotThrow(s::validate);
-    }
-
-    // --- batchSize ---
-
-    @Test
-    void validate_batchSizeZero() {
-        FactryHistorianSettings s = validSettings();
-        s.setBatchSize(0);
-        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, s::validate);
-        assertTrue(e.getMessage().contains("Batch size"));
-    }
-
-    @Test
-    void validate_batchSizeNegative() {
-        FactryHistorianSettings s = validSettings();
-        s.setBatchSize(-10);
-        assertThrows(IllegalArgumentException.class, s::validate);
-    }
-
-    @Test
-    void validate_batchSizeOne() {
-        FactryHistorianSettings s = validSettings();
-        s.setBatchSize(1);
-        assertDoesNotThrow(s::validate);
-    }
-
-    // --- batchIntervalMs ---
-
-    @Test
-    void validate_batchIntervalTooLow() {
-        FactryHistorianSettings s = validSettings();
-        s.setBatchIntervalMs(50);
-        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, s::validate);
-        assertTrue(e.getMessage().contains("Batch interval"));
-    }
-
-    @Test
-    void validate_batchIntervalZero() {
-        FactryHistorianSettings s = validSettings();
-        s.setBatchIntervalMs(0);
-        assertThrows(IllegalArgumentException.class, s::validate);
-    }
-
-    @Test
-    void validate_batchIntervalMinimum() {
-        FactryHistorianSettings s = validSettings();
-        s.setBatchIntervalMs(100);
         assertDoesNotThrow(s::validate);
     }
 }
