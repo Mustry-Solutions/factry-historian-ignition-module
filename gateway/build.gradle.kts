@@ -112,6 +112,13 @@ tasks.register<Test>("integrationTest") {
     testLogging {
         events("passed", "skipped", "failed")
         showStandardStreams = true
+        afterSuite(KotlinClosure2<TestDescriptor, TestResult, Unit>({ desc, result ->
+            if (desc.parent == null) {
+                println("\nTest results: ${result.resultType} " +
+                    "(${result.testCount} tests, ${result.successfulTestCount} passed, " +
+                    "${result.failedTestCount} failed, ${result.skippedTestCount} skipped)")
+            }
+        }))
     }
 }
 
