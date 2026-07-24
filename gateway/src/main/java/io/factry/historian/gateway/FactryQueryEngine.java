@@ -302,23 +302,29 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         long startMs = System.currentTimeMillis();
 
         try {
-            // Build the processing context and initialize
-            ProcessingContext<RawQueryKey, DataPointType> context =
-                    DefaultProcessingContext.<RawQueryKey, DataPointType>builder().build();
-            if (!processor.onInitialize(context)) {
-                logger.warn("Processor rejected initialization");
-                return Optional.of(0);
-            }
+            // Map each query key to its historian node AND initialize the processor with
+            // a context that carries every key's data type (String / Float / Boolean).
+            // This is what tells the framework how to type each result column.
+            //
+            // The previous code built an EMPTY context, so the framework had no type
+            // information and defaulted every column to numeric. A string value then
+            // failed to coerce to a number, and because that coercion happens while the
+            // framework commits the shared result set, it aborted the ENTIRE query —
+            // taking any numeric tags in the same query down with it (0 rows for all).
+            // mapKeysToNodes() populates the context from queryForHistoricalNodes() and
+            // calls processor.onInitialize() for us.
+            Map<RawQueryKey, ? extends HistoricalNode> keyToNode =
+                    mapKeysToNodes(options, processor, RawQueryKey::source);
 
             // Map query keys to measurement UUIDs
-            var queryKeys = options.getQueryKeys();
             List<String> measurementUUIDs = new ArrayList<>();
             Map<String, RawQueryKey> uuidToKeyMap = new HashMap<>();
 
-            for (RawQueryKey key : queryKeys) {
+            for (RawQueryKey key : options.getQueryKeys()) {
                 QualifiedPath source = key.source();
                 String tagPath = toStoredTagPath(source);
-                String uuid = lookupUUID(tagPath);
+                // Only query keys that resolved to a node; mapKeysToNodes omits the rest.
+                String uuid = keyToNode.containsKey(key) ? lookupUUID(tagPath) : null;
 
                 if (uuid != null) {
                     measurementUUIDs.add(uuid);
@@ -327,6 +333,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                         logger.debug("Mapped " + source + " -> " + tagPath + " -> " + uuid);
                     }
                 } else {
+                    // Node/measurement not found — fail only this key so the framework
+                    // emits nulls for its column instead of aborting the whole query.
                     logger.warn("No measurement UUID found for tag path: " + tagPath);
                     processor.onKeyFailure(key, QualityCode.Bad_NotFound);
                 }

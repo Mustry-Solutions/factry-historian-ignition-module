@@ -507,11 +507,9 @@ class FactryIntegrationTest {
         ));
         assertTrue((Boolean) result.get("success"), "queryRawPoints should succeed for string tags");
         int rowCount = ((Number) result.get("rowCount")).intValue();
-        if (rowCount == 0) {
-            log("system.historian returned 0 rows (Ignition framework drops string values in DataSet)");
-        } else {
-            pass("system.historian returned " + rowCount + " rows");
-        }
+        assertTrue(rowCount >= 3,
+                "String tags must return their history via system.historian, got " + rowCount + " rows");
+        pass("system.historian returned " + rowCount + " rows");
     }
 
     @Test
@@ -565,6 +563,80 @@ class FactryIntegrationTest {
         log("Got " + rowCount + " rows");
         assertTrue(rowCount >= 5, "Expected >= 5 rows");
         pass("Row count");
+    }
+
+    @Test
+    @Order(95)
+    @DisplayName("Mixed string + numeric raw query returns both instead of aborting")
+    void testMixedStringAndNumericQuery() throws Exception {
+        section("Mixed String + Numeric Query");
+
+        long baseTs = 1700065000000L;
+
+        // Numeric tag with 5 points
+        String numTag = TEST_PREFIX + "/MixedNumeric";
+        String numUuid = createMeasurement(storedTagPath(numTag), "number");
+        assertFalse(numUuid.isEmpty(), "Numeric measurement UUID should not be empty");
+        List<Point> numPoints = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            numPoints.add(buildPoint(numUuid, baseTs + i * 1000,
+                    Value.newBuilder().setNumberValue(10.0 + i).build()));
+        }
+        grpcStub.createPoints(Points.newBuilder().addAllPoints(numPoints).build());
+        log("Inserted 5 numeric points");
+
+        // String tag with 3 points
+        String strTag = TEST_PREFIX + "/MixedString";
+        String strUuid = createMeasurement(storedTagPath(strTag), "string");
+        assertFalse(strUuid.isEmpty(), "String measurement UUID should not be empty");
+        List<Point> strPoints = List.of(
+                buildPoint(strUuid, baseTs, Value.newBuilder().setStringValue("alpha").build()),
+                buildPoint(strUuid, baseTs + 1000, Value.newBuilder().setStringValue("beta").build()),
+                buildPoint(strUuid, baseTs + 2000, Value.newBuilder().setStringValue("gamma").build())
+        );
+        grpcStub.createPoints(Points.newBuilder().addAllPoints(strPoints).build());
+        log("Inserted 3 string points");
+        Thread.sleep(2000);
+
+        // Query BOTH tags in a single raw query
+        Map<String, Object> result = webdevPost("test/queryRaw", Map.of(
+                "paths", List.of(
+                        qualifiedPath(HISTORIAN_NAME, numTag),
+                        qualifiedPath(HISTORIAN_NAME, strTag)),
+                "startDate", baseTs - 1000,
+                "endDate", baseTs + 5000
+        ));
+
+        // BUG being reproduced: a string tag in the mix aborts the entire query,
+        // so even the numeric tag returns nothing.
+        assertTrue((Boolean) result.get("success"),
+                "Mixed string+numeric query must not abort — error: " + result.get("error"));
+        pass("Mixed query returned success (did not abort)");
+
+        @SuppressWarnings("unchecked")
+        List<String> columns = (List<String>) result.get("columns");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rows = (List<Map<String, Object>>) result.get("rows");
+        log("Columns: " + columns);
+        log("Row count: " + result.get("rowCount"));
+
+        // Both tags must appear as columns
+        String numCol = columns.stream().filter(c -> c.contains("MixedNumeric")).findFirst().orElse(null);
+        String strCol = columns.stream().filter(c -> c.contains("MixedString")).findFirst().orElse(null);
+        assertNotNull(numCol, "Numeric tag column must be present, got " + columns);
+        assertNotNull(strCol, "String tag column must be present, got " + columns);
+
+        // The good (numeric) tag must still return its values
+        long numValues = rows.stream().filter(r -> r.get(numCol) != null).count();
+        assertTrue(numValues >= 5, "Numeric tag must return its 5 values, got " + numValues);
+        pass("Numeric tag returned " + numValues + " values in the mixed query");
+
+        // The string tag should return its history too — strings can have history
+        // and must work, not be silently dropped.
+        long strValues = rows.stream().filter(r -> r.get(strCol) != null).count();
+        log("String tag returned " + strValues + " non-null values");
+        assertTrue(strValues >= 3, "String tag must return its 3 values, got " + strValues);
+        pass("String tag returned " + strValues + " values in the mixed query");
     }
 
     @Test

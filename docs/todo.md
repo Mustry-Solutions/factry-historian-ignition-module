@@ -56,12 +56,14 @@
 ## Wannnes's list
 
 Condensed below, more detail and minor items are in the attached document.
+
+- 7. Querying the raw history of a string tag throws an error and aborts the whole query, so a query mixing string and numeric tags fails entirely instead of just skipping the string one.
+
 1. Writes to new tag during historian outage(or not reachable) are silently dropped, it tries to create the new measurement a couple of times but ends up dropping the point
 2. When configuring a new historian in ignition and leaving "Use TLS" unchecked, after submitting it gets enabled anyway
 3. Editing an array tag in ignition only sends the changes indexes to historian, for example changing [1,2,3,4] to [1,2,4,5] gets sent as the value [4,5]
 4. Not sure how far implementation ever got for this but I couldn't get metadata or engineering specs to work when creating new tags (as it only is supported on creation)
 6. TLS only connects with "Skip TLS Verification" on, which leaves it unauthenticated. Confirmed against a deployed historian using a normal Let's Encrypt cert: the module trusts only its bundled certificate and rejects everything else, so verification always fails. It should also trust the system/public CAs alongside ours.
-- 7. Querying the raw history of a string tag throws an error and aborts the whole query, so a query mixing string and numeric tags fails entirely instead of just skipping the string one.
 
 + 5. Version is on 1.0.7 at the moment, would be good to make it will be 1.0.0 when we do the first release
 + 8. The Batch size and Batch interval configurations do not seem to be used, so unless I'm wrong could be better to remove those
