@@ -58,7 +58,7 @@
 Condensed below, more detail and minor items are in the attached document.
 
 3. Editing an array tag in ignition only sends the changes indexes to historian, for example changing [1,2,3,4] to [1,2,4,5] gets sent as the value [4,5]
-- 4. Not sure how far implementation ever got for this but I couldn't get metadata or engineering specs to work when creating new tags (as it only is supported on creation)
+? 4. Not sure how far implementation ever got for this but I couldn't get metadata or engineering specs to work when creating new tags (as it only is supported on creation)
 
 
 
