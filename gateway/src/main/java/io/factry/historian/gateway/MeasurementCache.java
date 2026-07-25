@@ -13,6 +13,7 @@ import io.factry.historian.proto.GetAssetPropertiesRequest;
 import io.factry.historian.proto.GetAssetsRequest;
 import io.factry.historian.proto.GetMeasurementsByFilterRequest;
 import io.factry.historian.proto.Measurement;
+import io.factry.historian.proto.MetadataProperty;
 import io.factry.historian.proto.MeasurementRequest;
 import io.factry.historian.proto.Measurements;
 import io.factry.historian.proto.Pagination;
@@ -218,10 +219,20 @@ public class MeasurementCache {
                     builder.setDescription(description);
                 }
                 if (!metadata.isEmpty()) {
+                    // Write remaining properties (engUnit, engLow, engHigh, ...) to BOTH
+                    // the metadata map and the attributes Struct. The metadata map is the
+                    // symmetric read/write channel — it round-trips back via
+                    // Measurement.metadata on queryMetadata (the read-side proto has no
+                    // 'attributes' field, so attributes alone would be write-only). We keep
+                    // attributes too so the values remain visible in the Factry UI.
                     Struct.Builder attrs = Struct.newBuilder();
                     for (Map.Entry<String, String> entry : metadata.entrySet()) {
                         attrs.putFields(entry.getKey(),
                                 Value.newBuilder().setStringValue(entry.getValue()).build());
+                        builder.putMetadata(entry.getKey(), MetadataProperty.newBuilder()
+                                .setDataType(MetadataProperty.DataType.STRING)
+                                .setValue(Value.newBuilder().setStringValue(entry.getValue()).build())
+                                .build());
                     }
                     builder.setAttributes(attrs);
                 }

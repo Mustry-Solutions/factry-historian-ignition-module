@@ -50,6 +50,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -528,6 +529,26 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             }
             if (specs.hasLimitHi()) {
                 ps.set(new BasicProperty<>("limitHigh", Double.class), specs.getLimitHi());
+            }
+        }
+
+        // Custom metadata properties stored via storeMetadata (engUnit, engLow, engHigh,
+        // and any others) round-trip through the measurement's metadata map. Surface any
+        // that weren't already provided above. (The read-side Measurement proto has no
+        // 'description'/'attributes' fields, so the metadata map is the only channel that
+        // round-trips storeMetadata values.)
+        Set<String> existing = new HashSet<>();
+        for (var pv : ps) {
+            existing.add(pv.getProperty().getName());
+        }
+        for (Map.Entry<String, io.factry.historian.proto.MetadataProperty> e : m.getMetadataMap().entrySet()) {
+            String name = e.getKey();
+            if (existing.contains(name)) {
+                continue; // don't clobber a value already provided by engineeringSpecs
+            }
+            Object val = protoValueToJava(e.getValue().getValue());
+            if (val != null) {
+                ps.set(new BasicProperty<>(name, String.class), val.toString());
             }
         }
 
