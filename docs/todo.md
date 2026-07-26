@@ -58,6 +58,18 @@
 Condensed below, more detail and minor items are in the attached document.
 
 3. Editing an array tag in ignition only sends the changes indexes to historian, for example changing [1,2,3,4] to [1,2,4,5] gets sent as the value [4,5]
+''' 
+question asked form factry
+The Ignition SDK hands only the changed elements over to the module's storage engine, e.g. changing [1,2,3,4] → [1,2,4,5] arrives as just {2:4, 3:5}.
+
+We can't reliably reconstruct the full array on our side: the changed elements come through Store & Forward, so by the time we process them the live tag value may have moved on. Storing the last values in the module would make it stateful, and its initialization could be error-prone.
+
+So I'd prefer to send the partial update and have the historian merge it onto the last stored array (keeping unchanged indices).
+
+- Option 1 — indexed changes only: send {2:4, 3:5} (index → value).
+- Option 2 — positional array with nulls: send [null, null, 4, 5], where null means "unchanged, keep the previous value at that index".
+'''
+
 ? 4. Not sure how far implementation ever got for this but I couldn't get metadata or engineering specs to work when creating new tags (as it only is supported on creation)
 
 
@@ -65,7 +77,7 @@ Condensed below, more detail and minor items are in the attached document.
 1. Writes to new tag during historian outage(or not reachable) are silently dropped, it tries to create the new measurement a couple of times but ends up dropping the point
 
 2. When configuring a new historian in ignition and leaving "Use TLS" unchecked, after submitting it gets enabled anyway
-6. TLS only connects with "Skip TLS Verification" on, which leaves it unauthenticated. Confirmed against a deployed historian using a normal Let's Encrypt cert: the module trusts only its bundled certificate and rejects everything else, so verification always fails. It should also trust the system/public CAs alongside ours.
+3. TLS only connects with "Skip TLS Verification" on, which leaves it unauthenticated. Confirmed against a deployed historian using a normal Let's Encrypt cert: the module trusts only its bundled certificate and rejects everything else, so verification always fails. It should also trust the system/public CAs alongside ours.
 
 + 5. Version is on 1.0.7 at the moment, would be good to make it will be 1.0.0 when we do the first release
 + 7. Querying the raw history of a string tag throws an error and aborts the whole query, so a query mixing string and numeric tags fails entirely instead of just skipping the string one.
