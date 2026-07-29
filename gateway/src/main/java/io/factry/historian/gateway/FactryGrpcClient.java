@@ -186,7 +186,17 @@ public class FactryGrpcClient {
         logger.debug("Sending CreateMeasurements with {} measurements", request.getMeasurementsCount());
         channelLock.readLock().lock();
         try {
-            return blockingStub.createMeasurements(request);
+            CreateMeasurementsReply reply = blockingStub
+                    .withDeadlineAfter(WRITE_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .createMeasurements(request);
+            connected = true;
+            return reply;
+        } catch (StatusRuntimeException e) {
+            Status.Code code = e.getStatus().getCode();
+            if (code == Status.Code.UNAVAILABLE || code == Status.Code.DEADLINE_EXCEEDED) {
+                connected = false;
+            }
+            throw e;
         } finally {
             channelLock.readLock().unlock();
         }

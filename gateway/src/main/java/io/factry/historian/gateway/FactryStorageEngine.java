@@ -94,6 +94,14 @@ public class FactryStorageEngine extends AbstractStorageEngine {
                 return StorageResult.exception(
                         new RuntimeException("Array measurement(s) being created, retry later"), points);
             }
+            if (built.hasFailedCreations) {
+                // Measurement creation failed for supported-type points (Factry likely
+                // unreachable). Return an exception so S&F keeps them in pending and retries
+                // instead of silently dropping them.
+                logger.warn("Could not create measurement(s) for new tag(s) — S&F will retry");
+                return StorageResult.exception(
+                        new RuntimeException("Measurement creation failed, retry later"), points);
+            }
             if (measurementCache.size() == 0) {
                 // All points skipped because measurement cache is empty (Factry likely down).
                 // Return exception so S&F keeps them in pending for retry.
@@ -149,11 +157,14 @@ public class FactryStorageEngine extends AbstractStorageEngine {
         final Points.Builder pointsBuilder;
         final Set<String> usedUUIDs;
         final boolean hasSkippedArrays;
+        final boolean hasFailedCreations;
 
-        BuildResult(Points.Builder pointsBuilder, Set<String> usedUUIDs, boolean hasSkippedArrays) {
+        BuildResult(Points.Builder pointsBuilder, Set<String> usedUUIDs,
+                    boolean hasSkippedArrays, boolean hasFailedCreations) {
             this.pointsBuilder = pointsBuilder;
             this.usedUUIDs = usedUUIDs;
             this.hasSkippedArrays = hasSkippedArrays;
+            this.hasFailedCreations = hasFailedCreations;
         }
     }
 
@@ -167,6 +178,10 @@ public class FactryStorageEngine extends AbstractStorageEngine {
     private BuildResult buildPoints(List<AtomicPoint<?>> points) {
         Points.Builder pointsBuilder = Points.newBuilder();
         Set<String> usedUUIDs = new HashSet<>();
+        // Tracks whether any point was skipped because its measurement could not be
+        // created (Factry unreachable or creation still in progress). Such points must
+        // NOT be dropped — sendPoints returns an exception so S&F retries them.
+        boolean hasFailedCreations = false;
         // Group array-indexed points by base path so they can be sent as a single ListValue.
         // Non-array points are processed immediately.
         // Key: base tag path, Value: sorted map of index → (point, tagPath)
@@ -189,14 +204,25 @@ public class FactryStorageEngine extends AbstractStorageEngine {
             }
 
             // Non-array point — process normally
-            String measurementUUID = measurementCache.getOrCreateUUID(tagPath, grpcClient, value);
-            if (measurementUUID == null || measurementUUID.isEmpty()) {
-                logger.debug("Skipping point for '" + tagPath + "': no measurement UUID");
+            if (value == null) {
+                // Nothing to store — genuinely skip (not a failure).
+                logger.debug("Skipping point for '" + tagPath + "': null value");
                 continue;
             }
 
-            if (value == null) {
-                logger.debug("Skipping point for '" + tagPath + "': null value");
+            String measurementUUID = measurementCache.getOrCreateUUID(tagPath, grpcClient, value);
+            if (measurementUUID == null || measurementUUID.isEmpty()) {
+                if (MeasurementCache.toFactryDataType(value) == null) {
+                    // Unsupported value type — creation will never succeed; skip permanently.
+                    logger.debug("Skipping point for '" + tagPath + "': unsupported value type "
+                            + value.getClass().getName());
+                } else {
+                    // Supported type but the measurement could not be created (Factry
+                    // unreachable, or creation still in progress). Defer for retry so the
+                    // point is not silently dropped.
+                    logger.debug("Deferring point for '" + tagPath + "': measurement not created yet");
+                    hasFailedCreations = true;
+                }
                 continue;
             }
 
@@ -275,7 +301,7 @@ public class FactryStorageEngine extends AbstractStorageEngine {
             logger.debug("Built array point for '" + basePath + "' with " + elements.size() + " elements");
         }
 
-        return new BuildResult(pointsBuilder, usedUUIDs, hasSkippedArrays);
+        return new BuildResult(pointsBuilder, usedUUIDs, hasSkippedArrays, hasFailedCreations);
     }
 
     @Override
