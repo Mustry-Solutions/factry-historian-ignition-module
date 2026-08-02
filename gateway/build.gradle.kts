@@ -95,16 +95,26 @@ tasks.register<Test>("integrationTest") {
     // Always re-run — integration tests depend on external services, not just code
     outputs.upToDateWhen { false }
 
-    // Pass system properties from Gradle command line (-P) or env vars.
-    // Token and UUID are read from the historian config created by setup-historians.sh.
+    // Resolve the Factry collector token, in priority order:
+    //   1. COLLECTOR_TOKEN env var (explicit override)
+    //   2. script/.collector-token file (durable local token — survives UI reconfig,
+    //      which stores the historian token encrypted rather than in plaintext config)
+    //   3. the historian config created by setup-historians.sh
     val historianConfigDir = file("../ignition/data/config/resources/core/com.inductiveautomation.historian/historian-provider")
     val tokenFromConfig = findTokenFromHistorianConfig(historianConfigDir)
+    val tokenFile = rootProject.file("script/.collector-token")
+    val tokenFromFile = if (tokenFile.exists()) tokenFile.readText().trim() else ""
+    val resolvedToken = when {
+        !System.getenv("COLLECTOR_TOKEN").isNullOrBlank() -> System.getenv("COLLECTOR_TOKEN")
+        tokenFromFile.isNotBlank() -> tokenFromFile
+        else -> tokenFromConfig
+    }
 
     systemProperty("gateway.url", System.getenv("GATEWAY_URL") ?: "http://localhost:8089")
     systemProperty("webdev.project", System.getenv("WEBDEV_PROJECT") ?: "TestFactry")
     systemProperty("grpc.host", System.getenv("GRPC_HOST") ?: "localhost")
     systemProperty("grpc.port", System.getenv("GRPC_PORT") ?: "8001")
-    systemProperty("collector.token", System.getenv("COLLECTOR_TOKEN") ?: tokenFromConfig)
+    systemProperty("collector.token", resolvedToken)
     systemProperty("gateway.system.name", System.getenv("GATEWAY_SYSTEM_NAME") ?: "Ignition-FactryTest")
     systemProperty("collector.name", System.getenv("COLLECTOR_NAME") ?: "Ignition")
     systemProperty("historian.name", System.getenv("HISTORIAN_NAME") ?: "Factry Historian")

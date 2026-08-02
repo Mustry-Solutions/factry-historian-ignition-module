@@ -36,7 +36,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.SSLException;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509TrustManager;
 import java.io.InputStream;
+import java.security.KeyStore;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -228,13 +235,19 @@ public class FactryGrpcClient {
                 if (skipTlsVerification) {
                     sslBuilder.trustManager(InsecureTrustManagerFactory.INSTANCE);
                 } else {
-                    InputStream caCert = getClass().getClassLoader().getResourceAsStream(CA_CERT_RESOURCE);
-                    if (caCert != null) {
-                        sslBuilder.trustManager(caCert);
-                        logger.info("Using bundled Factry CA certificate for TLS verification");
-                    } else {
-                        logger.warn("Bundled CA certificate '{}' not found, falling back to system trust store",
-                                CA_CERT_RESOURCE);
+                    // Trust the system/public CAs AND the bundled Factry CA, so both
+                    // publicly-signed certificates (e.g. Let's Encrypt) and Factry-signed
+                    // ones verify without having to disable verification entirely.
+                    try (InputStream caCert = getClass().getClassLoader().getResourceAsStream(CA_CERT_RESOURCE)) {
+                        if (caCert == null) {
+                            logger.warn("Bundled CA certificate '{}' not found; using system CAs only", CA_CERT_RESOURCE);
+                        } else {
+                            logger.info("TLS verification using system CAs plus bundled Factry CA certificate");
+                        }
+                        sslBuilder.trustManager(buildCombinedTrustManagerFactory(caCert));
+                    } catch (Exception e) {
+                        logger.warn("Failed to build combined trust store ({}), using the system default trust store",
+                                e.getMessage());
                     }
                 }
                 this.channel = NettyChannelBuilder.forAddress(host, port)
@@ -255,6 +268,44 @@ public class FactryGrpcClient {
 
         this.blockingStub = HistorianGrpc.newBlockingStub(channel)
                 .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers));
+    }
+
+    /**
+     * Build a TrustManagerFactory that trusts the JVM's default (system/public) CAs plus the
+     * given extra CA certificate(s). This lets the module verify servers using either a
+     * publicly-signed certificate (e.g. Let's Encrypt) or a Factry-signed one, without having
+     * to turn off certificate verification. If {@code extraCaCerts} is null, only the system
+     * CAs are trusted.
+     */
+    static TrustManagerFactory buildCombinedTrustManagerFactory(InputStream extraCaCerts) throws Exception {
+        KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
+        ks.load(null, null); // start with an empty keystore
+        int idx = 0;
+
+        // 1. System/public CAs — take the accepted issuers from the default trust manager.
+        TrustManagerFactory systemTmf =
+                TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        systemTmf.init((KeyStore) null); // null → JVM default trust store
+        for (TrustManager tm : systemTmf.getTrustManagers()) {
+            if (tm instanceof X509TrustManager) {
+                for (X509Certificate cert : ((X509TrustManager) tm).getAcceptedIssuers()) {
+                    ks.setCertificateEntry("system-ca-" + (idx++), cert);
+                }
+            }
+        }
+
+        // 2. Extra (bundled Factry) CA certificate(s).
+        if (extraCaCerts != null) {
+            CertificateFactory cf = CertificateFactory.getInstance("X.509");
+            for (Certificate cert : cf.generateCertificates(extraCaCerts)) {
+                ks.setCertificateEntry("extra-ca-" + (idx++), cert);
+            }
+        }
+
+        TrustManagerFactory combined =
+                TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        combined.init(ks);
+        return combined;
     }
 
     private static String tlsLabel(boolean useTls, boolean skipTlsVerification) {
