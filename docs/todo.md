@@ -68,13 +68,15 @@ implemented suggestion: query from factry
 
 query array doesn't work, email sent to Wannes
 
+
 '''
  
   
 
 
-1. When configuring a new historian in ignition and leaving "Use TLS" unchecked, after submitting it gets enabled anyway
-2. TLS only connects with "Skip TLS Verification" on, which leaves it unauthenticated. Confirmed against a deployed historian using a normal Let's Encrypt cert: the module trusts only its bundled certificate and rejects everything else, so verification always fails. It should also trust the system/public CAs alongside ours.
++ 1. When configuring a new historian in ignition and leaving "Use TLS" unchecked, after submitting it gets enabled anyway
+ ( I agree with your reasoning: since Ignition's create form doesn't pre-fill @DefaultValue, the checkbox renders unchecked, but on submit the old default (true) was applied — so "looks off, saved on." Setting the default to false (FactryHistorianConfig.java:25) makes what you see match what you get.)
+1. TLS only connects with "Skip TLS Verification" on, which leaves it unauthenticated. Confirmed against a deployed historian using a normal Let's Encrypt cert: the module trusts only its bundled certificate and rejects everything else, so verification always fails. It should also trust the system/public CAs alongside ours.
 
 
 
