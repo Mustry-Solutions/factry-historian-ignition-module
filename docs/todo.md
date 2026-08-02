@@ -64,10 +64,10 @@ The Ignition SDK hands only the changed elements over to the module's storage en
 
 We can't reliably reconstruct the full array on our side: the changed elements come through Store & Forward, so by the time we process them the live tag value may have moved on. Storing the last values in the module would make it stateful, and its initialization could be error-prone.
 
-So I'd prefer to send the partial update and have the historian merge it onto the last stored array (keeping unchanged indices).
+implemented suggestion: query from factry
 
-- Option 1 — indexed changes only: send {2:4, 3:5} (index → value).
-- Option 2 — positional array with nulls: send [null, null, 4, 5], where null means "unchanged, keep the previous value at that index".
+query array doesn't work, email sent to Wannes
+
 '''
  
   

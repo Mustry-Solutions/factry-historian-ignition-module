@@ -16,6 +16,10 @@ import io.grpc.StatusRuntimeException;
 import com.google.protobuf.Value;
 import io.factry.historian.proto.Point;
 import io.factry.historian.proto.Points;
+import io.factry.historian.proto.QueryTimeseriesRequest;
+import io.factry.historian.proto.QueryTimeseriesResponse;
+import io.factry.historian.proto.Series;
+import io.factry.historian.proto.SeriesPoint;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -171,6 +175,17 @@ public class FactryStorageEngine extends AbstractStorageEngine {
     /** Tracks array base paths for which measurement creation is in progress on a background thread. */
     private final Set<String> asyncArrayCreations = ConcurrentHashMap.newKeySet();
 
+    /**
+     * Last-known complete array value per base path (index → value). Ignition historizes
+     * array elements independently and, thanks to per-element deadbands, only sends the
+     * indices that actually changed — e.g. changing [1,2,3,4] to [1,2,4,5] arrives as just
+     * {2:4, 3:5}. We merge those partial updates into this map so the full array [1,2,4,5]
+     * is stored instead of the truncated [4,5]. On a cache miss (first write, or the first
+     * write after a gateway restart) the map is seeded from Factry's last stored array
+     * value. This is not the most efficient approach, but array tags are relatively rare.
+     */
+    private final Map<String, java.util.TreeMap<Integer, Object>> lastArrayValues = new ConcurrentHashMap<>();
+
     /** Pattern matching array-indexed tag paths like "some/path[0]", "some/path[123]". */
     private static final java.util.regex.Pattern ARRAY_INDEX_PATTERN =
             java.util.regex.Pattern.compile("^(.+)\\[(\\d+)]$");
@@ -275,18 +290,26 @@ public class FactryStorageEngine extends AbstractStorageEngine {
                 continue;
             }
 
-            // Build a ListValue with elements in index order
-            com.google.protobuf.ListValue.Builder listBuilder = com.google.protobuf.ListValue.newBuilder();
-            for (AtomicPoint<?> element : elements.values()) {
-                Object val = element.value();
-                if (val instanceof Boolean) {
-                    listBuilder.addValues(Value.newBuilder().setBoolValue((Boolean) val));
-                } else if (val instanceof Number) {
-                    listBuilder.addValues(Value.newBuilder().setNumberValue(((Number) val).doubleValue()));
-                } else if (val != null) {
-                    listBuilder.addValues(Value.newBuilder().setStringValue(val.toString()));
-                } else {
-                    listBuilder.addValues(Value.newBuilder().setNullValue(com.google.protobuf.NullValue.NULL_VALUE));
+            // Merge the incoming (possibly partial) element changes into the last-known
+            // full array so unchanged elements are preserved, then store the whole array.
+            java.util.TreeMap<Integer, Object> state =
+                    lastArrayValues.computeIfAbsent(basePath, k -> new java.util.TreeMap<>());
+            com.google.protobuf.ListValue.Builder listBuilder;
+            synchronized (state) {
+                if (state.isEmpty()) {
+                    // Cache miss (first store for this array, or first after a restart) —
+                    // seed from Factry's last stored value so a partial update from Ignition
+                    // doesn't truncate the array.
+                    seedArrayStateFromFactry(basePath, measurementUUID, state);
+                }
+                for (Map.Entry<Integer, AtomicPoint<?>> e : elements.entrySet()) {
+                    state.put(e.getKey(), e.getValue().value());
+                }
+
+                // Build a ListValue from the full merged array, in index order.
+                listBuilder = com.google.protobuf.ListValue.newBuilder();
+                for (Object val : state.values()) {
+                    appendArrayValue(listBuilder, val);
                 }
             }
 
@@ -298,10 +321,59 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
             pointsBuilder.addPoints(pb.build());
             usedUUIDs.add(measurementUUID);
-            logger.debug("Built array point for '" + basePath + "' with " + elements.size() + " elements");
+            logger.debug("Built array point for '" + basePath + "' with "
+                    + elements.size() + " changed of " + listBuilder.getValuesCount() + " elements");
         }
 
         return new BuildResult(pointsBuilder, usedUUIDs, hasSkippedArrays, hasFailedCreations);
+    }
+
+    /** Append a Java value to a protobuf ListValue as the matching Value kind. */
+    private static void appendArrayValue(com.google.protobuf.ListValue.Builder listBuilder, Object val) {
+        if (val instanceof Boolean) {
+            listBuilder.addValues(Value.newBuilder().setBoolValue((Boolean) val));
+        } else if (val instanceof Number) {
+            listBuilder.addValues(Value.newBuilder().setNumberValue(((Number) val).doubleValue()));
+        } else if (val != null) {
+            listBuilder.addValues(Value.newBuilder().setStringValue(val.toString()));
+        } else {
+            listBuilder.addValues(Value.newBuilder().setNullValue(com.google.protobuf.NullValue.NULL_VALUE));
+        }
+    }
+
+    /**
+     * Seed {@code state} with the elements of the most recent array value stored in Factry
+     * for the given measurement. Used on a cache miss so that a partial element update from
+     * Ignition is merged onto the full array rather than truncating it. Best-effort: on any
+     * error (or when Factry has no prior value) the state is left unchanged.
+     */
+    private void seedArrayStateFromFactry(String basePath, String measurementUUID,
+                                          java.util.TreeMap<Integer, Object> state) {
+        try {
+            QueryTimeseriesRequest req = QueryTimeseriesRequest.newBuilder()
+                    .addMeasurementUUIDs(measurementUUID)
+                    .setStart(Timestamps.fromMillis(0))
+                    .setEnd(Timestamps.fromMillis(System.currentTimeMillis() + 86_400_000L))
+                    .setDesc(true)
+                    .setLimit(1)
+                    .build();
+            QueryTimeseriesResponse reply = grpcClient.queryTimeseries(req);
+            for (Series series : reply.getSeriesList()) {
+                for (SeriesPoint pt : series.getDataPointsList()) {
+                    Value v = pt.getValue();
+                    if (v.getKindCase() == Value.KindCase.LIST_VALUE) {
+                        List<Value> list = v.getListValue().getValuesList();
+                        for (int i = 0; i < list.size(); i++) {
+                            state.put(i, FactryQueryEngine.protoValueToJava(list.get(i)));
+                        }
+                        logger.debug("Seeded array state for '" + basePath + "' with "
+                                + list.size() + " elements from Factry");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Could not seed array state for '" + basePath + "' from Factry: " + e.getMessage());
+        }
     }
 
     @Override
