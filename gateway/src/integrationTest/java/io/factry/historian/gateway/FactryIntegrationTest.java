@@ -931,6 +931,87 @@ class FactryIntegrationTest {
         pass("Browse root returned " + rootNodes.size() + " nodes with folder structure");
     }
 
+    @Test
+    @Order(108)
+    @DisplayName("Array measurement can be queried back (blocked by Factry []float64 bug)")
+    void testArrayQueryRoundTrip() throws Exception {
+        section("Array query round trip");
+
+        String measurementName = storedTagPath(TEST_PREFIX + "/ArrQuery");
+        long ts = 1700400000000L;
+
+        // Create a []number measurement and write an array point directly via gRPC.
+        // (Writing arrays works fine; only the READ path hits the Factry []float64 bug,
+        // so we set the scenario up deterministically rather than via the async S&F path.)
+        grpcStub.createMeasurements(CreateMeasurementsRequest.newBuilder()
+                .addMeasurements(CreateMeasurement.newBuilder()
+                        .setName(measurementName)
+                        .setDataType("[]number")
+                        .setAutoOnboard(true)
+                        .build())
+                .build());
+
+        String uuid = null;
+        for (int i = 0; i < 20 && uuid == null; i++) {
+            Thread.sleep(1000);
+            uuid = findMeasurementUuidByFilter(measurementName);
+        }
+        assertNotNull(uuid, "Array measurement should be created");
+
+        com.google.protobuf.ListValue arrList = com.google.protobuf.ListValue.newBuilder()
+                .addValues(Value.newBuilder().setNumberValue(10))
+                .addValues(Value.newBuilder().setNumberValue(11))
+                .addValues(Value.newBuilder().setNumberValue(12))
+                .addValues(Value.newBuilder().setNumberValue(13))
+                .build();
+        grpcStub.createPoints(Points.newBuilder()
+                .addPoints(buildPoint(uuid, ts, Value.newBuilder().setListValue(arrList).build()))
+                .build());
+        log("Wrote array [10,11,12,13] via gRPC to measurement " + uuid);
+        Thread.sleep(2000);
+
+        // Query the array back via gRPC. This currently fails INSIDE Factry with
+        //   "UNKNOWN: error converting data point value: proto: invalid type: []float64"
+        // (see the email to Factry). Until that's fixed we skip; once fixed, the real
+        // assertions below run and this test passes.
+        QueryTimeseriesResponse resp;
+        try {
+            resp = grpcQuery(uuid, ts - 1000, ts + 1000);
+        } catch (io.grpc.StatusRuntimeException e) {
+            String msg = String.valueOf(e.getMessage());
+            if (msg.contains("[]float64") || msg.contains("error converting data point value")) {
+                Assumptions.abort("KNOWN Factry bug: array measurements can't be queried via gRPC — "
+                        + msg + ". This test will pass once Factry fixes []float64 serialization.");
+            }
+            throw e; // any other gRPC error is unexpected
+        }
+
+        // --- Reached only once Factry can serialize arrays back ---
+        log("Array query returned seriesCount=" + resp.getSeriesCount());
+        for (Series s : resp.getSeriesList()) {
+            log("  fields=" + s.getFieldsList() + " datatype=" + s.getDatatype()
+                    + " points=" + s.getDataPointsCount());
+        }
+        assertFalse(resp.getSeriesList().isEmpty(), "Array query should return at least one series");
+        Series series = resp.getSeries(0);
+        assertTrue(series.getDataPointsCount() >= 1, "Array query should return at least one data point");
+
+        // Best-effort value check: if the array comes back as a single ListValue point,
+        // verify it equals [10,11,12,13]. (If Factry returns it as a multi-field series
+        // instead, the shape is logged above so the assertion can be tightened.)
+        Value v = series.getDataPoints(series.getDataPointsCount() - 1).getValue();
+        if (v.getKindCase() == Value.KindCase.LIST_VALUE) {
+            List<Value> list = v.getListValue().getValuesList();
+            double[] arr = new double[list.size()];
+            for (int i = 0; i < list.size(); i++) {
+                arr[i] = list.get(i).getNumberValue();
+            }
+            log("Array values: " + java.util.Arrays.toString(arr));
+            assertArrayEquals(new double[]{10, 11, 12, 13}, arr, 0.001, "Queried array should match stored");
+        }
+        pass("Array measurement queried back successfully");
+    }
+
     // =========================================================================
     // Error cases
     // =========================================================================
@@ -1278,6 +1359,23 @@ class FactryIntegrationTest {
     private String findMeasurementUuid(String name) {
         Measurements measurements = grpcStub.getMeasurements(MeasurementRequest.newBuilder().build());
         for (Measurement m : measurements.getMeasurementsList()) {
+            if (m.getName().equals(name)) {
+                return m.getUuid();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Find a measurement UUID by name via the filter query (the same RPC the module uses).
+     * Unlike {@link #findMeasurementUuid}, this reliably returns array ([]number) and
+     * not-yet-onboarded measurements.
+     */
+    private String findMeasurementUuidByFilter(String name) {
+        GetMeasurementsByFilterRequest req = GetMeasurementsByFilterRequest.newBuilder()
+                .setKeyword(name)
+                .build();
+        for (Measurement m : grpcStub.getMeasurementsByFilter(req).getMeasurementsList()) {
             if (m.getName().equals(name)) {
                 return m.getUuid();
             }

@@ -317,6 +317,15 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             Map<RawQueryKey, ? extends HistoricalNode> keyToNode =
                     mapKeysToNodes(options, processor, RawQueryKey::source);
 
+            // mapKeysToNodes only initializes the processor when it resolves at least one
+            // node. If NOTHING resolved (every tag is unknown), the processor is not
+            // initialized, so calling onKeyFailure/onComplete on it would throw
+            // "Processor not initialized". Nothing to return in that case — report zero rows.
+            if (keyToNode.isEmpty()) {
+                logger.debug("Raw query resolved no measurements; returning 0 rows");
+                return Optional.of(0);
+            }
+
             // Map query keys to measurement UUIDs
             List<String> measurementUUIDs = new ArrayList<>();
             Map<String, RawQueryKey> uuidToKeyMap = new HashMap<>();
