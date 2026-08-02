@@ -22,8 +22,8 @@ public record FactryHistorianConfig(
         @FormCategory("Connection")
         @Label("Use TLS")
         @FormField(FormFieldType.CHECKBOX)
-        @DefaultValue("true")
-        @Description("Use TLS for gRPC connection. Disable for plaintext connections (e.g. local test servers).")
+        @DefaultValue("false")
+        @Description("Use TLS for the gRPC connection. Leave unchecked for plaintext connections (e.g. local test servers).")
         boolean useTls,
 
         @FormCategory("Connection")
