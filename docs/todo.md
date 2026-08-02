@@ -57,7 +57,7 @@
 
 Condensed below, more detail and minor items are in the attached document.
 
-3. Editing an array tag in ignition only sends the changes indexes to historian, for example changing [1,2,3,4] to [1,2,4,5] gets sent as the value [4,5]
+6. Editing an array tag in ignition only sends the changes indexes to historian, for example changing [1,2,3,4] to [1,2,4,5] gets sent as the value [4,5]
 ''' 
 question asked form factry
 The Ignition SDK hands only the changed elements over to the module's storage engine, e.g. changing [1,2,3,4] → [1,2,4,5] arrives as just {2:4, 3:5}.
@@ -76,11 +76,11 @@ query array doesn't work, email sent to Wannes
 
 + 1. When configuring a new historian in ignition and leaving "Use TLS" unchecked, after submitting it gets enabled anyway
  ( I agree with your reasoning: since Ignition's create form doesn't pre-fill @DefaultValue, the checkbox renders unchecked, but on submit the old default (true) was applied — so "looks off, saved on." Setting the default to false (FactryHistorianConfig.java:25) makes what you see match what you get.)
-1. TLS only connects with "Skip TLS Verification" on, which leaves it unauthenticated. Confirmed against a deployed historian using a normal Let's Encrypt cert: the module trusts only its bundled certificate and rejects everything else, so verification always fails. It should also trust the system/public CAs alongside ours.
++ 2. TLS only connects with "Skip TLS Verification" on, which leaves it unauthenticated. Confirmed against a deployed historian using a normal Let's Encrypt cert: the module trusts only its bundled certificate and rejects everything else, so verification always fails. It should also trust the system/public CAs alongside ours.
 
 
 
-+ 1. Writes to new tag during historian outage(or not reachable) are silently dropped, it tries to create the new measurement a couple of times but ends up dropping the point
++ 3. Writes to new tag during historian outage(or not reachable) are silently dropped, it tries to create the new measurement a couple of times but ends up dropping the point
 
 + 4. Not sure how far implementation ever got for this but I couldn't get metadata or engineering specs to work when creating new tags (as it only is supported on creation)
 
