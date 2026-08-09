@@ -186,10 +186,6 @@ public class FactryStorageEngine extends AbstractStorageEngine {
      */
     private final Map<String, java.util.TreeMap<Integer, Object>> lastArrayValues = new ConcurrentHashMap<>();
 
-    /** Pattern matching array-indexed tag paths like "some/path[0]", "some/path[123]". */
-    private static final java.util.regex.Pattern ARRAY_INDEX_PATTERN =
-            java.util.regex.Pattern.compile("^(.+)\\[(\\d+)]$");
-
     private BuildResult buildPoints(List<AtomicPoint<?>> points) {
         Points.Builder pointsBuilder = Points.newBuilder();
         Set<String> usedUUIDs = new HashSet<>();
@@ -197,10 +193,12 @@ public class FactryStorageEngine extends AbstractStorageEngine {
         // created (Factry unreachable or creation still in progress). Such points must
         // NOT be dropped — sendPoints returns an exception so S&F retries them.
         boolean hasFailedCreations = false;
-        // Group array-indexed points by base path so they can be sent as a single ListValue.
+        // Collect array-indexed element changes per base path. They are grouped by timestamp
+        // and merged into full-array snapshots below (see ArrayPointMerger). A single
+        // store-and-forward batch can carry the same array at several timestamps (e.g.
+        // draining a backlog after an outage), so each timestamp becomes its own row.
         // Non-array points are processed immediately.
-        // Key: base tag path, Value: sorted map of index → (point, tagPath)
-        Map<String, java.util.TreeMap<Integer, AtomicPoint<?>>> arrayGroups = new HashMap<>();
+        Map<String, List<ArrayPointMerger.ArrayElement>> arrayElementsByPath = new HashMap<>();
 
         for (AtomicPoint<?> point : points) {
             String tagPath = TagPathUtil.storagePathToStoredPath(point.source().toString());
@@ -210,11 +208,12 @@ public class FactryStorageEngine extends AbstractStorageEngine {
                     + ", value=" + value
                     + ", valueType=" + (value != null ? value.getClass().getName() : "null"));
 
-            java.util.regex.Matcher m = ARRAY_INDEX_PATTERN.matcher(tagPath);
-            if (m.matches()) {
-                String basePath = m.group(1);
-                int index = Integer.parseInt(m.group(2));
-                arrayGroups.computeIfAbsent(basePath, k -> new java.util.TreeMap<>()).put(index, point);
+            ArrayPointMerger.ArrayRef ref = ArrayPointMerger.parseArrayPath(tagPath);
+            if (ref != null) {
+                long ts = point.timestamp().toEpochMilli();
+                arrayElementsByPath
+                        .computeIfAbsent(ref.basePath, k -> new ArrayList<>())
+                        .add(new ArrayPointMerger.ArrayElement(ref.index, ts, value, point.quality().getCode()));
                 continue;
             }
 
@@ -263,17 +262,19 @@ public class FactryStorageEngine extends AbstractStorageEngine {
         // which would stall the S&F forwarding thread. Instead, we only use the cache
         // for instant lookup and trigger creation asynchronously if missing.
         boolean hasSkippedArrays = false;
-        for (Map.Entry<String, java.util.TreeMap<Integer, AtomicPoint<?>>> entry : arrayGroups.entrySet()) {
+        for (Map.Entry<String, List<ArrayPointMerger.ArrayElement>> entry : arrayElementsByPath.entrySet()) {
             String basePath = entry.getKey();
-            java.util.TreeMap<Integer, AtomicPoint<?>> elements = entry.getValue();
-            AtomicPoint<?> firstElement = elements.firstEntry().getValue();
+            java.util.TreeMap<Long, java.util.TreeMap<Integer, ArrayPointMerger.ArrayElement>> byTimestamp =
+                    ArrayPointMerger.groupByTimestamp(entry.getValue());
+            // Any element serves to detect the array's element type for async creation.
+            ArrayPointMerger.ArrayElement firstElement = byTimestamp.firstEntry().getValue().firstEntry().getValue();
 
             // Non-blocking: only check the cache, don't create
             String measurementUUID = measurementCache.getUUID(basePath);
             if (measurementUUID == null || measurementUUID.isEmpty()) {
                 // Trigger async measurement creation if not already in progress
                 if (asyncArrayCreations.add(basePath)) {
-                    String elementType = MeasurementCache.toFactryDataType(firstElement.value());
+                    String elementType = MeasurementCache.toFactryDataType(firstElement.value);
                     String arrayDataType = "[]" + (elementType != null ? elementType : "string");
                     logger.info("Array measurement '" + basePath + "' not in cache, creating asynchronously (" + arrayDataType + ")");
                     Thread creator = new Thread(() -> {
@@ -291,10 +292,11 @@ public class FactryStorageEngine extends AbstractStorageEngine {
             }
 
             // Merge the incoming (possibly partial) element changes into the last-known
-            // full array so unchanged elements are preserved, then store the whole array.
+            // full array so unchanged elements are preserved, then store one row per
+            // timestamp (see ArrayPointMerger.mergeUpdates).
             java.util.TreeMap<Integer, Object> state =
                     lastArrayValues.computeIfAbsent(basePath, k -> new java.util.TreeMap<>());
-            com.google.protobuf.ListValue.Builder listBuilder;
+            List<ArrayPointMerger.ArraySnapshot> snapshots;
             synchronized (state) {
                 if (state.isEmpty()) {
                     // Cache miss (first store for this array, or first after a restart) —
@@ -302,27 +304,27 @@ public class FactryStorageEngine extends AbstractStorageEngine {
                     // doesn't truncate the array.
                     seedArrayStateFromFactry(basePath, measurementUUID, state);
                 }
-                for (Map.Entry<Integer, AtomicPoint<?>> e : elements.entrySet()) {
-                    state.put(e.getKey(), e.getValue().value());
-                }
-
-                // Build a ListValue from the full merged array, in index order.
-                listBuilder = com.google.protobuf.ListValue.newBuilder();
-                for (Object val : state.values()) {
-                    appendArrayValue(listBuilder, val);
-                }
+                snapshots = ArrayPointMerger.mergeUpdates(state, byTimestamp);
             }
 
-            Point.Builder pb = Point.newBuilder()
-                    .setMeasurementUUID(measurementUUID)
-                    .setTimestamp(Timestamps.fromMillis(firstElement.timestamp().toEpochMilli()))
-                    .setStatus(qualityToStatus(firstElement.quality().getCode()))
-                    .setValue(Value.newBuilder().setListValue(listBuilder));
+            for (ArrayPointMerger.ArraySnapshot snap : snapshots) {
+                // Build a ListValue from the full merged array, in index order.
+                com.google.protobuf.ListValue.Builder listBuilder = com.google.protobuf.ListValue.newBuilder();
+                for (Object val : snap.values) {
+                    appendArrayValue(listBuilder, val);
+                }
 
-            pointsBuilder.addPoints(pb.build());
+                Point.Builder pb = Point.newBuilder()
+                        .setMeasurementUUID(measurementUUID)
+                        .setTimestamp(Timestamps.fromMillis(snap.timestampMillis))
+                        .setStatus(qualityToStatus(snap.qualityCode))
+                        .setValue(Value.newBuilder().setListValue(listBuilder));
+
+                pointsBuilder.addPoints(pb.build());
+                logger.debug("Built array point for '" + basePath + "' at " + snap.timestampMillis
+                        + " with " + listBuilder.getValuesCount() + " elements");
+            }
             usedUUIDs.add(measurementUUID);
-            logger.debug("Built array point for '" + basePath + "' with "
-                    + elements.size() + " changed of " + listBuilder.getValuesCount() + " elements");
         }
 
         return new BuildResult(pointsBuilder, usedUUIDs, hasSkippedArrays, hasFailedCreations);
