@@ -107,4 +107,21 @@ class FactryHistorianSettingsTest {
         s.setGrpcPort(65535);
         assertDoesNotThrow(s::validate);
     }
+
+    // --- custom CA certificate ---
+
+    @Test
+    void validate_blankCustomCaCert_ok() {
+        FactryHistorianSettings s = validSettings();
+        s.setCustomCaCert("");
+        assertDoesNotThrow(s::validate);
+    }
+
+    @Test
+    void validate_invalidCustomCaCert_fails() {
+        FactryHistorianSettings s = validSettings();
+        s.setCustomCaCert("-----BEGIN CERTIFICATE-----\nnot base64\n-----END CERTIFICATE-----");
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, s::validate);
+        assertTrue(e.getMessage().toLowerCase().contains("custom ca certificate"), e.getMessage());
+    }
 }

@@ -17,6 +17,9 @@ public class FactryHistorianSettings implements HistorianSettings {
     private boolean useTls = false;
     private boolean skipTlsVerification = false;
     private String token = "";
+    // Optional PEM-encoded CA certificate(s) to trust in addition to the system and bundled
+    // Factry CAs — for Historians fronted by an internal/enterprise CA or a self-signed cert.
+    private String customCaCert = "";
     // Tag-path delimiter for tree-view splitting in the browser/Power Chart.
     // Default is empty (flat list). An Ignition 8.3 bug prevents defaultSettings()
     // from pre-filling the create form, so a blank field must mean what it shows —
@@ -98,6 +101,14 @@ public class FactryHistorianSettings implements HistorianSettings {
         this.delimiter = delimiter;
     }
 
+    public String getCustomCaCert() {
+        return customCaCert;
+    }
+
+    public void setCustomCaCert(String customCaCert) {
+        this.customCaCert = customCaCert;
+    }
+
     /**
      * Extract collectorUUID, grpcHost, and grpcPort from the JWT token payload.
      * These fields are no longer exposed in the UI — the token is the single
@@ -159,6 +170,9 @@ public class FactryHistorianSettings implements HistorianSettings {
         if (grpcPort < 1 || grpcPort > 65535) {
             throw new IllegalArgumentException("Port must be between 1 and 65535");
         }
+        // Surface a bad custom CA certificate at save time rather than as an opaque TLS
+        // handshake failure later. Throws IllegalArgumentException with a clear message.
+        FactryGrpcClient.parseCaCertificates(customCaCert);
     }
 
     @Override
@@ -172,6 +186,7 @@ public class FactryHistorianSettings implements HistorianSettings {
                 ", useTls=" + useTls +
                 ", skipTlsVerification=" + skipTlsVerification +
                 ", delimiter='" + delimiter + '\'' +
+                ", customCaCert='" + (customCaCert == null || customCaCert.isBlank() ? "" : "<set>") + '\'' +
                 '}';
     }
 }
