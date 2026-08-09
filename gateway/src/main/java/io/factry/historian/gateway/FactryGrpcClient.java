@@ -39,11 +39,15 @@ import javax.net.ssl.SSLException;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -69,8 +73,8 @@ public class FactryGrpcClient {
     private volatile boolean connected = true;
 
     public FactryGrpcClient(String host, int port, String collectorUUID, String token,
-                            boolean useTls, boolean skipTlsVerification) {
-        buildChannel(host, port, collectorUUID, token, useTls, skipTlsVerification);
+                            boolean useTls, boolean skipTlsVerification, String customCaCert) {
+        buildChannel(host, port, collectorUUID, token, useTls, skipTlsVerification, customCaCert);
         logger.info("gRPC client created ({}), target={}:{}, collectorUUID={}",
                 tlsLabel(useTls, skipTlsVerification), host, port, collectorUUID);
     }
@@ -214,12 +218,12 @@ public class FactryGrpcClient {
      * gRPC channel and creates a new one.
      */
     public void reconfigure(String host, int port, String collectorUUID, String token,
-                            boolean useTls, boolean skipTlsVerification) {
+                            boolean useTls, boolean skipTlsVerification, String customCaCert) {
         logger.info("Reconfiguring gRPC client: {}:{}", host, port);
         channelLock.writeLock().lock();
         try {
             shutdownChannel();
-            buildChannel(host, port, collectorUUID, token, useTls, skipTlsVerification);
+            buildChannel(host, port, collectorUUID, token, useTls, skipTlsVerification, customCaCert);
             logger.info("gRPC client reconfigured ({}), target={}:{}, collectorUUID={}",
                     tlsLabel(useTls, skipTlsVerification), host, port, collectorUUID);
         } finally {
@@ -228,23 +232,25 @@ public class FactryGrpcClient {
     }
 
     private void buildChannel(String host, int port, String collectorUUID, String token,
-                              boolean useTls, boolean skipTlsVerification) {
+                              boolean useTls, boolean skipTlsVerification, String customCaCert) {
         if (useTls) {
             try {
                 var sslBuilder = GrpcSslContexts.forClient();
                 if (skipTlsVerification) {
                     sslBuilder.trustManager(InsecureTrustManagerFactory.INSTANCE);
                 } else {
-                    // Trust the system/public CAs AND the bundled Factry CA, so both
-                    // publicly-signed certificates (e.g. Let's Encrypt) and Factry-signed
-                    // ones verify without having to disable verification entirely.
+                    // Trust the system/public CAs AND the bundled Factry CA, plus any custom CA
+                    // the user supplied per-profile. This lets publicly-signed (e.g. Let's Encrypt),
+                    // Factry-signed, and internal/enterprise-CA or self-signed certificates all
+                    // verify without having to disable verification entirely.
                     try (InputStream caCert = getClass().getClassLoader().getResourceAsStream(CA_CERT_RESOURCE)) {
                         if (caCert == null) {
                             logger.warn("Bundled CA certificate '{}' not found; using system CAs only", CA_CERT_RESOURCE);
-                        } else {
-                            logger.info("TLS verification using system CAs plus bundled Factry CA certificate");
                         }
-                        sslBuilder.trustManager(buildCombinedTrustManagerFactory(caCert));
+                        boolean hasCustomCa = customCaCert != null && !customCaCert.isBlank();
+                        logger.info("TLS verification using system CAs plus bundled Factry CA{}",
+                                hasCustomCa ? " plus a custom CA certificate" : "");
+                        sslBuilder.trustManager(buildCombinedTrustManagerFactory(caCert, customCaCert));
                     } catch (Exception e) {
                         logger.warn("Failed to build combined trust store ({}), using the system default trust store",
                                 e.getMessage());
@@ -272,12 +278,27 @@ public class FactryGrpcClient {
 
     /**
      * Build a TrustManagerFactory that trusts the JVM's default (system/public) CAs plus the
-     * given extra CA certificate(s). This lets the module verify servers using either a
-     * publicly-signed certificate (e.g. Let's Encrypt) or a Factry-signed one, without having
-     * to turn off certificate verification. If {@code extraCaCerts} is null, only the system
-     * CAs are trusted.
+     * bundled Factry CA. Convenience overload with no user-supplied custom CA.
      */
     static TrustManagerFactory buildCombinedTrustManagerFactory(InputStream extraCaCerts) throws Exception {
+        return buildCombinedTrustManagerFactory(extraCaCerts, null);
+    }
+
+    /**
+     * Build a TrustManagerFactory that trusts the JVM's default (system/public) CAs, the given
+     * bundled CA certificate(s), and any user-supplied custom CA certificate(s) in PEM form.
+     * This lets the module verify servers using a publicly-signed certificate (e.g. Let's
+     * Encrypt), a Factry-signed one, or one issued by a customer's internal/enterprise CA (or a
+     * self-signed certificate pasted directly), without having to turn off verification.
+     *
+     * <p>Trust is purely additive: the custom CA is added alongside, never in place of, the
+     * system and bundled CAs. If {@code extraCaCerts} is null only the system CAs and any custom
+     * CA are trusted; if {@code customCaCertPem} is null/blank no custom CA is added.
+     *
+     * @throws IllegalArgumentException if {@code customCaCertPem} is non-blank but not valid PEM
+     */
+    static TrustManagerFactory buildCombinedTrustManagerFactory(InputStream extraCaCerts, String customCaCertPem)
+            throws Exception {
         KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
         ks.load(null, null); // start with an empty keystore
         int idx = 0;
@@ -302,10 +323,44 @@ public class FactryGrpcClient {
             }
         }
 
+        // 3. User-supplied custom CA certificate(s) (internal/enterprise CA or self-signed).
+        for (X509Certificate cert : parseCaCertificates(customCaCertPem)) {
+            ks.setCertificateEntry("user-ca-" + (idx++), cert);
+        }
+
         TrustManagerFactory combined =
                 TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
         combined.init(ks);
         return combined;
+    }
+
+    /**
+     * Parse PEM-encoded X.509 certificate(s) from the given text. Returns an empty list for
+     * null/blank input; otherwise the text must contain at least one valid certificate.
+     *
+     * @throws IllegalArgumentException if the text is non-blank but does not parse to at least
+     *                                  one X.509 certificate
+     */
+    static List<X509Certificate> parseCaCertificates(String pem) {
+        List<X509Certificate> result = new ArrayList<>();
+        if (pem == null || pem.isBlank()) {
+            return result;
+        }
+        try (InputStream in = new ByteArrayInputStream(pem.getBytes(StandardCharsets.UTF_8))) {
+            CertificateFactory cf = CertificateFactory.getInstance("X.509");
+            for (Certificate cert : cf.generateCertificates(in)) {
+                result.add((X509Certificate) cert);
+            }
+        } catch (Exception e) {
+            throw new IllegalArgumentException(
+                    "Custom CA certificate is not valid PEM: " + e.getMessage(), e);
+        }
+        if (result.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Custom CA certificate is set but contains no certificates. Paste a PEM-encoded "
+                    + "certificate beginning with '-----BEGIN CERTIFICATE-----'.");
+        }
+        return result;
     }
 
     private static String tlsLabel(boolean useTls, boolean skipTlsVerification) {

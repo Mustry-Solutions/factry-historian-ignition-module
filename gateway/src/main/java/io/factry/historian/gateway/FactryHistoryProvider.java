@@ -64,7 +64,8 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
                 settings.getCollectorUUID(),
                 settings.getToken(),
                 settings.isUseTls(),
-                settings.isSkipTlsVerification()
+                settings.isSkipTlsVerification(),
+                settings.getCustomCaCert()
         );
         this.measurementCache = new MeasurementCache();
 
@@ -245,7 +246,8 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
                     newSettings.getCollectorUUID(),
                     newSettings.getToken(),
                     newSettings.isUseTls(),
-                    newSettings.isSkipTlsVerification()
+                    newSettings.isSkipTlsVerification(),
+                    newSettings.getCustomCaCert()
             );
 
             // Refresh measurement cache from the new endpoint

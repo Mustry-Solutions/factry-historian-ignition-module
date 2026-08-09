@@ -33,6 +33,18 @@ public record FactryHistorianConfig(
         @Description("Disable TLS certificate verification. Use only for testing with self-signed certificates.")
         boolean skipTlsVerification,
 
+        @FormCategory("Connection")
+        @Label("Custom CA Certificate (PEM)")
+        @FormField(FormFieldType.TEXTAREA)
+        @DefaultValue("")
+        @NonSecret
+        @Description("Optional. Paste one or more PEM-encoded CA certificates (or a self-signed server certificate) "
+                + "to trust in addition to the system and bundled Factry CAs. Use this for a Historian fronted by an "
+                + "internal/enterprise CA or a self-signed certificate, instead of disabling verification. "
+                + "Applies only when TLS is on and 'Skip TLS Verification' is off. The certificate's host name must "
+                + "still match the configured host.")
+        String customCaCert,
+
         @FormCategory("Advanced")
         @Label("Debug Logging")
         @FormField(FormFieldType.CHECKBOX)
@@ -55,6 +67,7 @@ public record FactryHistorianConfig(
         settings.setToken(token);
         settings.setUseTls(useTls);
         settings.setSkipTlsVerification(skipTlsVerification);
+        settings.setCustomCaCert(customCaCert);
         settings.setDebugLogging(debugLogging);
         settings.setDelimiter(delimiter);
         return settings;
@@ -65,6 +78,7 @@ public record FactryHistorianConfig(
                 settings.getToken(),
                 settings.isUseTls(),
                 settings.isSkipTlsVerification(),
+                settings.getCustomCaCert(),
                 settings.isDebugLogging(),
                 settings.getDelimiter()
         );
