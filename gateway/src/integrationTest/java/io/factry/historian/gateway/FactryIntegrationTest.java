@@ -933,7 +933,7 @@ class FactryIntegrationTest {
 
     @Test
     @Order(108)
-    @DisplayName("Array measurement can be queried back (blocked by Factry []float64 bug)")
+    @DisplayName("Array measurement can be queried back")
     void testArrayQueryRoundTrip() throws Exception {
         section("Array query round trip");
 
@@ -970,23 +970,11 @@ class FactryIntegrationTest {
         log("Wrote array [10,11,12,13] via gRPC to measurement " + uuid);
         Thread.sleep(2000);
 
-        // Query the array back via gRPC. This currently fails INSIDE Factry with
+        // Query the array back via gRPC. Historically this failed INSIDE Factry with
         //   "UNKNOWN: error converting data point value: proto: invalid type: []float64"
-        // (see the email to Factry). Until that's fixed we skip; once fixed, the real
-        // assertions below run and this test passes.
-        QueryTimeseriesResponse resp;
-        try {
-            resp = grpcQuery(uuid, ts - 1000, ts + 1000);
-        } catch (io.grpc.StatusRuntimeException e) {
-            String msg = String.valueOf(e.getMessage());
-            if (msg.contains("[]float64") || msg.contains("error converting data point value")) {
-                Assumptions.abort("KNOWN Factry bug: array measurements can't be queried via gRPC — "
-                        + msg + ". This test will pass once Factry fixes []float64 serialization.");
-            }
-            throw e; // any other gRPC error is unexpected
-        }
+        // (see the email to Factry). Fixed in Factry v8.2.0; this now runs for real.
+        QueryTimeseriesResponse resp = grpcQuery(uuid, ts - 1000, ts + 1000);
 
-        // --- Reached only once Factry can serialize arrays back ---
         log("Array query returned seriesCount=" + resp.getSeriesCount());
         for (Series s : resp.getSeriesList()) {
             log("  fields=" + s.getFieldsList() + " datatype=" + s.getDatatype()
