@@ -63,6 +63,12 @@ class FactryIntegrationTest {
     /** Unique prefix per test run to avoid measurement collisions. */
     private static final String TEST_PREFIX = "IT" + randomSuffix(6);
 
+    // Real Ignition-8 runtime QualityCode.getCode() values (the level is in the top two bits),
+    // NOT the legacy 0..255 view. Sourced from the Script Console.
+    private static final int QUALITY_GOOD = 192;            // 0x000000C0, level 0
+    private static final int QUALITY_UNCERTAIN = 1073742080; // 0x40000200, level 1
+    private static final int QUALITY_BAD = -2147483136;      // 0x80000200, level 2
+
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
 
     // -- Shared resources -----------------------------------------------------
@@ -700,6 +706,105 @@ class FactryIntegrationTest {
         assertNotNull(numCol, "Numeric tag column must be present, got " + columns);
         assertNotNull(strCol, "String tag column must be present, got " + columns);
         pass("Both numeric and string columns present in aggregated result");
+    }
+
+    @Test
+    @Order(97)
+    @DisplayName("Uncertain quality round-trips as an Uncertain status (not Good)")
+    void testQualityStatusRoundTrip() throws Exception {
+        section("Quality → Factry status mapping");
+
+        String tagName = TEST_PREFIX + "/QualityStatus";
+        String measurementName = storedTagPath(tagName);
+        long baseTs = 1700067000000L;
+
+        String uuid = createMeasurement(measurementName, "number");
+        assertFalse(uuid.isEmpty(), "Measurement UUID should not be empty");
+
+        // Store one point per Ignition-8 quality LEVEL, using the REAL runtime QualityCode
+        // values (not the legacy 0..255 view). These are the codes system.tag / the SDK
+        // actually emit — see QualityCode.getCode().
+        String qPath = qualifiedPath(HISTORIAN_NAME, tagName);
+        webdevPost("test/storePoints", Map.of(
+                "paths", List.of(qPath, qPath, qPath),
+                "values", List.of(1.0, 2.0, 3.0),
+                "timestamps", List.of(baseTs, baseTs + 1000, baseTs + 2000),
+                "qualities", List.of(QUALITY_GOOD, QUALITY_UNCERTAIN, QUALITY_BAD)
+        ));
+        log("Stored Good/Uncertain/Bad points (codes " + QUALITY_GOOD + "/" + QUALITY_UNCERTAIN
+                + "/" + QUALITY_BAD + ")");
+        Thread.sleep(2000);
+
+        // Read the stored per-point status straight from Factry, grouped by status tag.
+        QueryTimeseriesResponse resp = grpcQueryGroupedByStatus(uuid, baseTs - 1000, baseTs + 3000);
+        Set<String> statuses = new HashSet<>();
+        for (Series s : resp.getSeriesList()) {
+            Value stv = s.getTags().getFieldsMap().get("status");
+            if (stv != null && !stv.getStringValue().isEmpty()) {
+                statuses.add(stv.getStringValue());
+            }
+        }
+        log("Stored statuses in Factry: " + statuses);
+
+        // BUG (write-side mapping): qualityToStatus() uses legacy >=192/>=64 thresholds, so the
+        // Uncertain code (~1.07e9) is >=192 and gets stored as "Good". The Uncertain level must
+        // survive the round trip as an Uncertain* status instead.
+        assertTrue(statuses.stream().anyMatch(st -> st.startsWith("Uncertain")),
+                "Uncertain-quality point must be stored with an Uncertain status, got: " + statuses);
+        pass("Uncertain quality stored as an Uncertain status");
+    }
+
+    @Test
+    @Order(98)
+    @DisplayName("Aggregation excludes Bad-quality points instead of blending them")
+    void testAggregationExcludesBadQuality() throws Exception {
+        section("Aggregation quality blending");
+
+        String tagName = TEST_PREFIX + "/QualityAgg";
+        String measurementName = storedTagPath(tagName);
+        long baseTs = 1700068000000L;
+
+        String uuid = createMeasurement(measurementName, "number");
+        assertFalse(uuid.isEmpty(), "Measurement UUID should not be empty");
+
+        // 5 Good points at ~5.0 interleaved with 5 Bad points at ~5000.0.
+        String qPath = qualifiedPath(HISTORIAN_NAME, tagName);
+        List<Object> paths = new ArrayList<>();
+        List<Object> values = new ArrayList<>();
+        List<Object> timestamps = new ArrayList<>();
+        List<Object> qualities = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            paths.add(qPath);
+            timestamps.add(baseTs + i * 1000L);
+            if (i % 2 == 0) {
+                values.add(5.0);
+                qualities.add(QUALITY_GOOD);
+            } else {
+                values.add(5000.0);
+                qualities.add(QUALITY_BAD);
+            }
+        }
+        webdevPost("test/storePoints", Map.of(
+                "paths", paths, "values", values, "timestamps", timestamps, "qualities", qualities));
+        log("Stored 5 Good (5.0) + 5 Bad (5000.0) points");
+        Thread.sleep(2000);
+
+        Map<String, Object> result = webdevPost("test/queryAgg", Map.of(
+                "paths", List.of(qPath),
+                "startDate", baseTs - 1000,
+                "endDate", baseTs + 11000,
+                "aggregates", List.of("Average"),
+                "returnSize", 1
+        ));
+        assertTrue((Boolean) result.get("success"), "Average query should succeed: " + result.get("error"));
+        double avg = extractAggregationValue(result);
+        log("Average = " + avg + " (Good-only expects ~5.0; blended would be ~2502)");
+
+        // BUG (read-side): the aggregated query runs across all statuses, so the Bad 5000.0
+        // samples drag the average to ~2502. Aggregates must reflect Good data only.
+        assertTrue(avg < 100.0,
+                "Average must exclude Bad-quality points (expected ~5.0, got " + avg + ")");
+        pass("Aggregate reflects Good-quality data only");
     }
 
     @Test
@@ -1445,6 +1550,22 @@ class FactryIntegrationTest {
                 .setValue(value)
                 .setStatus("Good")
                 .build();
+    }
+
+    /** Query Factry directly via gRPC, grouped by the per-point status tag. */
+    private QueryTimeseriesResponse grpcQueryGroupedByStatus(String measurementUUID, long startMs, long endMs) {
+        return grpcStub.queryTimeseries(QueryTimeseriesRequest.newBuilder()
+                .addMeasurementUUIDs(measurementUUID)
+                .addGroupBy("status")
+                .setStart(Timestamp.newBuilder()
+                        .setSeconds(startMs / 1000)
+                        .setNanos((int) ((startMs % 1000) * 1_000_000))
+                        .build())
+                .setEnd(Timestamp.newBuilder()
+                        .setSeconds(endMs / 1000)
+                        .setNanos((int) ((endMs % 1000) * 1_000_000))
+                        .build())
+                .build());
     }
 
     /** Query Factry directly via gRPC. */
