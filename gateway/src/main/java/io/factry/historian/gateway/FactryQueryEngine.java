@@ -414,10 +414,22 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         long startMs = System.currentTimeMillis();
 
         try {
-            ProcessingContext context =
-                    DefaultProcessingContext.builder().build();
-            if (!processor.onInitialize(context)) {
-                logger.warn("Processor rejected initialization for aggregated query");
+            // Map each query key to its historian node AND initialize the processor with a
+            // context that carries every key's data type (String / Float / Boolean). This is
+            // the same fix applied to doQueryRaw: the previous code built an EMPTY context, so
+            // the framework had no type information and defaulted every column to numeric. A
+            // string value (the type the Perspective Power Chart uses aggregated queries for)
+            // then failed to coerce to a number, and because that coercion happens while the
+            // framework commits the shared result set, it aborted the ENTIRE query. mapKeysToNodes()
+            // populates the context from queryForHistoricalNodes() and calls onInitialize() for us.
+            Map<AggregatedQueryKey, ? extends HistoricalNode> keyToNode =
+                    mapKeysToNodes(options, processor, AggregatedQueryKey::source);
+
+            // mapKeysToNodes only initializes the processor when it resolves at least one node.
+            // If NOTHING resolved, the processor is not initialized, so calling
+            // onKeyFailure/onComplete on it would throw "Processor not initialized".
+            if (keyToNode.isEmpty()) {
+                logger.debug("Aggregated query resolved no measurements; returning 0 rows");
                 return Optional.of(0);
             }
 
@@ -430,7 +442,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             for (AggregatedQueryKey key : queryKeys) {
                 QualifiedPath source = key.source();
                 String tagPath = toStoredTagPath(source);
-                String uuid = lookupUUID(tagPath);
+                // Only query keys that resolved to a node; mapKeysToNodes omits the rest.
+                String uuid = keyToNode.containsKey(key) ? lookupUUID(tagPath) : null;
 
                 if (uuid == null) {
                     logger.warn("No measurement UUID found for aggregated query: " + tagPath);

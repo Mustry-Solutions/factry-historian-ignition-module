@@ -640,6 +640,69 @@ class FactryIntegrationTest {
     }
 
     @Test
+    @Order(96)
+    @DisplayName("Aggregated query on a string measurement returns instead of aborting")
+    void testAggregatedStringQuery() throws Exception {
+        section("Aggregated String Query (Power Chart path)");
+
+        long baseTs = 1700066000000L;
+
+        // Numeric tag so we can prove a string in the same aggregated query does not
+        // take the numeric tag down with it (the framework commits a shared result set).
+        String numTag = TEST_PREFIX + "/AggNumeric";
+        String numUuid = createMeasurement(storedTagPath(numTag), "number");
+        assertFalse(numUuid.isEmpty(), "Numeric measurement UUID should not be empty");
+        List<Point> numPoints = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            numPoints.add(buildPoint(numUuid, baseTs + i * 1000,
+                    Value.newBuilder().setNumberValue(20.0 + i).build()));
+        }
+        grpcStub.createPoints(Points.newBuilder().addAllPoints(numPoints).build());
+        log("Inserted 5 numeric points");
+
+        // String tag — this is what the Perspective Power Chart queries via the aggregated
+        // path, and what used to throw a ClassCastException and abort the whole read.
+        String strTag = TEST_PREFIX + "/AggString";
+        String strUuid = createMeasurement(storedTagPath(strTag), "string");
+        assertFalse(strUuid.isEmpty(), "String measurement UUID should not be empty");
+        List<Point> strPoints = List.of(
+                buildPoint(strUuid, baseTs, Value.newBuilder().setStringValue("alpha").build()),
+                buildPoint(strUuid, baseTs + 1000, Value.newBuilder().setStringValue("beta").build()),
+                buildPoint(strUuid, baseTs + 2000, Value.newBuilder().setStringValue("gamma").build())
+        );
+        grpcStub.createPoints(Points.newBuilder().addAllPoints(strPoints).build());
+        log("Inserted 3 string points");
+        Thread.sleep(2000);
+
+        // Aggregated query over BOTH tags — LastValue works for strings and numbers alike.
+        // queryAggregatedPoints requires one aggregate per path, so pass two.
+        Map<String, Object> result = webdevPost("test/queryAgg", Map.of(
+                "paths", List.of(
+                        qualifiedPath(HISTORIAN_NAME, numTag),
+                        qualifiedPath(HISTORIAN_NAME, strTag)),
+                "startDate", baseTs - 1000,
+                "endDate", baseTs + 5000,
+                "aggregates", List.of("LastValue", "LastValue"),
+                "returnSize", 1
+        ));
+
+        // BUG being reproduced: the aggregated path initialised the framework with an empty
+        // processing context, so string columns defaulted to numeric and a string value
+        // aborted the entire query.
+        assertTrue((Boolean) result.get("success"),
+                "Aggregated string query must not abort — error: " + result.get("error"));
+        pass("Aggregated string query returned success (did not abort)");
+
+        @SuppressWarnings("unchecked")
+        List<String> columns = (List<String>) result.get("columns");
+        String numCol = columns.stream().filter(c -> c.contains("AggNumeric")).findFirst().orElse(null);
+        String strCol = columns.stream().filter(c -> c.contains("AggString")).findFirst().orElse(null);
+        assertNotNull(numCol, "Numeric tag column must be present, got " + columns);
+        assertNotNull(strCol, "String tag column must be present, got " + columns);
+        pass("Both numeric and string columns present in aggregated result");
+    }
+
+    @Test
     @Order(100)
     @DisplayName("Full round trip: store + query via system.historian")
     void testRoundTrip() throws Exception {

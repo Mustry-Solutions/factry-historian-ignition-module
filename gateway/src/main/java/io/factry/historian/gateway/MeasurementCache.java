@@ -32,17 +32,22 @@ import java.util.concurrent.ConcurrentHashMap;
 public class MeasurementCache {
     private static final Logger logger = LoggerFactory.getLogger(MeasurementCache.class);
 
-    private final ConcurrentHashMap<String, String> tagPathToUUID = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, Measurement> uuidToMeasurement = new ConcurrentHashMap<>();
+    // These lookup maps are rebuilt on every refresh and swapped in by reference (not cleared and
+    // refilled in place), so a concurrent browse or query always sees a fully-populated map — never
+    // an empty or half-filled one. Each field is volatile so the swapped-in reference is visible to
+    // other threads immediately; the maps themselves stay ConcurrentHashMap so the occasional in-place
+    // mutation (evictByUUID, targeted single-measurement inserts) remains thread-safe.
+    private volatile ConcurrentHashMap<String, String> tagPathToUUID = new ConcurrentHashMap<>();
+    private volatile ConcurrentHashMap<String, Measurement> uuidToMeasurement = new ConcurrentHashMap<>();
     private final Set<String> pendingCreations = ConcurrentHashMap.newKeySet();
 
-    private final ConcurrentHashMap<String, String> assetNameToUUID = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, Asset> uuidToAsset = new ConcurrentHashMap<>();
+    private volatile ConcurrentHashMap<String, String> assetNameToUUID = new ConcurrentHashMap<>();
+    private volatile ConcurrentHashMap<String, Asset> uuidToAsset = new ConcurrentHashMap<>();
     /** Asset UUID → list of properties belonging to that asset. */
-    private final ConcurrentHashMap<String, List<AssetProperty>> assetProperties = new ConcurrentHashMap<>();
+    private volatile ConcurrentHashMap<String, List<AssetProperty>> assetProperties = new ConcurrentHashMap<>();
 
     /** Measurement UUID → collector name, for grouping in the browse tree. */
-    private final ConcurrentHashMap<String, String> measurementToCollectorName = new ConcurrentHashMap<>();
+    private volatile ConcurrentHashMap<String, String> measurementToCollectorName = new ConcurrentHashMap<>();
 
     /** Metadata properties cached from doStoreMetadata, applied when creating measurements. */
     private final ConcurrentHashMap<String, Map<String, String>> pendingMetadata = new ConcurrentHashMap<>();
@@ -86,11 +91,10 @@ public class MeasurementCache {
                 offset += pageCount;
             }
 
-            // Replace maps entirely so deleted measurements don't linger
-            tagPathToUUID.clear();
-            tagPathToUUID.putAll(freshPaths);
-            uuidToMeasurement.clear();
-            uuidToMeasurement.putAll(freshMeasurements);
+            // Swap in freshly-built maps by reference so deleted measurements don't linger and
+            // concurrent readers never observe a half-filled map.
+            tagPathToUUID = new ConcurrentHashMap<>(freshPaths);
+            uuidToMeasurement = new ConcurrentHashMap<>(freshMeasurements);
             logger.info("Measurement cache refreshed, {} active of {} total from Factry",
                     freshPaths.size(), serverTotal == Long.MAX_VALUE ? offset : serverTotal);
 
@@ -112,8 +116,7 @@ public class MeasurementCache {
                     }
                 }
 
-                measurementToCollectorName.clear();
-                measurementToCollectorName.putAll(freshCollectorMap);
+                measurementToCollectorName = new ConcurrentHashMap<>(freshCollectorMap);
                 logger.debug("Collector mapping refreshed: {} measurements mapped to collectors", freshCollectorMap.size());
             } catch (Exception ce) {
                 logger.error("Failed to refresh collector mapping", ce);
@@ -130,10 +133,8 @@ public class MeasurementCache {
                     freshAssets.put(a.getUuid(), a);
                     assetUUIDs.add(a.getUuid());
                 }
-                assetNameToUUID.clear();
-                assetNameToUUID.putAll(freshAssetNames);
-                uuidToAsset.clear();
-                uuidToAsset.putAll(freshAssets);
+                assetNameToUUID = new ConcurrentHashMap<>(freshAssetNames);
+                uuidToAsset = new ConcurrentHashMap<>(freshAssets);
 
                 // Fetch properties for all assets
                 Map<String, List<AssetProperty>> freshProps = new HashMap<>();
@@ -151,8 +152,7 @@ public class MeasurementCache {
                         logger.error("Failed to refresh asset properties cache", pe);
                     }
                 }
-                assetProperties.clear();
-                assetProperties.putAll(freshProps);
+                assetProperties = new ConcurrentHashMap<>(freshProps);
 
                 logger.debug("Asset cache refreshed, {} assets, {} properties",
                         freshAssetNames.size(), freshProps.values().stream().mapToInt(List::size).sum());
@@ -247,22 +247,35 @@ public class MeasurementCache {
 
             grpcClient.createMeasurements(request);
 
-            // Poll until the measurement becomes visible in Factry
-            for (int attempt = 1; attempt <= 5; attempt++) {
+            // Poll until the measurement becomes visible in Factry. This runs on the
+            // store-and-forward thread, so keep it cheap: use a targeted single-measurement
+            // lookup (keyword filter) instead of a full cache reload, and a tight fixed
+            // backoff. This scales with the number of new tags, not the total measurement
+            // count. Total worst-case wait is ~3s rather than the old 7.5s.
+            long[] backoffMs = {100L, 200L, 400L, 800L, 1500L};
+            for (int attempt = 0; attempt < backoffMs.length; attempt++) {
                 try {
-                    Thread.sleep(attempt * 500L);
+                    Thread.sleep(backoffMs[attempt]);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     break;
                 }
 
-                refresh(grpcClient);
-                uuid = tagPathToUUID.get(tagPath);
+                uuid = fetchSingleMeasurementUUID(tagPath, grpcClient);
                 if (uuid != null) {
-                    logger.debug("Measurement UUID resolved for '{}' on attempt {}: {}", tagPath, attempt, uuid);
+                    logger.debug("Measurement UUID resolved for '{}' on attempt {}: {}", tagPath, attempt + 1, uuid);
                     return uuid;
                 }
-                logger.debug("Measurement '{}' not visible yet, attempt {}/5", tagPath, attempt);
+                logger.debug("Measurement '{}' not visible yet, attempt {}/{}", tagPath, attempt + 1, backoffMs.length);
+            }
+
+            // Fallback: one full refresh in case the keyword filter never surfaced it
+            // (e.g. unusual characters in the path defeat the server-side keyword match).
+            refresh(grpcClient);
+            uuid = tagPathToUUID.get(tagPath);
+            if (uuid != null) {
+                logger.debug("Measurement UUID resolved for '{}' via fallback refresh: {}", tagPath, uuid);
+                return uuid;
             }
 
             logger.warn("Measurement UUID not found after create + retries for '{}'", tagPath);
@@ -273,6 +286,35 @@ public class MeasurementCache {
         } finally {
             pendingCreations.remove(tagPath);
         }
+    }
+
+    /**
+     * Targeted lookup of a single measurement by its exact name, used while polling for a
+     * just-created measurement to become visible. Uses the server-side keyword filter with a
+     * small page instead of reloading the entire cache (measurements, collectors, assets,
+     * asset properties), so a burst of new tags doesn't trigger repeated full reloads on the
+     * store-and-forward thread. On a hit the entry is inserted into the live maps so later
+     * lookups hit the fast path. Returns null if the measurement is not yet visible.
+     */
+    private String fetchSingleMeasurementUUID(String tagPath, FactryGrpcClient grpcClient) {
+        try {
+            GetMeasurementsByFilterRequest request = GetMeasurementsByFilterRequest.newBuilder()
+                    .setKeyword(tagPath)
+                    .setPagination(Pagination.newBuilder().setLimit(50).setOffset(0).build())
+                    .build();
+            Measurements response = grpcClient.getMeasurementsByFilter(request);
+            for (Measurement m : response.getMeasurementsList()) {
+                // Keyword search is fuzzy/substring, so match the exact name ourselves.
+                if (tagPath.equals(m.getName()) && "active".equalsIgnoreCase(m.getStatus())) {
+                    tagPathToUUID.put(m.getName(), m.getUuid());
+                    uuidToMeasurement.put(m.getUuid(), m);
+                    return m.getUuid();
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("Targeted lookup for '{}' failed: {}", tagPath, e.getMessage());
+        }
+        return null;
     }
 
     /**
