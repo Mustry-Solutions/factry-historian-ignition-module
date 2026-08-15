@@ -50,7 +50,9 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -355,9 +357,13 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 return Optional.of(0);
             }
 
-            // Build gRPC request using QueryTimeseries (no aggregation = raw)
+            // Build gRPC request using QueryTimeseries (no aggregation = raw). Group by the
+            // per-point status tag so Factry returns one series per quality status; without this
+            // every point comes back in a single series and reads back as Good, losing bad/
+            // uncertain quality.
             QueryTimeseriesRequest.Builder reqBuilder = QueryTimeseriesRequest.newBuilder()
-                    .addAllMeasurementUUIDs(measurementUUIDs);
+                    .addAllMeasurementUUIDs(measurementUUIDs)
+                    .addGroupBy("status");
 
             options.getTimeRange().ifPresent(tr -> {
                 reqBuilder.setStart(Timestamps.fromMillis(tr.startTime().toEpochMilli()));
@@ -366,22 +372,33 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
             QueryTimeseriesResponse reply = grpcClient.queryTimeseries(reqBuilder.build());
 
-            int totalPoints = 0;
+            // A measurement now spans multiple status-series. Collect all of a measurement's points
+            // (each carrying its series' quality), then merge-sort by timestamp before emitting —
+            // Ignition expects time-ordered points per key.
+            record RawPt(long ts, Object value, QualityCode quality) {}
+            Map<String, List<RawPt>> pointsByUuid = new LinkedHashMap<>();
             for (Series series : reply.getSeriesList()) {
                 String uuid = series.hasMeasurementUUID() ? series.getMeasurementUUID() : "";
-                RawQueryKey key = uuidToKeyMap.get(uuid);
-                if (key == null) {
+                if (!uuidToKeyMap.containsKey(uuid)) {
                     continue;
                 }
-
-                QualifiedPath path = key.source();
-
+                QualityCode quality = statusToQuality(seriesStatus(series));
+                List<RawPt> pts = pointsByUuid.computeIfAbsent(uuid, k -> new ArrayList<>());
                 for (SeriesPoint pt : series.getDataPointsList()) {
-                    Instant timestamp = Instant.ofEpochMilli(pt.getTimestamp());
-                    Object value = protoValueToJava(pt.getValue());
+                    pts.add(new RawPt(pt.getTimestamp(), protoValueToJava(pt.getValue()), quality));
+                }
+            }
 
+            int totalPoints = 0;
+            for (Map.Entry<String, List<RawPt>> entry : pointsByUuid.entrySet()) {
+                RawQueryKey key = uuidToKeyMap.get(entry.getKey());
+                QualifiedPath path = key.source();
+                List<RawPt> pts = entry.getValue();
+                pts.sort(Comparator.comparingLong(RawPt::ts));
+
+                for (RawPt p : pts) {
                     AtomicPoint<?> atomicPoint = DataPointFactory.createAtomicPoint(
-                            value, QualityCode.Good, timestamp, path);
+                            p.value(), p.quality(), Instant.ofEpochMilli(p.ts()), path);
 
                     if (!processor.onPointAvailable(key, atomicPoint)) {
                         processor.onComplete();
@@ -588,8 +605,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 .setFillType("none")
                 .build();
 
+        // Group by status so Factry aggregates each quality separately, then keep only the Good
+        // series. Aggregating across all statuses blends bad samples into the value (e.g. a bad
+        // x1000 reading drags the average up); Good-only is faithful and avoids the corruption.
         QueryTimeseriesRequest.Builder reqBuilder = QueryTimeseriesRequest.newBuilder()
                 .addMeasurementUUIDs(uuid)
+                .addGroupBy("status")
                 .setAggregation(aggregation);
 
         options.getTimeRange().ifPresent(tr -> {
@@ -601,6 +622,9 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
         int count = 0;
         for (Series series : reply.getSeriesList()) {
+            if (!isGoodStatus(seriesStatus(series))) {
+                continue; // drop Bad/Uncertain series so they don't blend into the aggregate
+            }
             for (SeriesPoint pt : series.getDataPointsList()) {
                 Instant timestamp = Instant.ofEpochMilli(pt.getTimestamp());
                 Object value = protoValueToJava(pt.getValue());
@@ -624,12 +648,15 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             String period, AggregatedQueryOptions options,
             AggregatedPointProcessor processor) {
 
-        // Query min and max separately
+        // Query min and max separately, grouped by status and keeping only the Good series so
+        // bad/uncertain samples don't skew the min/max (see querySingleAggregate).
         QueryTimeseriesRequest.Builder minReqBuilder = QueryTimeseriesRequest.newBuilder()
                 .addMeasurementUUIDs(uuid)
+                .addGroupBy("status")
                 .setAggregation(Aggregation.newBuilder().setName("min").setPeriod(period).setFillType("none").build());
         QueryTimeseriesRequest.Builder maxReqBuilder = QueryTimeseriesRequest.newBuilder()
                 .addMeasurementUUIDs(uuid)
+                .addGroupBy("status")
                 .setAggregation(Aggregation.newBuilder().setName("max").setPeriod(period).setFillType("none").build());
 
         options.getTimeRange().ifPresent(tr -> {
@@ -642,17 +669,23 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         QueryTimeseriesResponse minReply = grpcClient.queryTimeseries(minReqBuilder.build());
         QueryTimeseriesResponse maxReply = grpcClient.queryTimeseries(maxReqBuilder.build());
 
-        // Collect min values by timestamp
+        // Collect min values by timestamp (Good series only)
         Map<Long, Object> minValues = new HashMap<>();
         for (Series series : minReply.getSeriesList()) {
+            if (!isGoodStatus(seriesStatus(series))) {
+                continue;
+            }
             for (SeriesPoint pt : series.getDataPointsList()) {
                 minValues.put(pt.getTimestamp(), protoValueToJava(pt.getValue()));
             }
         }
 
-        // Emit min/max pairs for each bucket
+        // Emit min/max pairs for each bucket (Good series only)
         int count = 0;
         for (Series series : maxReply.getSeriesList()) {
+            if (!isGoodStatus(seriesStatus(series))) {
+                continue;
+            }
             for (SeriesPoint pt : series.getDataPointsList()) {
                 long ts = pt.getTimestamp();
                 Instant timestamp = Instant.ofEpochMilli(ts);
@@ -812,19 +845,30 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     }
 
     static QualityCode statusToQuality(String status) {
-        if (status == null) {
+        // Factry status values are level names with optional subtype suffixes
+        // (e.g. "BadFactryInvalidDataForDatatype", "UncertainInitialValue"). Match by PREFIX so
+        // subtypes don't silently fall through to Good.
+        if (status == null || status.isEmpty()) {
             return QualityCode.Good;
         }
-        switch (status) {
-            case "Good":
-                return QualityCode.Good;
-            case "Uncertain":
-                return QualityCode.Uncertain;
-            case "Bad":
-                return QualityCode.Bad;
-            default:
-                return QualityCode.Good;
+        if (status.startsWith("Uncertain")) {
+            return QualityCode.Uncertain;
         }
+        if (status.startsWith("Bad") || status.startsWith("Error")) {
+            return QualityCode.Bad;
+        }
+        return QualityCode.Good;
+    }
+
+    /** The per-series status tag from a {@code groupBy=["status"]} query, or "" if absent. */
+    private static String seriesStatus(Series series) {
+        var stv = series.getTags().getFieldsMap().get("status");
+        return stv != null ? stv.getStringValue() : "";
+    }
+
+    /** A status that maps to Good quality (Good level, or an untagged series). */
+    private static boolean isGoodStatus(String status) {
+        return statusToQuality(status) == QualityCode.Good;
     }
 
     static Object protoValueToJava(com.google.protobuf.Value value) {

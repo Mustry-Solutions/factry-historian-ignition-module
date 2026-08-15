@@ -7,6 +7,7 @@ import com.inductiveautomation.historian.common.model.data.AtomicPoint;
 import com.inductiveautomation.historian.common.model.data.MetadataPoint;
 import com.inductiveautomation.historian.common.model.data.SourceChangePoint;
 import com.inductiveautomation.historian.common.model.data.StorageResult;
+import com.inductiveautomation.ignition.common.model.values.QualityCode;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 
@@ -437,12 +438,17 @@ public class FactryStorageEngine extends AbstractStorageEngine {
     }
 
     static String qualityToStatus(int qualityCode) {
-        if (qualityCode >= 192) {
-            return "Good";
-        } else if (qualityCode >= 64) {
-            return "Uncertain";
-        } else {
-            return "Bad";
+        // Ignition 8 encodes the quality LEVEL in the top two bits of the 32-bit code, NOT the
+        // legacy 0..255 scale. Decode via the QualityCode API so an Uncertain code (~1.07e9) is
+        // recognised as Uncertain instead of tripping a numeric >=192 "Good" threshold. Bad and
+        // Error both map to Factry's "Bad" status.
+        switch (QualityCode.getLevel(qualityCode)) {
+            case Good:
+                return "Good";
+            case Uncertain:
+                return "Uncertain";
+            default:
+                return "Bad";
         }
     }
 }
