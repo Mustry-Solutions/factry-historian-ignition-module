@@ -24,6 +24,8 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -286,6 +288,144 @@ public class MeasurementCache {
         } finally {
             pendingCreations.remove(tagPath);
         }
+    }
+
+    /**
+     * Resolve UUIDs for a batch of tag paths in a single gRPC round-trip.
+     *
+     * All paths already in the cache are returned immediately. For unknown paths:
+     * the ones not being created by another thread are batched into a single
+     * {@code CreateMeasurementsRequest}; then all missing paths (newly created plus
+     * those delegated to another thread) are polled together using targeted keyword
+     * lookups. This keeps the store-and-forward thread's cost proportional to the
+     * number of distinct new tags in the flush, not the number of points.
+     *
+     * @param tagPathToValue map from tag path to a representative value (used only for
+     *                       data-type inference — the actual written values come from
+     *                       the caller)
+     * @return map from tag path to UUID; absent entries mean creation failed (caller
+     *         should mark those points for S&amp;F retry)
+     */
+    public Map<String, String> batchGetOrCreateUUIDs(
+            Map<String, Object> tagPathToValue, FactryGrpcClient grpcClient) {
+
+        Map<String, String> result = new HashMap<>();
+
+        // Split into cache hits and paths that need a UUID.
+        Map<String, String> pathToDataType = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : tagPathToValue.entrySet()) {
+            String path = entry.getKey();
+            String uuid = tagPathToUUID.get(path);
+            if (uuid != null) {
+                result.put(path, uuid);
+            } else {
+                String dataType = toFactryDataType(entry.getValue());
+                if (dataType != null) {
+                    pathToDataType.put(path, dataType);
+                }
+                // Unsupported value type → no entry in result (caller skips the point).
+            }
+        }
+
+        if (pathToDataType.isEmpty()) {
+            return result;
+        }
+
+        // Separate paths this call will create from ones another thread is already
+        // handling (pendingCreations guards against duplicate-creation races).
+        List<String> toCreate = new ArrayList<>();
+        List<String> alreadyPending = new ArrayList<>();
+        for (String path : pathToDataType.keySet()) {
+            if (pendingCreations.add(path)) {
+                // Double-check cache after acquiring the creation slot.
+                String uuid = tagPathToUUID.get(path);
+                if (uuid != null) {
+                    result.put(path, uuid);
+                    pendingCreations.remove(path);
+                } else {
+                    toCreate.add(path);
+                }
+            } else {
+                alreadyPending.add(path);
+            }
+        }
+
+        try {
+            // One CreateMeasurementsRequest for all new paths.
+            if (!toCreate.isEmpty()) {
+                CreateMeasurementsRequest.Builder req = CreateMeasurementsRequest.newBuilder();
+                for (String path : toCreate) {
+                    CreateMeasurement.Builder builder = CreateMeasurement.newBuilder()
+                            .setName(path)
+                            .setAutoOnboard(true)
+                            .setDataType(pathToDataType.get(path));
+
+                    Map<String, String> metadata = pendingMetadata.remove(path);
+                    if (metadata != null && !metadata.isEmpty()) {
+                        String description = metadata.remove("description");
+                        if (description != null) builder.setDescription(description);
+                        if (!metadata.isEmpty()) {
+                            Struct.Builder attrs = Struct.newBuilder();
+                            for (Map.Entry<String, String> e : metadata.entrySet()) {
+                                attrs.putFields(e.getKey(),
+                                        Value.newBuilder().setStringValue(e.getValue()).build());
+                                builder.putMetadata(e.getKey(), MetadataProperty.newBuilder()
+                                        .setDataType(MetadataProperty.DataType.STRING)
+                                        .setValue(Value.newBuilder().setStringValue(e.getValue()).build())
+                                        .build());
+                            }
+                            builder.setAttributes(attrs);
+                        }
+                    }
+                    req.addMeasurements(builder.build());
+                }
+                grpcClient.createMeasurements(req.build());
+                logger.info("Batch-created {} measurements in one gRPC call", toCreate.size());
+            }
+
+            // Poll for all missing paths together (newly created + delegated).
+            Set<String> stillMissing = new HashSet<>(toCreate);
+            stillMissing.addAll(alreadyPending);
+
+            long[] backoffMs = {100L, 200L, 400L, 800L, 1500L};
+            for (int attempt = 0; attempt < backoffMs.length && !stillMissing.isEmpty(); attempt++) {
+                try {
+                    Thread.sleep(backoffMs[attempt]);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                stillMissing.removeIf(path -> {
+                    String uuid = fetchSingleMeasurementUUID(path, grpcClient);
+                    if (uuid != null) {
+                        result.put(path, uuid);
+                        return true;
+                    }
+                    return false;
+                });
+            }
+
+            // Fallback: full refresh for anything still not visible.
+            if (!stillMissing.isEmpty()) {
+                logger.warn("Batch: {} paths not visible after retries, triggering full refresh",
+                        stillMissing.size());
+                refresh(grpcClient);
+                for (String path : stillMissing) {
+                    String uuid = tagPathToUUID.get(path);
+                    if (uuid != null) {
+                        result.put(path, uuid);
+                    } else {
+                        logger.warn("Measurement not found after batch create + full refresh: '{}'", path);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Batch measurement creation failed", e);
+        } finally {
+            toCreate.forEach(pendingCreations::remove);
+        }
+
+        return result;
     }
 
     /**

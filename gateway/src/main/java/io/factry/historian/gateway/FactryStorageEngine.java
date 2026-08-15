@@ -25,6 +25,7 @@ import io.factry.historian.proto.SeriesPoint;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -190,17 +191,13 @@ public class FactryStorageEngine extends AbstractStorageEngine {
     private BuildResult buildPoints(List<AtomicPoint<?>> points) {
         Points.Builder pointsBuilder = Points.newBuilder();
         Set<String> usedUUIDs = new HashSet<>();
-        // Tracks whether any point was skipped because its measurement could not be
-        // created (Factry unreachable or creation still in progress). Such points must
-        // NOT be dropped — sendPoints returns an exception so S&F retries them.
         boolean hasFailedCreations = false;
-        // Collect array-indexed element changes per base path. They are grouped by timestamp
-        // and merged into full-array snapshots below (see ArrayPointMerger). A single
-        // store-and-forward batch can carry the same array at several timestamps (e.g.
-        // draining a backlog after an outage), so each timestamp becomes its own row.
-        // Non-array points are processed immediately.
+        // Array element changes are collected here and merged into full snapshots below.
         Map<String, List<ArrayPointMerger.ArrayElement>> arrayElementsByPath = new HashMap<>();
 
+        // First pass: collect unique tag paths so all missing measurements can be
+        // created in a single gRPC call instead of one per tag.
+        Map<String, Object> tagPathToValue = new LinkedHashMap<>();
         for (AtomicPoint<?> point : points) {
             String tagPath = TagPathUtil.storagePathToStoredPath(point.source().toString());
             Object value = point.value();
@@ -218,23 +215,34 @@ public class FactryStorageEngine extends AbstractStorageEngine {
                 continue;
             }
 
-            // Non-array point — process normally
+            if (value != null) {
+                // putIfAbsent: only the first value is used for data-type inference.
+                tagPathToValue.putIfAbsent(tagPath, value);
+            }
+        }
+
+        // Batch-resolve UUIDs — at most one CreateMeasurementsRequest for the whole flush.
+        Map<String, String> uuidByPath = measurementCache.batchGetOrCreateUUIDs(tagPathToValue, grpcClient);
+
+        // Second pass: build point protos using the resolved UUIDs.
+        for (AtomicPoint<?> point : points) {
+            String tagPath = TagPathUtil.storagePathToStoredPath(point.source().toString());
+            Object value = point.value();
+
             if (value == null) {
-                // Nothing to store — genuinely skip (not a failure).
                 logger.debug("Skipping point for '" + tagPath + "': null value");
                 continue;
             }
+            if (ArrayPointMerger.parseArrayPath(tagPath) != null) {
+                continue; // handled in the array block below
+            }
 
-            String measurementUUID = measurementCache.getOrCreateUUID(tagPath, grpcClient, value);
+            String measurementUUID = uuidByPath.get(tagPath);
             if (measurementUUID == null || measurementUUID.isEmpty()) {
                 if (MeasurementCache.toFactryDataType(value) == null) {
-                    // Unsupported value type — creation will never succeed; skip permanently.
                     logger.debug("Skipping point for '" + tagPath + "': unsupported value type "
                             + value.getClass().getName());
                 } else {
-                    // Supported type but the measurement could not be created (Factry
-                    // unreachable, or creation still in progress). Defer for retry so the
-                    // point is not silently dropped.
                     logger.debug("Deferring point for '" + tagPath + "': measurement not created yet");
                     hasFailedCreations = true;
                 }
