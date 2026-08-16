@@ -808,6 +808,58 @@ class FactryIntegrationTest {
     }
 
     @Test
+    @Order(99)
+    @DisplayName("Batch new-tag creation: N brand-new tags in one flush all get stored")
+    void testBatchNewTagCreation() throws Exception {
+        section("Batch new-tag creation");
+
+        int tagCount = 10;
+        long baseTs = 1700069000000L;
+
+        // Build paths and values for tagCount brand-new tags (none pre-created in Factry).
+        List<Object> paths = new ArrayList<>();
+        List<Object> values = new ArrayList<>();
+        List<Object> timestamps = new ArrayList<>();
+        List<Object> qualities = new ArrayList<>();
+        List<String> tagNames = new ArrayList<>();
+        for (int i = 0; i < tagCount; i++) {
+            String tagName = TEST_PREFIX + "/BatchNew" + i;
+            tagNames.add(tagName);
+            paths.add(qualifiedPath(HISTORIAN_NAME, tagName));
+            values.add((double) (i + 1) * 10.0);
+            timestamps.add(baseTs + i * 1000L);
+            qualities.add(QUALITY_GOOD);
+        }
+
+        log("Storing " + tagCount + " points for brand-new tags in a single storeDataPoints call");
+        Map<String, Object> storeResult = webdevPost("test/storePoints", Map.of(
+                "paths", paths, "values", values, "timestamps", timestamps, "qualities", qualities));
+        assertTrue((Boolean) storeResult.get("success"), "storeDataPoints should succeed: " + storeResult.get("error"));
+
+        log("Waiting " + (BATCH_FLUSH_WAIT_MS / 1000) + "s for S&F flush and measurement creation...");
+        Thread.sleep(BATCH_FLUSH_WAIT_MS);
+
+        // Verify every tag was created in Factry and its point is queryable.
+        int createdCount = 0;
+        for (int i = 0; i < tagCount; i++) {
+            String measurementName = storedTagPath(tagNames.get(i));
+            String uuid = findMeasurementUuid(measurementName);
+            if (uuid == null) {
+                log("MISS: measurement not found for '" + measurementName + "'");
+                continue;
+            }
+            QueryTimeseriesResponse resp = grpcQuery(uuid, baseTs - 1000, baseTs + tagCount * 1000L);
+            int pts = resp.getSeriesList().isEmpty() ? 0 : resp.getSeries(0).getDataPointsCount();
+            log("Tag " + i + " (" + measurementName + "): uuid=" + uuid + ", points=" + pts);
+            if (pts >= 1) createdCount++;
+        }
+        log("Created and stored: " + createdCount + "/" + tagCount);
+        assertEquals(tagCount, createdCount,
+                "All " + tagCount + " new tags should have been created and their point stored");
+        pass("Batch creation: all " + tagCount + " new measurements created in one flush");
+    }
+
+    @Test
     @Order(100)
     @DisplayName("Full round trip: store + query via system.historian")
     void testRoundTrip() throws Exception {
