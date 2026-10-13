@@ -207,6 +207,15 @@ public class MeasurementCache {
                 return uuid;
             }
 
+            // The cache only knows what Factry had at the last refresh. Ask Factry once more
+            // before creating: CreateMeasurements with a name that already exists does not return
+            // the existing measurement but adds a duplicate in status Discovered.
+            uuid = fetchSingleMeasurementUUID(tagPath, grpcClient);
+            if (uuid != null) {
+                logger.debug("Measurement '{}' already exists in Factry: {}", tagPath, uuid);
+                return uuid;
+            }
+
             logger.debug("Creating measurement for '{}' with dataType={}", tagPath, dataType);
 
             CreateMeasurement createMeasurement = buildCreateMeasurement(
@@ -306,8 +315,12 @@ public class MeasurementCache {
         List<String> alreadyPending = new ArrayList<>();
         for (String path : pathToDataType.keySet()) {
             if (pendingCreations.add(path)) {
-                // Double-check cache after acquiring the creation slot.
+                // Double-check the cache after acquiring the creation slot, then Factry itself:
+                // creating a name that already exists adds a Discovered duplicate.
                 String uuid = tagPathToUUID.get(path);
+                if (uuid == null) {
+                    uuid = fetchSingleMeasurementUUID(path, grpcClient);
+                }
                 if (uuid != null) {
                     result.put(path, uuid);
                     pendingCreations.remove(path);
@@ -495,9 +508,11 @@ public class MeasurementCache {
      * numeric ones as numbers. LimitLo and LimitHi have no plain Ignition tag property equivalent
      * (those values live in alarm setpoints) and stay unset.
      *
-     * Every other property goes to the metadata map, which stays the channel for arbitrary extras:
-     * it is the only one that round-trips back on read, since the read-side Measurement proto has
-     * no 'attributes' field. On read, Config-derived engineeringSpecs wins over the metadata map.
+     * Every other property goes to the metadata map, which stays the channel for arbitrary extras.
+     * Factry stores it and returns it over REST, but on Historian v8.2.3 the gRPC read calls
+     * (GetMeasurements, GetMeasurementsByFilter) leave Measurement.metadata empty, so these extras
+     * do not come back to Ignition. The read side still merges the map in case Factry starts
+     * returning it; Config-derived engineeringSpecs wins over it.
      */
     static CreateMeasurement buildCreateMeasurement(String tagPath, String dataType,
                                                     Map<String, String> metadata) {
