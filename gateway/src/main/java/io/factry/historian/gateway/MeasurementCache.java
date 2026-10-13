@@ -207,6 +207,15 @@ public class MeasurementCache {
                 return uuid;
             }
 
+            // The cache only knows what Factry had at the last refresh. Ask Factry once more
+            // before creating: CreateMeasurements with a name that already exists does not return
+            // the existing measurement but adds a duplicate in status Discovered.
+            uuid = fetchSingleMeasurementUUID(tagPath, grpcClient);
+            if (uuid != null) {
+                logger.debug("Measurement '{}' already exists in Factry: {}", tagPath, uuid);
+                return uuid;
+            }
+
             logger.debug("Creating measurement for '{}' with dataType={}", tagPath, dataType);
 
             CreateMeasurement createMeasurement = buildCreateMeasurement(
@@ -306,8 +315,12 @@ public class MeasurementCache {
         List<String> alreadyPending = new ArrayList<>();
         for (String path : pathToDataType.keySet()) {
             if (pendingCreations.add(path)) {
-                // Double-check cache after acquiring the creation slot.
+                // Double-check the cache after acquiring the creation slot, then Factry itself:
+                // creating a name that already exists adds a Discovered duplicate.
                 String uuid = tagPathToUUID.get(path);
+                if (uuid == null) {
+                    uuid = fetchSingleMeasurementUUID(path, grpcClient);
+                }
                 if (uuid != null) {
                     result.put(path, uuid);
                     pendingCreations.remove(path);
