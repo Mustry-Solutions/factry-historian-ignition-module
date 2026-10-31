@@ -3,11 +3,18 @@ package io.factry.historian.gateway;
 import com.google.protobuf.Struct;
 import com.google.protobuf.Value;
 import io.factry.historian.proto.CreateMeasurement;
+import io.factry.historian.proto.CreateMeasurementsReply;
+import io.factry.historian.proto.CreateMeasurementsRequest;
+import io.factry.historian.proto.GetMeasurementsByFilterRequest;
+import io.factry.historian.proto.Measurement;
+import io.factry.historian.proto.Measurements;
 import io.factry.historian.proto.MetadataProperty;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -101,6 +108,118 @@ class MeasurementCacheTest {
             assertFalse(m.hasAttributes());
             assertTrue(m.getMetadataMap().isEmpty());
             assertFalse(m.hasDescription());
+        }
+    }
+
+    /**
+     * Stands in for Factry: the gRPC channel is never used for measurements, because the calls the
+     * cache makes for them are overridden. Like Factry, a create with a name that already exists
+     * does not return the existing measurement.
+     */
+    static class FakeFactry extends FactryGrpcClient {
+        final List<Measurement> measurements = new ArrayList<>();
+        final List<String> createdNames = new ArrayList<>();
+        /** How many of the next single-name lookups fail, as a timed-out call would. */
+        int lookupFailures = 0;
+
+        FakeFactry() {
+            super("localhost", 1, "collector", "token", false, false, null);
+        }
+
+        void add(String name, String uuid) {
+            measurements.add(Measurement.newBuilder().setName(name).setUuid(uuid).setStatus("Active").build());
+        }
+
+        @Override
+        public Measurements getMeasurementsByFilterWithDeadline(GetMeasurementsByFilterRequest request) {
+            if (lookupFailures > 0) {
+                lookupFailures--;
+                throw new RuntimeException("lookup timed out");
+            }
+            return getMeasurementsByFilter(request);
+        }
+
+        @Override
+        public Measurements getMeasurementsByFilter(GetMeasurementsByFilterRequest request) {
+            Measurements.Builder b = Measurements.newBuilder();
+            for (Measurement m : measurements) {
+                if (!request.hasKeyword() || m.getName().contains(request.getKeyword())) {
+                    b.addMeasurements(m);
+                }
+            }
+            return b.setTotal(b.getMeasurementsCount()).build();
+        }
+
+        @Override
+        public CreateMeasurementsReply createMeasurements(CreateMeasurementsRequest request) {
+            for (CreateMeasurement m : request.getMeasurementsList()) {
+                createdNames.add(m.getName());
+                if (measurements.stream().noneMatch(e -> e.getName().equals(m.getName()))) {
+                    add(m.getName(), "new-" + m.getName());
+                }
+            }
+            return CreateMeasurementsReply.getDefaultInstance();
+        }
+    }
+
+    @Nested
+    class ExistingMeasurementNotInCache {
+
+        @Test
+        void getOrCreateUsesTheExistingMeasurementInsteadOfCreating() {
+            FakeFactry factry = new FakeFactry();
+            MeasurementCache cache = new MeasurementCache();
+            // Created in Factry after the cache was last refreshed.
+            factry.add("[default]Tank/Temp", "existing-uuid");
+
+            String uuid = cache.getOrCreateUUID("[default]Tank/Temp", factry, 21.5);
+
+            assertEquals("existing-uuid", uuid);
+            assertTrue(factry.createdNames.isEmpty(), "must not ask Factry to create an existing name");
+            assertEquals("existing-uuid", cache.getUUID("[default]Tank/Temp"));
+        }
+
+        @Test
+        void batchCreatesOnlyTheNamesFactryDoesNotHave() {
+            FakeFactry factry = new FakeFactry();
+            MeasurementCache cache = new MeasurementCache();
+            factry.add("[default]Tank/Temp", "existing-uuid");
+
+            Map<String, Object> values = new LinkedHashMap<>();
+            values.put("[default]Tank/Temp", 21.5);
+            values.put("[default]Tank/Level", 3.2);
+            Map<String, String> uuids = cache.batchGetOrCreateUUIDs(values, factry);
+
+            assertEquals("existing-uuid", uuids.get("[default]Tank/Temp"));
+            assertEquals("new-[default]Tank/Level", uuids.get("[default]Tank/Level"));
+            assertEquals(List.of("[default]Tank/Level"), factry.createdNames);
+        }
+
+        @Test
+        void batchCreatesWhenTheLookupFails() {
+            FakeFactry factry = new FakeFactry();
+            MeasurementCache cache = new MeasurementCache();
+            // The lookup before create fails; the polling after the create succeeds.
+            factry.lookupFailures = 1;
+
+            Map<String, String> uuids = cache.batchGetOrCreateUUIDs(
+                    Map.of("[default]Tank/Level", 3.2), factry);
+
+            assertEquals("new-[default]Tank/Level", uuids.get("[default]Tank/Level"));
+            assertEquals(List.of("[default]Tank/Level"), factry.createdNames);
+        }
+
+        @Test
+        void aNameThatOnlyContainsTheTagPathDoesNotCount() {
+            FakeFactry factry = new FakeFactry();
+            MeasurementCache cache = new MeasurementCache();
+            // The keyword filter matches substrings; only an exact name is the same measurement.
+            factry.add("[default]Tank/Temp2", "other-uuid");
+
+            String uuid = cache.getOrCreateUUID("[default]Tank/Temp", factry, 21.5);
+
+            assertEquals("new-[default]Tank/Temp", uuid);
+            assertEquals(List.of("[default]Tank/Temp"), factry.createdNames);
         }
     }
 }

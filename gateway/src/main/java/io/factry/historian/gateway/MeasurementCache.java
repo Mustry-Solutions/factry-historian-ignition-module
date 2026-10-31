@@ -207,6 +207,16 @@ public class MeasurementCache {
                 return uuid;
             }
 
+            // The cache only knows what Factry had at the last refresh. Ask Factry once more
+            // before creating: CreateMeasurements with a name that already exists does not return
+            // the existing measurement but adds a duplicate in status Discovered.
+            uuid = fetchSingleMeasurementUUID(tagPath, grpcClient);
+            if (uuid != null) {
+                logger.debug("Measurement '{}' already exists in Factry: {}", tagPath, uuid);
+                pendingMetadata.remove(tagPath);
+                return uuid;
+            }
+
             logger.debug("Creating measurement for '{}' with dataType={}", tagPath, dataType);
 
             CreateMeasurement createMeasurement = buildCreateMeasurement(
@@ -222,7 +232,8 @@ public class MeasurementCache {
             // store-and-forward thread, so keep it cheap: use a targeted single-measurement
             // lookup (keyword filter) instead of a full cache reload, and a tight fixed
             // backoff. This scales with the number of new tags, not the total measurement
-            // count. Total worst-case wait is ~3s rather than the old 7.5s.
+            // count. Worst case is about 3 s of sleeps (the old loop slept 7.5 s), plus up
+            // to the lookup deadline per poll when Factry is slow.
             long[] backoffMs = {100L, 200L, 400L, 800L, 1500L};
             for (int attempt = 0; attempt < backoffMs.length; attempt++) {
                 try {
@@ -260,10 +271,11 @@ public class MeasurementCache {
     }
 
     /**
-     * Resolve UUIDs for a batch of tag paths in a single gRPC round-trip.
+     * Resolve UUIDs for a batch of tag paths.
      *
-     * All paths already in the cache are returned immediately. For unknown paths:
-     * the ones not being created by another thread are batched into a single
+     * All paths already in the cache are returned immediately. For unknown paths not
+     * being created by another thread, Factry is first asked for each exact name (one
+     * lookup per path); the ones it does not have are batched into a single
      * {@code CreateMeasurementsRequest}; then all missing paths (newly created plus
      * those delegated to another thread) are polled together using targeted keyword
      * lookups. This keeps the store-and-forward thread's cost proportional to the
@@ -304,22 +316,29 @@ public class MeasurementCache {
         // handling (pendingCreations guards against duplicate-creation races).
         List<String> toCreate = new ArrayList<>();
         List<String> alreadyPending = new ArrayList<>();
-        for (String path : pathToDataType.keySet()) {
-            if (pendingCreations.add(path)) {
-                // Double-check cache after acquiring the creation slot.
-                String uuid = tagPathToUUID.get(path);
-                if (uuid != null) {
-                    result.put(path, uuid);
-                    pendingCreations.remove(path);
-                } else {
-                    toCreate.add(path);
-                }
-            } else {
-                alreadyPending.add(path);
-            }
-        }
-
         try {
+            for (String path : pathToDataType.keySet()) {
+                if (pendingCreations.add(path)) {
+                    // Track the slot in toCreate right away so the finally below releases it
+                    // even if the lookup throws.
+                    toCreate.add(path);
+                    // Double-check the cache after acquiring the creation slot, then Factry itself:
+                    // creating a name that already exists adds a Discovered duplicate.
+                    String uuid = tagPathToUUID.get(path);
+                    if (uuid == null) {
+                        uuid = fetchSingleMeasurementUUID(path, grpcClient);
+                    }
+                    if (uuid != null) {
+                        result.put(path, uuid);
+                        pendingMetadata.remove(path);
+                        toCreate.remove(path);
+                        pendingCreations.remove(path);
+                    }
+                } else {
+                    alreadyPending.add(path);
+                }
+            }
+
             // One CreateMeasurementsRequest for all new paths.
             if (!toCreate.isEmpty()) {
                 CreateMeasurementsRequest.Builder req = CreateMeasurementsRequest.newBuilder();
@@ -377,12 +396,14 @@ public class MeasurementCache {
     }
 
     /**
-     * Targeted lookup of a single measurement by its exact name, used while polling for a
-     * just-created measurement to become visible. Uses the server-side keyword filter with a
-     * small page instead of reloading the entire cache (measurements, collectors, assets,
-     * asset properties), so a burst of new tags doesn't trigger repeated full reloads on the
-     * store-and-forward thread. On a hit the entry is inserted into the live maps so later
-     * lookups hit the fast path. Returns null if the measurement is not yet visible.
+     * Targeted lookup of a single measurement by its exact name, used before creating a
+     * measurement (to reuse one Factry already has) and while polling for a just-created
+     * measurement to become visible. Uses the server-side keyword filter with a small page,
+     * bounded by the write deadline, instead of reloading the entire cache (measurements,
+     * collectors, assets, asset properties), so a burst of new tags doesn't trigger repeated
+     * full reloads on the store-and-forward thread. On a hit the entry is inserted into the
+     * live maps so later lookups hit the fast path. Returns null if no active measurement with
+     * that name is visible or the lookup fails.
      */
     private String fetchSingleMeasurementUUID(String tagPath, FactryGrpcClient grpcClient) {
         try {
@@ -390,7 +411,7 @@ public class MeasurementCache {
                     .setKeyword(tagPath)
                     .setPagination(Pagination.newBuilder().setLimit(50).setOffset(0).build())
                     .build();
-            Measurements response = grpcClient.getMeasurementsByFilter(request);
+            Measurements response = grpcClient.getMeasurementsByFilterWithDeadline(request);
             for (Measurement m : response.getMeasurementsList()) {
                 // Keyword search is fuzzy/substring, so match the exact name ourselves.
                 if (tagPath.equals(m.getName()) && "active".equalsIgnoreCase(m.getStatus())) {
@@ -406,8 +427,9 @@ public class MeasurementCache {
     }
 
     /**
-     * Remove a measurement from the cache by UUID so the next
-     * {@link #getOrCreateUUID} call will re-create it in Factry.
+     * Remove a measurement from the cache by UUID. The next {@link #getOrCreateUUID} call for
+     * its tag path looks the measurement up in Factry first and only re-creates it if Factry
+     * no longer has it.
      */
     public void evictByUUID(String uuid) {
         uuidToMeasurement.remove(uuid);

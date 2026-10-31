@@ -86,9 +86,11 @@ public class FactryStorageEngine extends AbstractStorageEngine {
     /**
      * Build and send points to Factry. If the call fails with a server rejection
      * (e.g. deleted measurement) and {@code retryOnRejection} is true, evict the
-     * affected measurement UUIDs from the cache and retry once — the retry will
-     * trigger {@link MeasurementCache#getOrCreateUUID} which re-creates the
-     * measurement in Factry.
+     * affected measurement UUIDs from the cache and retry once. The retry resolves
+     * them again through {@link MeasurementCache#batchGetOrCreateUUIDs} (array
+     * measurements through {@link MeasurementCache#getOrCreateUUID}), which looks
+     * each measurement up in Factry first and only re-creates it if Factry no
+     * longer has it.
      */
     private StorageResult<AtomicPoint<?>> sendPoints(List<AtomicPoint<?>> points, boolean retryOnRejection) {
         BuildResult built = buildPoints(points);
