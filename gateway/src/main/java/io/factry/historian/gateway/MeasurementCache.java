@@ -232,7 +232,8 @@ public class MeasurementCache {
             // store-and-forward thread, so keep it cheap: use a targeted single-measurement
             // lookup (keyword filter) instead of a full cache reload, and a tight fixed
             // backoff. This scales with the number of new tags, not the total measurement
-            // count. Total worst-case wait is ~3s rather than the old 7.5s.
+            // count. Worst case is about 3 s of sleeps (the old loop slept 7.5 s), plus up
+            // to the lookup deadline per poll when Factry is slow.
             long[] backoffMs = {100L, 200L, 400L, 800L, 1500L};
             for (int attempt = 0; attempt < backoffMs.length; attempt++) {
                 try {
