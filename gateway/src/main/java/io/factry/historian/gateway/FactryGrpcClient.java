@@ -123,6 +123,32 @@ public class FactryGrpcClient {
         }
     }
 
+    /**
+     * Same call as {@link #getMeasurementsByFilter}, bounded by the write deadline. For the small
+     * single-name lookups on the store-and-forward path, so a Factry that accepts the connection
+     * but never answers cannot block the write. Not for the full cache refresh, which pages
+     * through every measurement and can take longer.
+     */
+    public Measurements getMeasurementsByFilterWithDeadline(GetMeasurementsByFilterRequest request) {
+        logger.debug("Sending GetMeasurementsByFilter with deadline");
+        channelLock.readLock().lock();
+        try {
+            Measurements reply = blockingStub
+                    .withDeadlineAfter(WRITE_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .getMeasurementsByFilter(request);
+            connected = true;
+            return reply;
+        } catch (StatusRuntimeException e) {
+            Status.Code code = e.getStatus().getCode();
+            if (code == Status.Code.UNAVAILABLE || code == Status.Code.DEADLINE_EXCEEDED) {
+                connected = false;
+            }
+            throw e;
+        } finally {
+            channelLock.readLock().unlock();
+        }
+    }
+
     public QueryTimeseriesResponse queryTimeseries(QueryTimeseriesRequest request) {
         logger.debug("Sending QueryTimeseries for {} measurements", request.getMeasurementUUIDsCount());
         channelLock.readLock().lock();
