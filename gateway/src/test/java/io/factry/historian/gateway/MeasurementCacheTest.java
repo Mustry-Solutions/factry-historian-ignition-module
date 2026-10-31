@@ -112,13 +112,15 @@ class MeasurementCacheTest {
     }
 
     /**
-     * Stands in for Factry: the gRPC channel is never used, because the two calls the cache makes
-     * here are overridden. Like Factry, a create with a name that already exists does not return
-     * the existing measurement.
+     * Stands in for Factry: the gRPC channel is never used for measurements, because the calls the
+     * cache makes for them are overridden. Like Factry, a create with a name that already exists
+     * does not return the existing measurement.
      */
     static class FakeFactry extends FactryGrpcClient {
         final List<Measurement> measurements = new ArrayList<>();
         final List<String> createdNames = new ArrayList<>();
+        /** How many of the next single-name lookups fail, as a timed-out call would. */
+        int lookupFailures = 0;
 
         FakeFactry() {
             super("localhost", 1, "collector", "token", false, false, null);
@@ -126,6 +128,15 @@ class MeasurementCacheTest {
 
         void add(String name, String uuid) {
             measurements.add(Measurement.newBuilder().setName(name).setUuid(uuid).setStatus("Active").build());
+        }
+
+        @Override
+        public Measurements getMeasurementsByFilterWithDeadline(GetMeasurementsByFilterRequest request) {
+            if (lookupFailures > 0) {
+                lookupFailures--;
+                throw new RuntimeException("lookup timed out");
+            }
+            return getMeasurementsByFilter(request);
         }
 
         @Override
@@ -180,6 +191,20 @@ class MeasurementCacheTest {
             Map<String, String> uuids = cache.batchGetOrCreateUUIDs(values, factry);
 
             assertEquals("existing-uuid", uuids.get("[default]Tank/Temp"));
+            assertEquals("new-[default]Tank/Level", uuids.get("[default]Tank/Level"));
+            assertEquals(List.of("[default]Tank/Level"), factry.createdNames);
+        }
+
+        @Test
+        void batchCreatesWhenTheLookupFails() {
+            FakeFactry factry = new FakeFactry();
+            MeasurementCache cache = new MeasurementCache();
+            // The lookup before create fails; the polling after the create succeeds.
+            factry.lookupFailures = 1;
+
+            Map<String, String> uuids = cache.batchGetOrCreateUUIDs(
+                    Map.of("[default]Tank/Level", 3.2), factry);
+
             assertEquals("new-[default]Tank/Level", uuids.get("[default]Tank/Level"));
             assertEquals(List.of("[default]Tank/Level"), factry.createdNames);
         }

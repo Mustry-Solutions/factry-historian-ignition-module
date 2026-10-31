@@ -573,10 +573,10 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
         // Properties stored via storeMetadata that Factry has no engineering spec for are written to
         // the measurement's metadata map. Surface any that weren't already provided above: the
-        // Config-derived engineeringSpecs wins for engUnit/engLow/engHigh. Historian v8.2.3 leaves
-        // the metadata map empty on the gRPC read calls, so today this loop finds nothing; it is
-        // kept for when Factry returns the map. (The read-side Measurement proto has no
-        // 'description'/'attributes' fields, so there is no other channel for these values.)
+        // Config-derived engineeringSpecs wins for engUnit/engLow/engHigh. Factry Historian v8.2.3
+        // and v8.2.4 leave the metadata map empty on the gRPC read calls, so today this loop finds
+        // nothing; it is kept for when Factry returns the map. (The read-side Measurement proto has
+        // no 'description'/'attributes' fields, so there is no other channel for these values.)
         Set<String> existing = new HashSet<>();
         for (var pv : ps) {
             existing.add(pv.getProperty().getName());
