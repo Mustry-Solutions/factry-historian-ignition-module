@@ -38,15 +38,21 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.lang.reflect.Proxy;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -277,5 +283,93 @@ class GrpcTimeLimitsTest {
         settings.setToken(token);
         settings.setUseTls(false);
         return settings;
+    }
+
+    @Test
+    void failedConnectionTestDropsADeadConnection() throws Exception {
+        try (SilentDropProxy proxy = new SilentDropProxy(server.getPort())) {
+            FactryGrpcClient viaProxy = new FactryGrpcClient("localhost", proxy.port(), "collector-uuid",
+                    "token", false, false, null);
+            try {
+                assertTrue(viaProxy.testConnection());
+
+                // The network drops the connection without closing it: no FIN, no RST.
+                proxy.dropExistingConnections();
+                assertFalse(viaProxy.testConnection());
+
+                // The next call must open a new connection instead of waiting on the dead one.
+                timed(Duration.ofSeconds(3), () -> assertDoesNotThrow(viaProxy::getCollectors));
+            } finally {
+                viaProxy.shutdown();
+            }
+        }
+    }
+
+    /**
+     * TCP proxy whose existing connections can be made to swallow every byte while staying open,
+     * like a connection a firewall or NAT forgot. New connections still go through.
+     */
+    private static class SilentDropProxy implements AutoCloseable {
+        private final ServerSocket listener = new ServerSocket(0);
+        private final List<AtomicBoolean> links = new CopyOnWriteArrayList<>();
+        private final List<Socket> sockets = new CopyOnWriteArrayList<>();
+
+        SilentDropProxy(int targetPort) throws Exception {
+            Thread accept = new Thread(() -> {
+                try {
+                    while (true) {
+                        Socket in = listener.accept();
+                        Socket out = new Socket("localhost", targetPort);
+                        sockets.add(in);
+                        sockets.add(out);
+                        AtomicBoolean dropped = new AtomicBoolean();
+                        links.add(dropped);
+                        pump(in, out, dropped);
+                        pump(out, in, dropped);
+                    }
+                } catch (Exception closed) {
+                    // listener closed
+                }
+            });
+            accept.setDaemon(true);
+            accept.start();
+        }
+
+        int port() {
+            return listener.getLocalPort();
+        }
+
+        void dropExistingConnections() {
+            for (AtomicBoolean dropped : links) {
+                dropped.set(true);
+            }
+        }
+
+        private static void pump(Socket from, Socket to, AtomicBoolean dropped) {
+            Thread t = new Thread(() -> {
+                byte[] buf = new byte[8192];
+                try (InputStream in = from.getInputStream(); OutputStream out = to.getOutputStream()) {
+                    int n;
+                    while ((n = in.read(buf)) >= 0) {
+                        if (!dropped.get()) {
+                            out.write(buf, 0, n);
+                            out.flush();
+                        }
+                    }
+                } catch (Exception closed) {
+                    // socket closed
+                }
+            });
+            t.setDaemon(true);
+            t.start();
+        }
+
+        @Override
+        public void close() throws Exception {
+            listener.close();
+            for (Socket s : sockets) {
+                s.close();
+            }
+        }
     }
 }

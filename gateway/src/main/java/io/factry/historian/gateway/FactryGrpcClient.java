@@ -278,6 +278,10 @@ public class FactryGrpcClient {
         }
     }
 
+    // No gRPC keepalive pings. Factry's server keeps the grpc-go defaults: a ping while no call is
+    // running counts as abuse, and after three it closes the connection with "too_many_pings"
+    // (seen on v8.2.3 with pings every 30 s and every 5 minutes). Deadlines on every call and
+    // enterIdle() in testConnection() deal with connections the network dropped.
     private void buildChannel(String host, int port, String collectorUUID, String token,
                               boolean useTls, boolean skipTlsVerification, String customCaCert) {
         if (useTls) {
@@ -485,6 +489,13 @@ public class FactryGrpcClient {
         } catch (Exception e) {
             connected = false;
             logger.debug("Connection test failed: {}", e.getMessage());
+            if (e instanceof StatusRuntimeException sre
+                    && sre.getStatus().getCode() == Status.Code.DEADLINE_EXCEEDED) {
+                // A connection the network dropped without closing it (firewall or NAT timeout)
+                // still looks ready, and every call on it times out until TCP gives up, about
+                // 16 minutes on Linux. Drop it, so the next call opens a new connection.
+                channel.enterIdle();
+            }
             return false;
         } finally {
             channelLock.readLock().unlock();
