@@ -60,6 +60,8 @@ public class FactryGrpcClient {
             Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER);
 
     private static final long WRITE_DEADLINE_SECONDS = ModuleProperties.getWriteDeadlineSeconds();
+    private static final long WRITE_DEADLINE_MILLIS_PER_POINT = ModuleProperties.getWriteDeadlineMillisPerPoint();
+    private static final long WRITE_DEADLINE_MAX_SECONDS = ModuleProperties.getWriteDeadlineMaxSeconds();
     private static final long READ_DEADLINE_SECONDS = ModuleProperties.getReadDeadlineSeconds();
     private static final long CALL_DEADLINE_SECONDS = ModuleProperties.getCallDeadlineSeconds();
     private static final long SHUTDOWN_GRACE_SECONDS = ModuleProperties.getShutdownGraceSeconds();
@@ -87,7 +89,7 @@ public class FactryGrpcClient {
         channelLock.readLock().lock();
         try {
             CreatePointsReply reply = blockingStub
-                    .withDeadlineAfter(WRITE_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .withDeadlineAfter(writeDeadlineMillis(points.getPointsCount()), TimeUnit.MILLISECONDS)
                     .createPoints(points);
             connected = true;
             return reply;
@@ -100,6 +102,16 @@ public class FactryGrpcClient {
         } finally {
             channelLock.readLock().unlock();
         }
+    }
+
+    /**
+     * A fixed deadline that fits one point is too short for a full store and forward batch on a
+     * slow link: the same batch would time out on every retry and the backlog would never
+     * shrink. So the deadline grows with the batch, up to a ceiling.
+     */
+    private static long writeDeadlineMillis(int pointCount) {
+        long millis = WRITE_DEADLINE_SECONDS * 1000 + pointCount * WRITE_DEADLINE_MILLIS_PER_POINT;
+        return Math.min(millis, WRITE_DEADLINE_MAX_SECONDS * 1000);
     }
 
     public Measurements getMeasurements(MeasurementRequest request) {

@@ -138,7 +138,7 @@ The single point of contact with Factry. Wraps a gRPC `ManagedChannel` and expos
 **Key design points:**
 - **TLS modes**: plain text, TLS with bundled CA cert, TLS with insecure trust (skip verification), fallback to system trust store
 - **Connection tracking**: `connected` flag set to `false` on `createPoints()` failure, checked by `StorageEngine.isEngineUnavailable()` so S&F can buffer without hitting the network
-- **Deadlines**: every call has one, so a Factry that never answers cannot hang the module: 3 s for writes and store lookups, 30 s for history queries and each cache refresh page, 10 s for the other small calls (configurable via `ModuleProperties`)
+- **Deadlines**: every call has one, so a Factry that never answers cannot hang the module: 3 s for store lookups, 3 s plus 1 ms per point (at most 30 s) for writes, 30 s for history queries and each cache refresh page, 10 s for the other small calls (configurable via `ModuleProperties`)
 - **Dead connections**: no keepalive pings, because Factry closes a connection that pings without a call running (`too_many_pings`). When `testConnection()` times out, the channel drops its connection with `enterIdle()` so the next call opens a new one
 - **Auth headers**: every call includes `collectoruuid` + `authorization: Bearer <token>` metadata
 - **Read/write lock**: prevents race conditions during `reconfigure()` — old channel is shut down and replaced atomically. `reconfigure()` and `shutdown()` wait at most 3 s for running calls, then cancel them
@@ -249,7 +249,9 @@ Loads tuning values from `factry-historian.properties` (bundled in the .modl). T
 
 | Property | Default | Controls |
 |----------|---------|----------|
-| `grpc.write.deadline.seconds` | 3 | Timeout on `createPoints()` calls |
+| `grpc.write.deadline.seconds` | 3 | Timeout on store lookups and measurement creation; base timeout on `createPoints()` |
+| `grpc.write.deadline.ms.per.point` | 1 | Added to the `createPoints()` timeout per point in the batch |
+| `grpc.write.deadline.max.seconds` | 30 | Ceiling on the `createPoints()` timeout |
 | `grpc.read.deadline.seconds` | 30 | Timeout on history queries and on each page of the measurement cache refresh |
 | `grpc.call.deadline.seconds` | 10 | Timeout on the small calls: collectors, assets, health, collector state |
 | `grpc.shutdown.grace.seconds` | 3 | How long a settings save or shutdown waits for running calls before it cancels them |
