@@ -195,6 +195,30 @@ class FactryQueryEngineRawTest {
     }
 
     @Test
+    void readStopsAtTheMaxRawPointsCap() {
+        for (String tag : List.of("a", "b", "c")) {
+            String uuid = factry.addMeasurement("default/" + tag, "number");
+            for (int s = 0; s < 86_400; s++) {
+                factry.addPoint(uuid, START + s * 1000L, s);
+            }
+        }
+        startEngine();
+        engine.maxRawPoints = 30_000;
+
+        Recorder rec = query(null, key("a"), key("b"), key("c"));
+
+        assertNull(rec.error, () -> "read failed: " + rec.error);
+        assertTrue(rec.completed);
+        // The cap is shared over the pens, and each pen keeps its first points in time.
+        for (String tag : List.of("a", "b", "c")) {
+            List<AtomicPoint<?>> pts = rec.points.get(key(tag));
+            assertEquals(10_000, pts.size(), tag);
+            assertEquals(START + 9_999_000L, pts.get(pts.size() - 1).timestamp().toEpochMilli(), tag);
+        }
+        assertEquals(1, factry.queries.size(), "should stop paging at the cap");
+    }
+
+    @Test
     void returnSizeKeepsTheFirstPointsInTime() {
         for (String tag : List.of("a", "b")) {
             String uuid = factry.addMeasurement("default/" + tag, "number");

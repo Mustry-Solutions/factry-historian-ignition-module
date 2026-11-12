@@ -88,6 +88,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     private final MeasurementCache measurementCache;
     private final HistorianMetrics metrics;
 
+    /**
+     * Most raw points one query collects over all pens before it stops paging. Paging lifts the
+     * gRPC message limit, so without this a long range over many pens could fill the heap.
+     */
+    long maxRawPoints = ModuleProperties.getRawQueryMaxPoints();
+
     public FactryQueryEngine(
         GatewayContext context,
         String historianName,
@@ -394,11 +400,25 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             int pageSize = RAW_QUERY_PAGE_SIZE;
             List<String> pending = measurementUUIDs;
             long offset = 0;
+            long collected = 0;
             while (!pending.isEmpty()) {
                 long limit = returnSize != null ? Math.min(pageSize, returnSize - offset) : pageSize;
                 if (limit <= 0) {
                     break;
                 }
+                // Stop at maxRawPoints and return what we have. The processor API has no way to
+                // mark a result as partial, so the warning in the log is the only signal.
+                long room = maxRawPoints - collected;
+                if (room <= 0) {
+                    logger.warn("Raw query stopped at " + collected + " points (query.raw.max.points="
+                            + maxRawPoints + "); " + pending.size() + " pen(s) have more data in "
+                            + options.getTimeRange().map(Object::toString).orElse("the range")
+                            + " that is not returned");
+                    break;
+                }
+                // Share what is left over the pens still paging so the last page fills up to the
+                // cap instead of passing it by a full page per pen.
+                limit = Math.min(limit, Math.max(1, room / pending.size()));
                 QueryTimeseriesResponse reply;
                 try {
                     reply = grpcClient.queryTimeseries(reqBuilder
@@ -432,6 +452,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     for (SeriesPoint pt : series.getDataPointsList()) {
                         pts.add(new RawPt(pt.getTimestamp(), protoValueToJava(pt.getValue()), quality));
                     }
+                    collected += series.getDataPointsCount();
                 }
                 pending = new ArrayList<>(more);
                 offset += limit;
