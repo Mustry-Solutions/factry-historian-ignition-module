@@ -281,7 +281,7 @@ public class FactryStorageEngine extends AbstractStorageEngine {
             ArrayPointMerger.ArrayElement firstElement = byTimestamp.firstEntry().getValue().firstEntry().getValue();
 
             // Non-blocking: only check the cache, don't create
-            String measurementUUID = measurementCache.getUUID(basePath);
+            String measurementUUID = measurementCache.getWriteUUID(basePath, grpcClient);
             if (measurementUUID == null || measurementUUID.isEmpty()) {
                 // Trigger async measurement creation if not already in progress
                 if (asyncArrayCreations.add(basePath)) {
