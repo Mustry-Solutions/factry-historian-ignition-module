@@ -149,8 +149,8 @@ The single point of contact with Factry. Wraps a gRPC `ManagedChannel` and expos
 
 In-memory cache of Factry measurements and assets. Both the storage engine and query engine depend on this.
 
-- `tagPathToUUID` — maps stored tag path (e.g., `Ignition-abc:[default]Temperature`) to Factry UUID
-- `uuidToMeasurement` — maps UUID to full `Measurement` proto object
+- `tagPathToUUID` — maps stored tag path (e.g., `Ignition-abc:[default]Temperature`) to Factry UUID. Names are only unique per time-series database, so another Site can have the same name; this collector's measurement always keeps the name, for writes and reads. Writes never use another collector's measurement without first asking Factry once to create this collector's own
+- `uuidToMeasurement` — maps UUID to full `Measurement` proto object, of every collector, so browse still shows other collectors
 - `refresh(grpcClient)` — fetches all measurements from Factry, replaces the maps. Only keeps measurements with `status=Active`
 - `getOrCreateUUID(tagPath, grpcClient, value)` — cache lookup with auto-creation: on miss, creates the measurement in Factry, polls until visible, returns UUID. Includes concurrent creation prevention (`pendingCreations` set) and data type detection from the value
 - `evictByUUID(uuid)` — removes a measurement so it gets re-created on next write (used when Factry rejects points for deleted measurements)
