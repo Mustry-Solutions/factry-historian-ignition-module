@@ -401,6 +401,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             List<String> pending = measurementUUIDs;
             long offset = 0;
             long collected = 0;
+            // Last timestamp read per series (measurement and status), to see that a page moved on.
+            Map<String, Long> lastTsBySeries = new HashMap<>();
             while (!pending.isEmpty()) {
                 long limit = returnSize != null ? Math.min(pageSize, returnSize - offset) : pageSize;
                 if (limit <= 0) {
@@ -438,6 +440,28 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     throw e;
                 }
 
+                // Each page should start where the previous one ended. A Factry that ignores offset
+                // answers the first page again, and paging on would loop and duplicate points.
+                // Equal timestamps are allowed: series merged under one status can share one. A
+                // Factry that repeats a page of equal timestamps slips past this, but the
+                // maxRawPoints cap still ends the read.
+                String stuck = null;
+                for (Series series : reply.getSeriesList()) {
+                    Long lastTs = series.getDataPointsCount() > 0
+                            ? lastTsBySeries.get(series.getMeasurementUUID() + "|" + seriesStatus(series))
+                            : null;
+                    if (lastTs != null && series.getDataPoints(0).getTimestamp() < lastTs) {
+                        stuck = series.getMeasurementUUID();
+                        break;
+                    }
+                }
+                if (stuck != null) {
+                    logger.warn("Raw query stopped at " + collected + " points: Factry answered offset "
+                            + offset + " for measurement " + stuck + " with points from before the "
+                            + "previous page. It may not support offset; returning the points read so far");
+                    break;
+                }
+
                 Set<String> more = new LinkedHashSet<>();
                 for (Series series : reply.getSeriesList()) {
                     String uuid = series.hasMeasurementUUID() ? series.getMeasurementUUID() : "";
@@ -453,6 +477,10 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                         pts.add(new RawPt(pt.getTimestamp(), protoValueToJava(pt.getValue()), quality));
                     }
                     collected += series.getDataPointsCount();
+                    if (series.getDataPointsCount() > 0) {
+                        lastTsBySeries.put(uuid + "|" + seriesStatus(series),
+                                series.getDataPoints(series.getDataPointsCount() - 1).getTimestamp());
+                    }
                 }
                 pending = new ArrayList<>(more);
                 offset += limit;

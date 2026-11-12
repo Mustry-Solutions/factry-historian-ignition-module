@@ -14,6 +14,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,7 +22,9 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static io.factry.historian.gateway.FactryQueryEngine.RAW_QUERY_PAGE_SIZE;
 
 /** Raw reads through the public query entry point, against an in-process Factry. */
 class FactryQueryEngineRawTest {
@@ -216,6 +219,28 @@ class FactryQueryEngineRawTest {
             assertEquals(START + 9_999_000L, pts.get(pts.size() - 1).timestamp().toEpochMilli(), tag);
         }
         assertEquals(1, factry.queries.size(), "should stop paging at the cap");
+    }
+
+    @Test
+    void factryThatIgnoresOffsetDoesNotLoopOrDuplicate() {
+        String uuid = factry.addMeasurement("default/a", "number");
+        for (int s = 0; s < 25_000; s++) {
+            factry.addPoint(uuid, START + s * 1000L, s);
+        }
+        factry.ignoreOffset = true;
+        startEngine();
+
+        Recorder rec = assertTimeoutPreemptively(Duration.ofSeconds(30), () -> query(null, key("a")));
+
+        assertNull(rec.error, () -> "read failed: " + rec.error);
+        assertTrue(rec.completed);
+        // Only the first page is real; the second repeats it and must be dropped.
+        List<AtomicPoint<?>> pts = rec.points.get(key("a"));
+        assertEquals(RAW_QUERY_PAGE_SIZE, pts.size());
+        for (int i = 0; i < pts.size(); i++) {
+            assertEquals(START + i * 1000L, pts.get(i).timestamp().toEpochMilli());
+        }
+        assertEquals(2, factry.queries.size(), "should stop at the first page that does not move on");
     }
 
     @Test
