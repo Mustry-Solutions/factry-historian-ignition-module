@@ -284,8 +284,9 @@ Extends `AbstractQueryEngine`. Handles all data retrieval from Factry.
 **`doQueryRaw(options, processor)`**:
 1. Maps each `RawQueryKey` to stored tag path → measurement UUID (via `lookupUUID`)
 2. `lookupUUID` checks cache, then refreshes from Factry on miss
-3. Builds `QueryTimeseriesRequest` with measurement UUIDs and time range
-4. Iterates response `Series` → `SeriesPoint`, converts protobuf values to Java, creates `AtomicPoint` objects, feeds them to the `RawPointProcessor`
+3. Builds `QueryTimeseriesRequest` with measurement UUIDs and time range, grouped by status
+4. Reads in pages of `limit`/`offset` (Factry applies both per series), halving the page when an answer is too large, and keeps only the first `returnSize` points per pen when Ignition sets one
+5. Iterates response `Series` → `SeriesPoint`, converts protobuf values to Java, creates `AtomicPoint` objects, feeds them to the `RawPointProcessor`
 
 **`doQueryAggregated(options, processor)`**:
 - Same pattern but adds aggregation function and interval to the request
@@ -470,7 +471,7 @@ FactryStorageEngine.doStoreAtomic(points)
 
 **Store metadata is a no-op:** `FactryStorageEngine.doStoreMetadata()` accepts the call and returns success, but does not forward metadata to Factry. Metadata (engineering units, limits, etc.) is managed on the Factry platform directly, not pushed from Ignition.
 
-**Pagination:** The design document lists pagination as a provider requirement. In practice, there is no paginated use case — charts receive the full dataset and Jython scripts get a complete `DataSet` object. The gRPC proto does define `limit`/`offset` fields on `QueryTimeseriesRequest`, so pagination can be added if Factry ever imposes response size limits.
+**Pagination:** Raw reads page through `QueryTimeseries` with `limit`/`offset`. One answer for a day of 1-second data on a few pens is over grpc-java's default 4 MiB message limit, so the client also accepts answers up to 64 MiB, which is Factry's own send limit (`GRPC_MAX_MESSAGE_SIZE`). Charts and scripts still receive the full dataset.
 
 **Browse filters and optional query parameters:** The design document's appendix lists optional parameters for `browse`, `queryRawPoints`, and `queryAggregatedPoints` (e.g. `returnSize`, `includeBounds`, `fillModes`, `nameFilters`). These are part of the Ignition scripting API — the framework parses them and passes relevant options to the query engine. Our implementation handles the core parameters (time range, aggregation type, time window). The optional parameters are either handled by the Ignition framework itself or are not relevant for the Factry backend.
 
