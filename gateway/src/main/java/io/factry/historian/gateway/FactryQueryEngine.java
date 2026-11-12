@@ -475,8 +475,23 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         } catch (Exception e) {
             logger.error("Error querying raw data", e);
             processor.onError(e);
-            return Optional.empty();
+            throw readFailed(e);
         }
+    }
+
+    /**
+     * The exception a failed read leaves the query engine with. Ignition's history reader
+     * (HistorianPointQueryExecutor) stores what onError gets and never reads it back, so on its own
+     * a failed read shows as an empty, Good result. An exception out of the query engine reaches
+     * HistoryWriter, which ends the dataset with that error: the Power Chart answers with an error
+     * and the RPC to Vision and Designer clients carries it.
+     */
+    static IllegalStateException readFailed(Exception e) {
+        String detail = e.getMessage();
+        if (!(e instanceof StatusRuntimeException) && e.getCause() instanceof StatusRuntimeException s) {
+            detail = detail + ": " + s.getMessage();
+        }
+        return new IllegalStateException("Factry Historian read failed: " + detail, e);
     }
 
     @Override
@@ -538,8 +553,11 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                         pointCount += querySingleAggregate(uuid, source, key, factryFunction, period, options, processor);
                     }
                 } catch (Exception e) {
+                    // Fail the whole read, not just this pen: once the columns are built, Ignition
+                    // ignores the quality given to onKeyFailure and shows Bad_NotFound, the same
+                    // as a tag that does not exist.
                     logger.error("Error querying aggregated data for: " + tagPath, e);
-                    processor.onKeyFailure(key, QualityCode.Bad);
+                    throw e;
                 }
             }
 
@@ -551,7 +569,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         } catch (Exception e) {
             logger.error("Error in aggregated query", e);
             processor.onError(e);
-            return Optional.empty();
+            throw readFailed(e);
         }
     }
 

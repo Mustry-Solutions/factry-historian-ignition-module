@@ -287,6 +287,7 @@ Extends `AbstractQueryEngine`. Handles all data retrieval from Factry.
 3. Builds `QueryTimeseriesRequest` with measurement UUIDs and time range, grouped by status
 4. Reads in pages of `limit`/`offset` (Factry applies both per series), halving the page when an answer is too large, and keeps only the first `returnSize` points across all pens when Ignition sets one
 5. Iterates response `Series` → `SeriesPoint`, converts protobuf values to Java, creates `AtomicPoint` objects, and feeds them to the `RawPointProcessor` in one time order across all pens. Ignition builds wide-format rows from that single stream; pen by pen gives rows out of order with values carried between pens
+6. A failed read (Factry unreachable, a timeout, a refused query) calls `processor.onError` and then throws, in `doQueryAggregated` too. Ignition's history reader ignores `onError` and would show an empty, Good result; the exception ends the dataset with an error instead. The Power Chart answers that with an error, and the RPC to Vision and Designer clients carries it. Gateway-scope `system.tag.queryTagHistory` and Perspective history bindings drop that error in Ignition itself (8.3.6) and still return an empty dataset. A tag Factry does not have stays a `Bad_NotFound` column, not an error
 
 **`doQueryAggregated(options, processor)`**:
 - Same pattern but adds aggregation function and interval to the request
