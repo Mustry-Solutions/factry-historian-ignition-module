@@ -103,9 +103,9 @@ public class FactryStorageEngine extends AbstractStorageEngine {
                         new RuntimeException("Array measurement(s) being created, retry later"), points);
             }
             if (built.hasFailedCreations) {
-                // Measurement creation failed for supported-type points (Factry likely
-                // unreachable). Return an exception so S&F keeps them in pending and retries
-                // instead of silently dropping them.
+                // Measurement creation failed for new tags (Factry likely unreachable). Return
+                // an exception so S&F keeps them in pending and retries instead of silently
+                // dropping them.
                 logger.warn("Could not create measurement(s) for new tag(s) — S&F will retry");
                 return StorageResult.exception(
                         new RuntimeException("Measurement creation failed, retry later"), points);

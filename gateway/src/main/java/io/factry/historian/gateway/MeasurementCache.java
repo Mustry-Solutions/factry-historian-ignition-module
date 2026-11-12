@@ -187,7 +187,7 @@ public class MeasurementCache {
         }
         logger.debug("Cache miss for '{}', cache size={}, keys={}", tagPath, tagPathToUUID.size(), tagPathToUUID.keySet());
 
-        // Determine data type from value — refuse to create without it
+        // Data type from the tag's metadata, else from the value; refuse to create without one
         String dataType = explicitDataType != null ? explicitDataType : dataTypeFor(tagPath, value);
         if (dataType == null) {
             logger.debug("Skipping measurement creation for '{}': value is null or unknown type", tagPath);
@@ -304,7 +304,7 @@ public class MeasurementCache {
                 if (dataType != null) {
                     pathToDataType.put(path, dataType);
                 }
-                // Unsupported value type → no entry in result (caller skips the point).
+                // No data type → no entry in result; the caller defers the point for S&F retry.
             }
         }
 
