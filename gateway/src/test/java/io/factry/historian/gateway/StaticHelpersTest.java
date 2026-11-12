@@ -1,10 +1,13 @@
 package io.factry.historian.gateway;
 
 import com.google.protobuf.Value;
+import io.factry.historian.proto.QueryTimeseriesRequest;
 import com.inductiveautomation.ignition.common.model.values.QualityCode;
 import com.inductiveautomation.ignition.common.sqltags.model.types.DataType;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -18,8 +21,9 @@ class StaticHelpersTest {
     class ToFactryAggregateFunction {
 
         @Test
-        void average() {
-            assertEquals("mean", FactryQueryEngine.toFactryAggregateFunction("Average"));
+        void average_isTimeWeighted() {
+            // Ignition's "Average" is time-weighted; "SimpleAverage" is the mean of the samples.
+            assertEquals("twa", FactryQueryEngine.toFactryAggregateFunction("Average"));
         }
 
         @Test
@@ -70,6 +74,39 @@ class StaticHelpersTest {
         @Test
         void unknownDefaultsToMean() {
             assertEquals("mean", FactryQueryEngine.toFactryAggregateFunction("UnknownAgg"));
+        }
+    }
+
+    // =========================================================================
+    // FactryQueryEngine.aggregateRequest
+    // =========================================================================
+
+    @Nested
+    class AggregateRequest {
+
+        @Test
+        void timeWeightedAverage_holdsPreviousValueAndFiltersGood() {
+            // Checked against Factry 8.2.3: twa is only right with fill "previous" (a tag at 100
+            // for 1 minute of the hour gives 1.666667; fill "none" gives 100), and twa refuses
+            // group by, so the Good filter is a tag filter.
+            QueryTimeseriesRequest req = FactryQueryEngine.aggregateRequest("u1", "twa", "10m").build();
+
+            assertEquals("twa", req.getAggregation().getName());
+            assertEquals("10m", req.getAggregation().getPeriod());
+            assertEquals("previous", req.getAggregation().getFillType());
+            assertEquals(0, req.getGroupByCount());
+            assertEquals("Good", req.getTags().getFieldsOrThrow("status").getStringValue());
+            assertEquals(List.of("u1"), req.getMeasurementUUIDsList());
+        }
+
+        @Test
+        void otherAggregates_groupByStatusWithoutFill() {
+            QueryTimeseriesRequest req = FactryQueryEngine.aggregateRequest("u1", "mean", "10m").build();
+
+            assertEquals("mean", req.getAggregation().getName());
+            assertEquals("none", req.getAggregation().getFillType());
+            assertEquals(List.of("status"), req.getGroupByList());
+            assertFalse(req.hasTags());
         }
     }
 
