@@ -13,7 +13,12 @@ import io.factry.historian.proto.HistorianGrpc;
 import io.factry.historian.proto.Measurement;
 import io.factry.historian.proto.Measurements;
 import io.factry.historian.proto.Points;
+import io.grpc.Metadata;
 import io.grpc.Server;
+import io.grpc.ServerCall;
+import io.grpc.ServerCallHandler;
+import io.grpc.ServerInterceptor;
+import io.grpc.ServerInterceptors;
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
 import io.grpc.stub.StreamObserver;
 import org.junit.jupiter.api.AfterEach;
@@ -26,6 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -42,6 +48,7 @@ class SlowLinkTest {
     private Server server;
     private FactryGrpcClient client;
     private final AtomicInteger storedPoints = new AtomicInteger();
+    private final AtomicReference<String> writeEncoding = new AtomicReference<>();
 
     private class SlowFactry extends HistorianGrpc.HistorianImplBase {
         @Override
@@ -70,9 +77,23 @@ class SlowLinkTest {
         }
     }
 
+    /** Records how the CreatePoints request body was encoded. */
+    private class EncodingRecorder implements ServerInterceptor {
+        @Override
+        public <Q, R> ServerCall.Listener<Q> interceptCall(ServerCall<Q, R> call, Metadata headers,
+                                                          ServerCallHandler<Q, R> next) {
+            if (call.getMethodDescriptor().getBareMethodName().equals("CreatePoints")) {
+                writeEncoding.set(headers.get(Metadata.Key.of("grpc-encoding", Metadata.ASCII_STRING_MARSHALLER)));
+            }
+            return next.startCall(call, headers);
+        }
+    }
+
     @BeforeEach
     void startServer() throws Exception {
-        server = NettyServerBuilder.forPort(0).addService(new SlowFactry()).build().start();
+        server = NettyServerBuilder.forPort(0)
+                .addService(ServerInterceptors.intercept(new SlowFactry(), new EncodingRecorder()))
+                .build().start();
         client = new FactryGrpcClient("localhost", server.getPort(), "collector-uuid", "token",
                 false, false, null);
     }
@@ -115,5 +136,12 @@ class SlowLinkTest {
 
         assertTrue(result.error().isEmpty(), "batch failed: " + result.error());
         assertEquals(10_000, storedPoints.get());
+    }
+
+    @Test
+    void writesAreGzipCompressed() throws Exception {
+        engine(client).storeAtomic(batch(10)).toCompletableFuture().get(30, TimeUnit.SECONDS);
+
+        assertEquals("gzip", writeEncoding.get());
     }
 }

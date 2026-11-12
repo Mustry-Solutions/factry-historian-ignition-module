@@ -252,6 +252,7 @@ Loads tuning values from `factry-historian.properties` (bundled in the .modl). T
 | `grpc.write.deadline.seconds` | 3 | Timeout on store lookups and measurement creation; base timeout on `createPoints()` |
 | `grpc.write.deadline.ms.per.point` | 1 | Added to the `createPoints()` timeout per point in the batch |
 | `grpc.write.deadline.max.seconds` | 30 | Ceiling on the `createPoints()` timeout |
+| `grpc.write.gzip` | true | Send `createPoints()` gzip-compressed |
 | `grpc.read.deadline.seconds` | 30 | Timeout on history queries and on each page of the measurement cache refresh |
 | `grpc.call.deadline.seconds` | 10 | Timeout on the small calls: collectors, assets, health, collector state |
 | `grpc.shutdown.grace.seconds` | 3 | How long a settings save or shutdown waits for running calls before it cancels them |

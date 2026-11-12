@@ -62,6 +62,7 @@ public class FactryGrpcClient {
     private static final long WRITE_DEADLINE_SECONDS = ModuleProperties.getWriteDeadlineSeconds();
     private static final long WRITE_DEADLINE_MILLIS_PER_POINT = ModuleProperties.getWriteDeadlineMillisPerPoint();
     private static final long WRITE_DEADLINE_MAX_SECONDS = ModuleProperties.getWriteDeadlineMaxSeconds();
+    private static final boolean WRITE_GZIP = ModuleProperties.isWriteGzip();
     private static final long READ_DEADLINE_SECONDS = ModuleProperties.getReadDeadlineSeconds();
     private static final long CALL_DEADLINE_SECONDS = ModuleProperties.getCallDeadlineSeconds();
     private static final long SHUTDOWN_GRACE_SECONDS = ModuleProperties.getShutdownGraceSeconds();
@@ -88,9 +89,12 @@ public class FactryGrpcClient {
         logger.debug("Sending CreatePoints with {} points", points.getPointsCount());
         channelLock.readLock().lock();
         try {
-            CreatePointsReply reply = blockingStub
-                    .withDeadlineAfter(writeDeadlineMillis(points.getPointsCount()), TimeUnit.MILLISECONDS)
-                    .createPoints(points);
+            HistorianGrpc.HistorianBlockingStub stub = blockingStub
+                    .withDeadlineAfter(writeDeadlineMillis(points.getPointsCount()), TimeUnit.MILLISECONDS);
+            if (WRITE_GZIP) {
+                stub = stub.withCompression("gzip");
+            }
+            CreatePointsReply reply = stub.createPoints(points);
             connected = true;
             return reply;
         } catch (StatusRuntimeException e) {
