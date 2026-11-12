@@ -20,12 +20,14 @@ import io.grpc.stub.StreamObserver;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
 import java.lang.reflect.Proxy;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -40,6 +42,7 @@ class FactryStorageEngineRefusalTest {
     private Server server;
     private FactryGrpcClient client;
     private volatile Status createPointsStatus;
+    private final AtomicInteger createPointsCalls = new AtomicInteger();
 
     /** Answers every lookup with an Active measurement of that name, refuses CreatePoints. */
     private class RefusingHistorian extends HistorianGrpc.HistorianImplBase {
@@ -58,6 +61,7 @@ class FactryStorageEngineRefusalTest {
 
         @Override
         public void createPoints(Points request, StreamObserver<CreatePointsReply> observer) {
+            createPointsCalls.incrementAndGet();
             observer.onError(createPointsStatus.asRuntimeException());
         }
     }
@@ -105,5 +109,23 @@ class FactryStorageEngineRefusalTest {
         assertTrue(result.error().isPresent(),
                 "a refused batch must carry an error so Store and Forward keeps it, got " + result.type());
         assertTrue(result.successfulData().isEmpty(), "nothing was stored");
+    }
+
+    /**
+     * Only an answer about the measurements is worth a cache eviction and a second attempt.
+     * Factry v8.2.3 answers INTERNAL while InfluxDB is down; retrying then just doubles the
+     * load on a Factry that is already in trouble.
+     */
+    @ParameterizedTest
+    @CsvSource({"NOT_FOUND, 2", "INVALID_ARGUMENT, 2", "INTERNAL, 1", "UNKNOWN, 1",
+            "RESOURCE_EXHAUSTED, 1", "UNAUTHENTICATED, 1"})
+    void onlyMeasurementErrorsTriggerARetry(Status.Code code, int expectedCalls) throws Exception {
+        createPointsStatus = Status.fromCode(code).withDescription("refused by test server");
+        AtomicPoint<?> point = DataPointFactory.createAtomicPoint(42.0, QualityCode.Good, Instant.now(),
+                QualifiedPath.newBuilder().setProvider("default").setTag("Pump1/Flow").build());
+
+        engine(client).storeAtomic(List.of(point)).toCompletableFuture().get(30, TimeUnit.SECONDS);
+
+        assertEquals(expectedCalls, createPointsCalls.get(), "CreatePoints calls for " + code);
     }
 }

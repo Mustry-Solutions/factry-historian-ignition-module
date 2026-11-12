@@ -87,8 +87,8 @@ public class FactryStorageEngine extends AbstractStorageEngine {
     }
 
     /**
-     * Build and send points to Factry. If the call fails with a server rejection
-     * (e.g. deleted measurement) and {@code retryOnRejection} is true, evict the
+     * Build and send points to Factry. If Factry answers NOT_FOUND or INVALID_ARGUMENT
+     * (e.g. a deleted measurement) and {@code retryOnRejection} is true, evict the
      * affected measurement UUIDs from the cache and retry once. The retry resolves
      * them again through {@link MeasurementCache#batchGetOrCreateUUIDs} (array
      * measurements through {@link MeasurementCache#getOrCreateUUID}), which looks
@@ -150,8 +150,11 @@ public class FactryStorageEngine extends AbstractStorageEngine {
                 throw e;
             }
 
-            // Server rejection — likely deleted measurements. Evict and retry once.
-            if (retryOnRejection && !built.usedUUIDs.isEmpty()) {
+            // Only an answer about the measurements themselves justifies dropping them from
+            // the cache: evicting on INTERNAL (e.g. InfluxDB down) would send a lookup per
+            // measurement to a Factry that is already struggling, on every retry.
+            boolean aboutMeasurements = code == Status.Code.NOT_FOUND || code == Status.Code.INVALID_ARGUMENT;
+            if (retryOnRejection && aboutMeasurements && !built.usedUUIDs.isEmpty()) {
                 logger.warn("Server rejected points (" + code + "), evicting "
                         + built.usedUUIDs.size() + " measurement UUIDs and retrying: " + e.getMessage());
                 for (String uuid : built.usedUUIDs) {
