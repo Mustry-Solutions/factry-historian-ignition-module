@@ -403,6 +403,10 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             long collected = 0;
             // Last timestamp read per series (measurement and status), to see that a page moved on.
             Map<String, Long> lastTsBySeries = new HashMap<>();
+            // Per pen still paging: the time up to which all its series are read. Set when the
+            // read stops early, so those pens end there instead of at a sparse series' last point.
+            Map<String, Long> readUntil = new HashMap<>();
+            Map<String, Long> cutAt = Map.of();
             while (!pending.isEmpty()) {
                 long limit = returnSize != null ? Math.min(pageSize, returnSize - offset) : pageSize;
                 if (limit <= 0) {
@@ -416,6 +420,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                             + maxRawPoints + "); " + pending.size() + " pen(s) have more data in "
                             + options.getTimeRange().map(Object::toString).orElse("the range")
                             + " that is not returned");
+                    cutAt = readUntil;
                     break;
                 }
                 // Share what is left over the pens still paging so the last page fills up to the
@@ -459,10 +464,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     logger.warn("Raw query stopped at " + collected + " points: Factry answered offset "
                             + offset + " for measurement " + stuck + " with points from before the "
                             + "previous page. It may not support offset; returning the points read so far");
+                    cutAt = readUntil;
                     break;
                 }
 
                 Set<String> more = new LinkedHashSet<>();
+                Map<String, Long> pageReadUntil = new HashMap<>();
                 for (Series series : reply.getSeriesList()) {
                     String uuid = series.hasMeasurementUUID() ? series.getMeasurementUUID() : "";
                     if (!uuidToKeyMap.containsKey(uuid)) {
@@ -470,6 +477,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     }
                     if (series.getDataPointsCount() >= limit) {
                         more.add(uuid);
+                        pageReadUntil.merge(uuid,
+                                series.getDataPoints(series.getDataPointsCount() - 1).getTimestamp(), Math::min);
                     }
                     QualityCode quality = statusToQuality(seriesStatus(series));
                     List<RawPt> pts = pointsByUuid.computeIfAbsent(uuid, k -> new ArrayList<>());
@@ -483,6 +492,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     }
                 }
                 pending = new ArrayList<>(more);
+                readUntil = pageReadUntil;
                 offset += limit;
             }
 
@@ -496,6 +506,10 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 // past where the Good one stopped. Keep only the first returnSize points in time.
                 if (returnSize != null && pts.size() > returnSize) {
                     pts = pts.subList(0, returnSize);
+                }
+                Long cut = cutAt.get(entry.getKey());
+                if (cut != null) {
+                    pts = pts.stream().filter(p -> p.ts() <= cut).toList();
                 }
 
                 for (RawPt p : pts) {

@@ -222,6 +222,28 @@ class FactryQueryEngineRawTest {
     }
 
     @Test
+    void penCutShortByTheCapEndsWhereItsPagingStopped() {
+        // The sparse Bad series fits whole in the first page and runs far past the Good one.
+        String uuid = factry.addMeasurement("default/a", "number");
+        for (int s = 0; s < 25_000; s++) {
+            factry.addPoint(uuid, START + s * 1000L, Value.newBuilder().setNumberValue(s).build(),
+                    s % 1000 == 7 ? "Bad" : "Good");
+        }
+        startEngine();
+        engine.maxRawPoints = 5_000;
+
+        Recorder rec = query(null, key("a"));
+
+        // 5,000 Good points reach second 5,004; the 5 Bad points before it fill the gaps. Bad
+        // points after it would draw a trend past where the data really stops.
+        List<AtomicPoint<?>> pts = rec.points.get(key("a"));
+        assertEquals(5_005, pts.size());
+        for (int i = 0; i < pts.size(); i++) {
+            assertEquals(START + i * 1000L, pts.get(i).timestamp().toEpochMilli());
+        }
+    }
+
+    @Test
     void factryThatIgnoresOffsetDoesNotLoopOrDuplicate() {
         String uuid = factry.addMeasurement("default/a", "number");
         for (int s = 0; s < 25_000; s++) {
