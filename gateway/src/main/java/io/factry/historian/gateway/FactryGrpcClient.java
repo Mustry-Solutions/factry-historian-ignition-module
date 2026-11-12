@@ -48,7 +48,9 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -77,6 +79,7 @@ public class FactryGrpcClient {
     private volatile ManagedChannel channel;
     private volatile HistorianGrpc.HistorianBlockingStub blockingStub;
     private volatile boolean connected = true;
+    private final AtomicBoolean writeGzip = new AtomicBoolean(WRITE_GZIP);
 
     public FactryGrpcClient(String host, int port, String collectorUUID, String token,
                             boolean useTls, boolean skipTlsVerification, String customCaCert) {
@@ -89,12 +92,21 @@ public class FactryGrpcClient {
         logger.debug("Sending CreatePoints with {} points", points.getPointsCount());
         channelLock.readLock().lock();
         try {
-            HistorianGrpc.HistorianBlockingStub stub = blockingStub
-                    .withDeadlineAfter(writeDeadlineMillis(points.getPointsCount()), TimeUnit.MILLISECONDS);
-            if (WRITE_GZIP) {
-                stub = stub.withCompression("gzip");
+            CreatePointsReply reply;
+            boolean gzip = writeGzip.get();
+            try {
+                reply = sendPoints(points, gzip);
+            } catch (StatusRuntimeException e) {
+                if (!gzip || !isGzipRejected(e)) {
+                    throw e;
+                }
+                // Without this the batch would fail the same way on every attempt.
+                if (writeGzip.compareAndSet(true, false)) {
+                    logger.warn("Factry does not accept gzip-compressed writes ({}), sending them uncompressed from now on",
+                            e.getStatus().getDescription());
+                }
+                reply = sendPoints(points, false);
             }
-            CreatePointsReply reply = stub.createPoints(points);
             connected = true;
             return reply;
         } catch (StatusRuntimeException e) {
@@ -106,6 +118,28 @@ public class FactryGrpcClient {
         } finally {
             channelLock.readLock().unlock();
         }
+    }
+
+    private CreatePointsReply sendPoints(Points points, boolean gzip) {
+        HistorianGrpc.HistorianBlockingStub stub = blockingStub
+                .withDeadlineAfter(writeDeadlineMillis(points.getPointsCount()), TimeUnit.MILLISECONDS);
+        if (gzip) {
+            stub = stub.withCompression("gzip");
+        }
+        return stub.createPoints(points);
+    }
+
+    /**
+     * A server without a gzip decompressor answers UNIMPLEMENTED: grpc-go with "grpc:
+     * Decompressor is not installed for grpc-encoding \"gzip\"", grpc-java with "Can't find
+     * decompressor for gzip". An RPC the server does not know is also UNIMPLEMENTED ("unknown
+     * method", "Method not found"), so the message tells the two apart.
+     */
+    static boolean isGzipRejected(StatusRuntimeException e) {
+        String description = e.getStatus().getDescription();
+        return e.getStatus().getCode() == Status.Code.UNIMPLEMENTED
+                && description != null
+                && description.toLowerCase(Locale.ROOT).contains("decompressor");
     }
 
     /**

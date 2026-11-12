@@ -13,12 +13,14 @@ import io.factry.historian.proto.HistorianGrpc;
 import io.factry.historian.proto.Measurement;
 import io.factry.historian.proto.Measurements;
 import io.factry.historian.proto.Points;
+import io.grpc.DecompressorRegistry;
 import io.grpc.Metadata;
 import io.grpc.Server;
 import io.grpc.ServerCall;
 import io.grpc.ServerCallHandler;
 import io.grpc.ServerInterceptor;
 import io.grpc.ServerInterceptors;
+import io.grpc.Status;
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
 import io.grpc.stub.StreamObserver;
 import org.junit.jupiter.api.AfterEach;
@@ -28,6 +30,8 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Proxy;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -49,6 +53,7 @@ class SlowLinkTest {
     private FactryGrpcClient client;
     private final AtomicInteger storedPoints = new AtomicInteger();
     private final AtomicReference<String> writeEncoding = new AtomicReference<>();
+    private final List<String> writeEncodings = Collections.synchronizedList(new ArrayList<>());
 
     private class SlowFactry extends HistorianGrpc.HistorianImplBase {
         @Override
@@ -83,7 +88,9 @@ class SlowLinkTest {
         public <Q, R> ServerCall.Listener<Q> interceptCall(ServerCall<Q, R> call, Metadata headers,
                                                           ServerCallHandler<Q, R> next) {
             if (call.getMethodDescriptor().getBareMethodName().equals("CreatePoints")) {
-                writeEncoding.set(headers.get(Metadata.Key.of("grpc-encoding", Metadata.ASCII_STRING_MARSHALLER)));
+                String encoding = headers.get(Metadata.Key.of("grpc-encoding", Metadata.ASCII_STRING_MARSHALLER));
+                writeEncoding.set(encoding);
+                writeEncodings.add(encoding);
             }
             return next.startCall(call, headers);
         }
@@ -143,5 +150,44 @@ class SlowLinkTest {
         engine(client).storeAtomic(batch(10)).toCompletableFuture().get(30, TimeUnit.SECONDS);
 
         assertEquals("gzip", writeEncoding.get());
+    }
+
+    @Test
+    void writesFallBackToUncompressedWhenFactryRejectsGzip() throws Exception {
+        // A Factry without the gzip decompressor answers UNIMPLEMENTED. An empty registry gives
+        // this server the same gap.
+        Server noGzipServer = NettyServerBuilder.forPort(0)
+                .decompressorRegistry(DecompressorRegistry.emptyInstance())
+                .addService(ServerInterceptors.intercept(new SlowFactry(), new EncodingRecorder()))
+                .build().start();
+        FactryGrpcClient noGzipClient = new FactryGrpcClient("localhost", noGzipServer.getPort(),
+                "collector-uuid", "token", false, false, null);
+        try {
+            FactryStorageEngine engine = engine(noGzipClient);
+            StorageResult<AtomicPoint<?>> first = engine.storeAtomic(batch(10))
+                    .toCompletableFuture().get(30, TimeUnit.SECONDS);
+            StorageResult<AtomicPoint<?>> second = engine.storeAtomic(batch(5))
+                    .toCompletableFuture().get(30, TimeUnit.SECONDS);
+
+            // A rejection comes back as a failure without an error, which drops the points.
+            assertTrue(first.failedData().isEmpty() && first.error().isEmpty(), "first batch: " + first.type());
+            assertTrue(second.failedData().isEmpty() && second.error().isEmpty(), "second batch: " + second.type());
+            assertEquals(15, storedPoints.get());
+            // Rejected gzip calls never reach the service, so every recorded write is uncompressed.
+            assertEquals(Arrays.asList(null, null), writeEncodings);
+        } finally {
+            noGzipServer.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
+            noGzipClient.shutdown();
+        }
+    }
+
+    @Test
+    void onlyAMissingDecompressorCountsAsGzipRejected() {
+        // Factry is grpc-go; this is its message for a missing decompressor.
+        assertTrue(FactryGrpcClient.isGzipRejected(Status.UNIMPLEMENTED
+                .withDescription("grpc: Decompressor is not installed for grpc-encoding \"gzip\"").asRuntimeException()));
+        assertFalse(FactryGrpcClient.isGzipRejected(Status.UNIMPLEMENTED
+                .withDescription("unknown method CreatePoints for service historian.Historian").asRuntimeException()));
+        assertFalse(FactryGrpcClient.isGzipRejected(Status.UNIMPLEMENTED.asRuntimeException()));
     }
 }
