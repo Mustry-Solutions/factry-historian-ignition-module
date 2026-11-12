@@ -187,8 +187,8 @@ public class MeasurementCache {
         }
         logger.debug("Cache miss for '{}', cache size={}, keys={}", tagPath, tagPathToUUID.size(), tagPathToUUID.keySet());
 
-        // Determine data type from value — refuse to create without it
-        String dataType = explicitDataType != null ? explicitDataType : toFactryDataType(value);
+        // Data type from the tag's metadata, else from the value; refuse to create without one
+        String dataType = explicitDataType != null ? explicitDataType : dataTypeFor(tagPath, value);
         if (dataType == null) {
             logger.debug("Skipping measurement creation for '{}': value is null or unknown type", tagPath);
             return "";
@@ -220,7 +220,7 @@ public class MeasurementCache {
             logger.debug("Creating measurement for '{}' with dataType={}", tagPath, dataType);
 
             CreateMeasurement createMeasurement = buildCreateMeasurement(
-                    tagPath, dataType, pendingMetadata.remove(tagPath));
+                    tagPath, dataType, takeMetadata(tagPath, value));
 
             CreateMeasurementsRequest request = CreateMeasurementsRequest.newBuilder()
                     .addMeasurements(createMeasurement)
@@ -300,11 +300,11 @@ public class MeasurementCache {
             if (uuid != null) {
                 result.put(path, uuid);
             } else {
-                String dataType = toFactryDataType(entry.getValue());
+                String dataType = dataTypeFor(path, entry.getValue());
                 if (dataType != null) {
                     pathToDataType.put(path, dataType);
                 }
-                // Unsupported value type → no entry in result (caller skips the point).
+                // No data type → no entry in result; the caller defers the point for S&F retry.
             }
         }
 
@@ -344,7 +344,7 @@ public class MeasurementCache {
                 CreateMeasurementsRequest.Builder req = CreateMeasurementsRequest.newBuilder();
                 for (String path : toCreate) {
                     req.addMeasurements(buildCreateMeasurement(
-                            path, pathToDataType.get(path), pendingMetadata.remove(path)));
+                            path, pathToDataType.get(path), takeMetadata(path, tagPathToValue.get(path))));
                 }
                 grpcClient.createMeasurements(req.build());
                 logger.info("Batch-created {} measurements in one gRPC call", toCreate.size());
@@ -496,6 +496,36 @@ public class MeasurementCache {
         logger.debug("Cached metadata for '{}': {}", tagPath, properties);
     }
 
+    /**
+     * Take the cached metadata for a tag that is about to get a measurement. A Date value without a
+     * known Ignition data type (for example one stored by a script) still marks the tag as DateTime,
+     * so the read side can return Dates.
+     */
+    private Map<String, String> takeMetadata(String tagPath, Object value) {
+        Map<String, String> metadata = pendingMetadata.remove(tagPath);
+        if (value instanceof java.util.Date && (metadata == null || !metadata.containsKey(IGNITION_DATA_TYPE))) {
+            metadata = metadata != null ? new HashMap<>(metadata) : new HashMap<>();
+            metadata.put(IGNITION_DATA_TYPE, "DateTime");
+        }
+        return metadata;
+    }
+
+    /** Ignition tag property that holds the tag's data type (e.g. "DateTime"). */
+    static final String IGNITION_DATA_TYPE = "dataType";
+
+    /**
+     * Measurement setting that keeps the tag's Ignition data type. Factry stores dates as plain
+     * numbers, so this is how the read side knows to return Dates. Settings are used because the
+     * gRPC read calls return them, while they leave the metadata map empty (Factry v8.2.3).
+     */
+    static final String IGNITION_DATA_TYPE_SETTING = "ignitionDataType";
+
+    /** The Ignition data type recorded on a measurement at creation, or null when there is none. */
+    static String ignitionDataType(Measurement m) {
+        Value v = m.getSettings().getFieldsMap().get(IGNITION_DATA_TYPE_SETTING);
+        return v != null && v.getKindCase() == Value.KindCase.STRING_VALUE ? v.getStringValue() : null;
+    }
+
     /** Factry derives EngineeringSpecs from a nested "Config" attribute group with these keys. */
     private static final String CONFIG_GROUP = "Config";
 
@@ -522,6 +552,9 @@ public class MeasurementCache {
      * read calls (GetMeasurements, GetMeasurementsByFilter) leave Measurement.metadata empty, so
      * these extras do not come back to Ignition. The read side still merges the map in case Factry
      * starts returning it; Config-derived engineeringSpecs wins over it.
+     *
+     * The tag's data type is also copied to the measurement settings, which the gRPC read calls do
+     * return (see {@link #IGNITION_DATA_TYPE_SETTING}).
      */
     static CreateMeasurement buildCreateMeasurement(String tagPath, String dataType,
                                                     Map<String, String> metadata) {
@@ -532,6 +565,12 @@ public class MeasurementCache {
 
         if (metadata == null || metadata.isEmpty()) {
             return builder.build();
+        }
+
+        String ignitionType = metadata.get(IGNITION_DATA_TYPE);
+        if (ignitionType != null) {
+            builder.setSettings(Struct.newBuilder()
+                    .putFields(IGNITION_DATA_TYPE_SETTING, Value.newBuilder().setStringValue(ignitionType).build()));
         }
 
         Struct.Builder config = Struct.newBuilder();
@@ -583,10 +622,46 @@ public class MeasurementCache {
         return builder.build();
     }
 
+    /**
+     * Factry data type for a new measurement. The tag's Ignition data type, from the metadata
+     * Ignition sends before the first value, wins over the value: Store and Forward hands Boolean
+     * values over as Long 0/1 (its storage format has no boolean type), so the value alone would
+     * turn a Boolean tag into a number measurement.
+     */
+    String dataTypeFor(String tagPath, Object value) {
+        Map<String, String> metadata = pendingMetadata.get(tagPath);
+        String fromTag = metadata != null ? fromIgnitionDataType(metadata.get(IGNITION_DATA_TYPE)) : null;
+        return fromTag != null ? fromTag : toFactryDataType(value);
+    }
+
+    /**
+     * Map an Ignition DataType name to a Factry data type, or null when there is no mapping.
+     * Array types map to their element type.
+     */
+    private static String fromIgnitionDataType(String ignitionType) {
+        if (ignitionType == null) {
+            return null;
+        }
+        String type = ignitionType.endsWith("Array")
+                ? ignitionType.substring(0, ignitionType.length() - "Array".length())
+                : ignitionType;
+        if (type.equals("Boolean")) {
+            return "boolean";
+        }
+        if (type.startsWith("Int") || type.startsWith("Float") || type.equals("DateTime")) {
+            return "number";
+        }
+        if (type.equals("String") || type.equals("Text")) {
+            return "string";
+        }
+        return null;
+    }
+
     static String toFactryDataType(Object value) {
         if (value instanceof Boolean) {
             return "boolean";
-        } else if (value instanceof Number) {
+        } else if (value instanceof Number || value instanceof java.util.Date) {
+            // Dates are stored as epoch milliseconds, see FactryStorageEngine.toProtoValue.
             return "number";
         } else if (value instanceof String) {
             return "string";

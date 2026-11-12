@@ -103,9 +103,9 @@ public class FactryStorageEngine extends AbstractStorageEngine {
                         new RuntimeException("Array measurement(s) being created, retry later"), points);
             }
             if (built.hasFailedCreations) {
-                // Measurement creation failed for supported-type points (Factry likely
-                // unreachable). Return an exception so S&F keeps them in pending and retries
-                // instead of silently dropping them.
+                // Measurement creation failed for new tags (Factry likely unreachable). Return
+                // an exception so S&F keeps them in pending and retries instead of silently
+                // dropping them.
                 logger.warn("Could not create measurement(s) for new tag(s) — S&F will retry");
                 return StorageResult.exception(
                         new RuntimeException("Measurement creation failed, retry later"), points);
@@ -176,6 +176,15 @@ public class FactryStorageEngine extends AbstractStorageEngine {
         }
     }
 
+    /** Tag paths (prefixed with the kind of problem) already warned about, to warn once per tag. */
+    private final Set<String> warnedTags = ConcurrentHashMap.newKeySet();
+
+    private void warnOnce(String kind, String tagPath, String message) {
+        if (warnedTags.add(kind + ":" + tagPath)) {
+            logger.warn(message);
+        }
+    }
+
     /** Tracks array base paths for which measurement creation is in progress on a background thread. */
     private final Set<String> asyncArrayCreations = ConcurrentHashMap.newKeySet();
 
@@ -241,27 +250,32 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
             String measurementUUID = uuidByPath.get(tagPath);
             if (measurementUUID == null || measurementUUID.isEmpty()) {
-                if (MeasurementCache.toFactryDataType(value) == null) {
-                    logger.debug("Skipping point for '" + tagPath + "': unsupported value type "
-                            + value.getClass().getName());
-                } else {
-                    logger.debug("Deferring point for '" + tagPath + "': measurement not created yet");
-                    hasFailedCreations = true;
-                }
+                // Every value type an AtomicPoint can hold has a Factry data type (AtomicPoint is
+                // sealed and DataPointFactory only builds Boolean, the Java number types, String
+                // and Date), so a missing UUID always means the creation failed: retry later.
+                logger.debug("Deferring point for '" + tagPath + "': measurement not created yet");
+                hasFailedCreations = true;
                 continue;
             }
 
             Point.Builder pb = Point.newBuilder()
                     .setMeasurementUUID(measurementUUID)
-                    .setTimestamp(Timestamps.fromMillis(point.timestamp().toEpochMilli()))
-                    .setStatus(qualityToStatus(point.quality().getCode()));
+                    .setTimestamp(Timestamps.fromMillis(point.timestamp().toEpochMilli()));
 
-            if (value instanceof Boolean) {
-                pb.setValue(Value.newBuilder().setBoolValue((Boolean) value).build());
-            } else if (value instanceof Number) {
-                pb.setValue(Value.newBuilder().setNumberValue(((Number) value).doubleValue()).build());
+            if (isNonFinite(value)) {
+                // Factry stores NaN and Infinity as 0, and keeps the status we send unless it is
+                // Good. Send no value and Bad, so the point reads back as Bad instead of a real 0.
+                pb.setStatus("Bad");
+                warnOnce("non-finite", tagPath, "Tag '" + tagPath + "' has value " + value
+                        + "; Factry cannot store it, storing a Bad point instead");
             } else {
-                pb.setValue(Value.newBuilder().setStringValue(value.toString()).build());
+                Value protoValue = toProtoValue(value);
+                if (losesPrecision(value, protoValue)) {
+                    warnOnce("precision", tagPath, "Tag '" + tagPath + "' has value " + value
+                            + ", which Factry stores as the nearest double " + protoValue.getNumberValue()
+                            + "; integers above 2^53 lose their low digits");
+                }
+                pb.setStatus(qualityToStatus(point.quality().getCode())).setValue(protoValue);
             }
 
             pointsBuilder.addPoints(pb.build());
@@ -285,7 +299,7 @@ public class FactryStorageEngine extends AbstractStorageEngine {
             if (measurementUUID == null || measurementUUID.isEmpty()) {
                 // Trigger async measurement creation if not already in progress
                 if (asyncArrayCreations.add(basePath)) {
-                    String elementType = MeasurementCache.toFactryDataType(firstElement.value);
+                    String elementType = measurementCache.dataTypeFor(basePath, firstElement.value);
                     String arrayDataType = "[]" + (elementType != null ? elementType : "string");
                     logger.info("Array measurement '" + basePath + "' not in cache, creating asynchronously (" + arrayDataType + ")");
                     Thread creator = new Thread(() -> {
@@ -319,17 +333,26 @@ public class FactryStorageEngine extends AbstractStorageEngine {
             }
 
             for (ArrayPointMerger.ArraySnapshot snap : snapshots) {
-                // Build a ListValue from the full merged array, in index order.
-                com.google.protobuf.ListValue.Builder listBuilder = com.google.protobuf.ListValue.newBuilder();
-                for (Object val : snap.values) {
-                    appendArrayValue(listBuilder, val);
-                }
-
                 Point.Builder pb = Point.newBuilder()
                         .setMeasurementUUID(measurementUUID)
-                        .setTimestamp(Timestamps.fromMillis(snap.timestampMillis))
-                        .setStatus(qualityToStatus(snap.qualityCode))
-                        .setValue(Value.newBuilder().setListValue(listBuilder));
+                        .setTimestamp(Timestamps.fromMillis(snap.timestampMillis));
+
+                // Build a ListValue from the full merged array, in index order.
+                com.google.protobuf.ListValue.Builder listBuilder = com.google.protobuf.ListValue.newBuilder();
+                Object nonFinite = snap.values.stream().filter(FactryStorageEngine::isNonFinite).findFirst().orElse(null);
+                if (nonFinite != null) {
+                    // Same as a scalar NaN: Factry cannot store it (one NaN element turns the whole
+                    // row into an empty array), so send the row as Bad without a value.
+                    pb.setStatus("Bad");
+                    warnOnce("non-finite", basePath, "Array tag '" + basePath + "' has element value " + nonFinite
+                            + "; Factry cannot store it, storing a Bad point instead");
+                } else {
+                    for (Object val : snap.values) {
+                        appendArrayValue(listBuilder, val);
+                    }
+                    pb.setStatus(qualityToStatus(snap.qualityCode))
+                            .setValue(Value.newBuilder().setListValue(listBuilder));
+                }
 
                 pointsBuilder.addPoints(pb.build());
                 logger.debug("Built array point for '" + basePath + "' at " + snap.timestampMillis
@@ -341,17 +364,44 @@ public class FactryStorageEngine extends AbstractStorageEngine {
         return new BuildResult(pointsBuilder, usedUUIDs, hasSkippedArrays, hasFailedCreations);
     }
 
+    /**
+     * Convert a Java value to the protobuf Value Factry gets. Dates go as epoch milliseconds in a
+     * number measurement: they stay exact (well below 2^53) and Factry can chart them. The
+     * measurement is marked DateTime at creation, so the query engine turns them back into Dates.
+     * An ISO string would need a string measurement, which Ignition's raw queries return no rows for.
+     */
+    private static Value toProtoValue(Object value) {
+        if (value instanceof Boolean) {
+            return Value.newBuilder().setBoolValue((Boolean) value).build();
+        } else if (value instanceof java.util.Date) {
+            return Value.newBuilder().setNumberValue(((java.util.Date) value).getTime()).build();
+        } else if (value instanceof Number) {
+            return Value.newBuilder().setNumberValue(((Number) value).doubleValue()).build();
+        } else if (value != null) {
+            return Value.newBuilder().setStringValue(value.toString()).build();
+        }
+        return Value.newBuilder().setNullValue(com.google.protobuf.NullValue.NULL_VALUE).build();
+    }
+
+    private static boolean isNonFinite(Object value) {
+        return (value instanceof Double || value instanceof Float)
+                && !Double.isFinite(((Number) value).doubleValue());
+    }
+
+    /**
+     * True when a Long does not survive the conversion to double. Factry keeps numbers as float64
+     * and parses numeric strings into the same float64, so there is no lossless way to send it to
+     * a number measurement. Compared as BigDecimal because casting back saturates at Long.MAX_VALUE.
+     */
+    private static boolean losesPrecision(Object value, Value sent) {
+        return value instanceof Long
+                && new java.math.BigDecimal(sent.getNumberValue())
+                        .compareTo(java.math.BigDecimal.valueOf((Long) value)) != 0;
+    }
+
     /** Append a Java value to a protobuf ListValue as the matching Value kind. */
     private static void appendArrayValue(com.google.protobuf.ListValue.Builder listBuilder, Object val) {
-        if (val instanceof Boolean) {
-            listBuilder.addValues(Value.newBuilder().setBoolValue((Boolean) val));
-        } else if (val instanceof Number) {
-            listBuilder.addValues(Value.newBuilder().setNumberValue(((Number) val).doubleValue()));
-        } else if (val != null) {
-            listBuilder.addValues(Value.newBuilder().setStringValue(val.toString()));
-        } else {
-            listBuilder.addValues(Value.newBuilder().setNullValue(com.google.protobuf.NullValue.NULL_VALUE));
-        }
+        listBuilder.addValues(toProtoValue(val));
     }
 
     /**
