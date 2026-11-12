@@ -366,10 +366,11 @@ Extends `AbstractHistorian<FactryHistorianSettings>`. The orchestrator that ties
    - Metrics logging (every 30s)
    - Measurement cache refresh (every 30s)
    - Quarantine retry (every 30s, S&F only)
+   - Connection check (every 30s): pauses the S&F sink while Factry is unreachable, resumes it when it is back
 
 **`getStorageEngine()`** — returns S&F bridge if configured, otherwise the direct storage engine
 
-**`getStatus()`** — cached gRPC health check (30s TTL)
+**`getStatus()`** — returns the result of the last scheduled connection check
 
 **`handleSettingsChange()`** — reconfigures gRPC client, refreshes cache, updates engines. No restart needed.
 
