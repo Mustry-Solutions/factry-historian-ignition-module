@@ -31,6 +31,7 @@ import com.inductiveautomation.ignition.common.config.BasicPropertySet;
 import com.inductiveautomation.ignition.common.config.PropertySet;
 import com.inductiveautomation.ignition.common.model.values.QualityCode;
 import com.inductiveautomation.ignition.common.sqltags.history.AggregationMode;
+import com.inductiveautomation.ignition.common.sqltags.model.types.DataType;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 
@@ -476,7 +477,17 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                         pointCount += queryMinMax(uuid, source, key, period, options, processor);
                     } else {
                         String factryFunction = toFactryAggregateFunction(aggName);
-                        pointCount += querySingleAggregate(uuid, source, key, factryFunction, period, options, processor);
+                        if (TIME_WEIGHTED_AVERAGE.equals(factryFunction)
+                                && keyToNode.get(key).dataType().filter(t -> t != DataType.Float8).isPresent()) {
+                            // Factry's twa only takes numbers; a Boolean average stays a mean.
+                            factryFunction = "mean";
+                        }
+                        if (TIME_WEIGHTED_AVERAGE.equals(factryFunction) && options.getTimeRange().isPresent()) {
+                            pointCount += queryTimeWeightedAverage(uuid, source, key, period,
+                                    timeWindowToMillis(timeWindow), options, processor);
+                        } else {
+                            pointCount += querySingleAggregate(uuid, source, key, factryFunction, period, options, processor);
+                        }
                     }
                 } catch (Exception e) {
                     logger.error("Error querying aggregated data for: " + tagPath, e);
@@ -600,19 +611,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             String factryFunction, String period,
             AggregatedQueryOptions options, AggregatedPointProcessor processor) {
 
-        Aggregation aggregation = Aggregation.newBuilder()
-                .setName(factryFunction)
-                .setPeriod(period)
-                .setFillType("none")
-                .build();
-
-        // Group by status so Factry aggregates each quality separately, then keep only the Good
-        // series. Aggregating across all statuses blends bad samples into the value (e.g. a bad
-        // x1000 reading drags the average up); Good-only is faithful and avoids the corruption.
-        QueryTimeseriesRequest.Builder reqBuilder = QueryTimeseriesRequest.newBuilder()
-                .addMeasurementUUIDs(uuid)
-                .addGroupBy("status")
-                .setAggregation(aggregation);
+        QueryTimeseriesRequest.Builder reqBuilder = aggregateRequest(uuid, factryFunction, period);
 
         options.getTimeRange().ifPresent(tr -> {
             reqBuilder.setStart(Timestamps.fromMillis(tr.startTime().toEpochMilli()));
@@ -642,6 +641,133 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             }
         }
         return count;
+    }
+
+    /**
+     * Ignition's "Average" over Good time only (see {@link GoodTimeAverage}). Factry's twa gives
+     * the buckets that are Good throughout; a per-status {@code last} aggregate and the sample
+     * before the range tell which buckets that is. Only buckets where the status changes are
+     * fetched raw. Buckets that are not Good throughout get no point, so they show as a gap.
+     */
+    private int queryTimeWeightedAverage(
+            String uuid, QualifiedPath source, AggregatedQueryKey key, String period, long periodMs,
+            AggregatedQueryOptions options, AggregatedPointProcessor processor) {
+
+        long startMs = options.getTimeRange().get().startTime().toEpochMilli();
+        long endMs = options.getTimeRange().get().endTime().toEpochMilli();
+
+        Map<Long, Double> twa = new LinkedHashMap<>();
+        for (Series series : grpcClient.queryTimeseries(withRange(
+                aggregateRequest(uuid, TIME_WEIGHTED_AVERAGE, period), startMs, endMs).build()).getSeriesList()) {
+            for (SeriesPoint pt : series.getDataPointsList()) {
+                twa.put(pt.getTimestamp(), toDouble(pt.getValue()));
+            }
+        }
+        if (twa.isEmpty()) {
+            return 0;
+        }
+
+        Map<Long, GoodTimeAverage.BucketStatus> statuses = new HashMap<>();
+        for (Series series : grpcClient.queryTimeseries(withRange(
+                bucketStatusRequest(uuid, period), startMs, endMs).build()).getSeriesList()) {
+            boolean good = isGoodStatus(seriesStatus(series));
+            for (SeriesPoint pt : series.getDataPointsList()) {
+                statuses.computeIfAbsent(pt.getTimestamp(), t -> new GoodTimeAverage.BucketStatus())
+                        .add(good, toDouble(pt.getValue()));
+            }
+        }
+
+        List<GoodTimeAverage.Sample> before = samples(grpcClient.queryTimeseries(sampleBeforeRequest(uuid, startMs)));
+        GoodTimeAverage.Sample seed = before.isEmpty() ? null : before.get(before.size() - 1);
+
+        Map<Long, Double> values = GoodTimeAverage.compute(twa, statuses, seed, periodMs, endMs,
+                (from, to) -> samples(grpcClient.queryTimeseries(withRange(
+                        QueryTimeseriesRequest.newBuilder().addMeasurementUUIDs(uuid).addGroupBy("status"),
+                        from, to).build())));
+
+        for (Map.Entry<Long, Double> e : values.entrySet()) {
+            processor.onPointAvailable(key,
+                    AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
+                            .value(e.getValue())
+                            .quality(QualityCode.Good)
+                            .timestamp(Instant.ofEpochMilli(e.getKey()))
+                            .build());
+        }
+        return values.size();
+    }
+
+    private static QueryTimeseriesRequest.Builder withRange(QueryTimeseriesRequest.Builder b, long startMs, long endMs) {
+        return b.setStart(Timestamps.fromMillis(startMs)).setEnd(Timestamps.fromMillis(endMs));
+    }
+
+    /** Per bucket and status, the last sample: says which statuses a bucket holds. */
+    static QueryTimeseriesRequest.Builder bucketStatusRequest(String uuid, String period) {
+        return QueryTimeseriesRequest.newBuilder()
+                .addMeasurementUUIDs(uuid)
+                .addGroupBy("status")
+                .setAggregation(Aggregation.newBuilder().setName("last").setPeriod(period).setFillType("none").build());
+    }
+
+    /** The last sample before {@code startMs} (end is exclusive), one per status series. */
+    static QueryTimeseriesRequest sampleBeforeRequest(String uuid, long startMs) {
+        return QueryTimeseriesRequest.newBuilder()
+                .addMeasurementUUIDs(uuid)
+                .addGroupBy("status")
+                .setStart(Timestamps.fromMillis(0))
+                .setEnd(Timestamps.fromMillis(startMs))
+                .setDesc(true)
+                .setLimit(1)
+                .build();
+    }
+
+    /** The raw samples of a status-grouped reply, merged in time order. */
+    private static List<GoodTimeAverage.Sample> samples(QueryTimeseriesResponse reply) {
+        List<GoodTimeAverage.Sample> out = new ArrayList<>();
+        for (Series series : reply.getSeriesList()) {
+            boolean good = isGoodStatus(seriesStatus(series));
+            for (SeriesPoint pt : series.getDataPointsList()) {
+                out.add(new GoodTimeAverage.Sample(pt.getTimestamp(), toDouble(pt.getValue()), good));
+            }
+        }
+        out.sort(Comparator.comparingLong(GoodTimeAverage.Sample::ts));
+        return out;
+    }
+
+    private static double toDouble(com.google.protobuf.Value v) {
+        return v.getKindCase() == com.google.protobuf.Value.KindCase.NUMBER_VALUE ? v.getNumberValue() : Double.NaN;
+    }
+
+    /** The Factry aggregate behind Ignition's (time-weighted) "Average". */
+    static final String TIME_WEIGHTED_AVERAGE = "twa";
+
+    /** The Factry request for one aggregate of one measurement, without the time range. */
+    static QueryTimeseriesRequest.Builder aggregateRequest(String uuid, String factryFunction, String period) {
+        if (TIME_WEIGHTED_AVERAGE.equals(factryFunction)) {
+            // Factry's twa is only right with fill "previous": it then holds each value until the
+            // next sample, also the last value from before the bucket or query start, and fills
+            // empty buckets. With fill "none" it returns wrong values (100 instead of 1.67 for a
+            // tag at 100 for 1 minute of the hour). twa refuses group by and its tag filter only
+            // matches a status exactly, so it gets no status filter: queryTimeWeightedAverage
+            // keeps its value only for buckets that are Good throughout, where the two agree.
+            return QueryTimeseriesRequest.newBuilder()
+                    .addMeasurementUUIDs(uuid)
+                    .setAggregation(Aggregation.newBuilder()
+                            .setName(factryFunction)
+                            .setPeriod(period)
+                            .setFillType("previous")
+                            .build());
+        }
+        // Group by status so Factry aggregates each quality separately, then keep only the Good
+        // series. Aggregating across all statuses blends bad samples into the value (e.g. a bad
+        // x1000 reading drags the average up); Good-only is faithful and avoids the corruption.
+        return QueryTimeseriesRequest.newBuilder()
+                .addMeasurementUUIDs(uuid)
+                .addGroupBy("status")
+                .setAggregation(Aggregation.newBuilder()
+                        .setName(factryFunction)
+                        .setPeriod(period)
+                        .setFillType("none")
+                        .build());
     }
 
     private int queryMinMax(
@@ -716,6 +842,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     static String toFactryAggregateFunction(String name) {
         switch (name) {
             case "Average":
+                return TIME_WEIGHTED_AVERAGE;
             case "SimpleAverage":
                 return "mean";
             case "Minimum":
@@ -743,6 +870,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      * Convert a TimeWindow to a Go-style duration string (e.g. "2h30m", "45s").
      * Factry uses Go's time.ParseDuration() which does not accept ISO 8601.
      */
+    /** The bucket length in milliseconds of the period {@link #timeWindowToPeriod} gives. */
+    static long timeWindowToMillis(TimeWindow tw) {
+        long totalSeconds = tw.toSeconds();
+        return totalSeconds <= 0 ? 60_000 : totalSeconds * 1000;
+    }
+
     static String timeWindowToPeriod(TimeWindow tw) {
         long totalSeconds = tw.toSeconds();
         if (totalSeconds <= 0) {
