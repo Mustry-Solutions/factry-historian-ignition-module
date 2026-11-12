@@ -279,10 +279,11 @@ class FactryQueryEngineRawTest {
 
         Recorder rec = query(100, key("a"), key("b"));
 
+        // 100 points across both pens, the earliest ones: 50 seconds of each.
         for (String tag : List.of("a", "b")) {
             List<AtomicPoint<?>> pts = rec.points.get(key(tag));
-            assertEquals(100, pts.size(), tag);
-            assertEquals(START + 99_000L, pts.get(99).timestamp().toEpochMilli(), tag);
+            assertEquals(50, pts.size(), tag);
+            assertEquals(START + 49_000L, pts.get(49).timestamp().toEpochMilli(), tag);
         }
         for (QueryTimeseriesRequest q : factry.queries) {
             assertTrue(q.getOffset() + q.getLimit() <= 100, () -> "fetched past returnSize: " + q);
