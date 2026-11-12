@@ -13,9 +13,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Failed reads through Ignition's own query path. A failed read must end the dataset with an
- * error (what the Power Chart and clients show), not come back as an empty or Bad_NotFound result
- * that looks like a quiet or unknown tag.
+ * Failed reads through Ignition's own query path. A read that fails for every pen must end the
+ * dataset with an error (what the Power Chart and clients show), not come back as an empty or
+ * Bad_NotFound result that looks like a quiet or unknown tag. A pen that fails on its own is
+ * Bad_Failure, and the other pens still show their data.
  */
 class ReadErrorTest {
 
@@ -96,11 +97,51 @@ class ReadErrorTest {
         assertReadFailed(average("a", "b"), "UNAVAILABLE");
     }
 
+    /** Pen a reads fine on every row; pen b is Bad_Failure on every row; no error for the read. */
+    private static void assertOnlySecondPenFailed(Dataset ds) {
+        assertNull(ds.error, ds::toString);
+        assertTrue(ds.rows.size() > 1, ds::toString);
+        for (int i = 0; i < ds.rows.size(); i++) {
+            QualityCode[] q = ds.qualities.get(i);
+            assertTrue(q[2].is(QualityCode.Bad_Failure), ds::toString);
+            // Ignition's raw rows start before a pen's first value; that one cell is not a failure.
+            if (i > 0) {
+                assertTrue(q[1].isGood(), ds::toString);
+                assertNotNull(ds.rows.get(i)[1], ds::toString);
+            }
+        }
+    }
+
     @Test
-    void aggregatedReadThatFactryRejectsForOnePenIsAnError() throws Exception {
+    void aggregatedReadThatFactryRejectsForOnePenMarksOnlyThatPen() throws Exception {
         startEngine(true);
         factry.failingMeasurements.add("uuid-2");
 
+        Dataset ds = average("a", "b");
+
+        assertOnlySecondPenFailed(ds);
+        assertEquals(5, ds.rows.size(), ds::toString);
+        assertEquals(29.5, ((Number) ds.rows.get(0)[1]).doubleValue(), ds::toString);
+    }
+
+    @Test
+    void rawReadThatFactryRejectsForOnePenMarksOnlyThatPen() throws Exception {
+        startEngine(true);
+        factry.failingMeasurements.add("uuid-2");
+
+        Dataset ds = raw("a", "b");
+
+        assertOnlySecondPenFailed(ds);
+        assertEquals(5.0, ((Number) ds.rows.get(ds.rows.size() - 1)[1]).doubleValue(), ds::toString);
+    }
+
+    @Test
+    void readThatFactryRejectsForEveryPenIsAnError() throws Exception {
+        startEngine(true);
+        factry.failingMeasurements.add("uuid-1");
+        factry.failingMeasurements.add("uuid-2");
+
+        assertReadFailed(raw("a", "b"), "INTERNAL");
         assertReadFailed(average("a", "b"), "INTERNAL");
     }
 
