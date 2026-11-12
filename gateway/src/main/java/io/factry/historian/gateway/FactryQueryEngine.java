@@ -181,6 +181,20 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         for (Map.Entry<String, String> leaf : leafDisplayNameToFullPath.entrySet()) {
             String displayName = leaf.getKey();
             String storedPath = displayToStored.get(leaf.getValue());
+            Measurement m = storedPath != null
+                    ? measurementCache.getMeasurementByName(TagPathUtil.fromBrowseName(storedPath, settings.getDelimiter()))
+                    : null;
+            if (m != null && isArrayType(m.getDatatype())) {
+                // List the elements, as Ignition historized them, instead of the array itself.
+                int length = storedArrayLength(m.getUuid());
+                for (int i = 0; i < length; i++) {
+                    publisher.newNode("tag", storedPath + "[" + i + "]")
+                            .displayPath(StringPath.of(displayName + "[" + i + "]"))
+                            .hasChildren(false)
+                            .add();
+                }
+                continue;
+            }
             // Use stored path as tag identifier so queries can resolve it back;
             // displayPath controls what appears in the UI.
             publisher.newNode("tag", storedPath != null ? storedPath : displayName)
@@ -190,6 +204,29 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         }
 
         logger.debug("Browse: published " + folders.size() + " folders, " + leafDisplayNameToFullPath.size() + " tags");
+    }
+
+    /** The length of the last value stored in an array measurement, or 0 if there is none. */
+    private int storedArrayLength(String measurementUUID) {
+        try {
+            QueryTimeseriesRequest req = QueryTimeseriesRequest.newBuilder()
+                    .addMeasurementUUIDs(measurementUUID)
+                    .setStart(Timestamps.fromMillis(0))
+                    .setEnd(Timestamps.fromMillis(System.currentTimeMillis() + 86_400_000L))
+                    .setDesc(true)
+                    .setLimit(1)
+                    .build();
+            for (Series series : grpcClient.queryTimeseries(req).getSeriesList()) {
+                for (SeriesPoint pt : series.getDataPointsList()) {
+                    if (pt.getValue().hasListValue()) {
+                        return pt.getValue().getListValue().getValuesCount();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Could not read the array length of measurement " + measurementUUID + ": " + e.getMessage());
+        }
+        return 0;
     }
 
     /**
@@ -328,19 +365,21 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 return Optional.of(0);
             }
 
-            // Map query keys to measurement UUIDs
-            List<String> measurementUUIDs = new ArrayList<>();
-            Map<String, RawQueryKey> uuidToKeyMap = new HashMap<>();
+            // Map query keys to measurement UUIDs. Several keys can read one measurement: the
+            // elements of an array tag (Tag[0], Tag[1], ...) are all stored in measurement Tag.
+            record KeyElement(RawQueryKey key, int arrayIndex) {}
+            Map<String, List<KeyElement>> keysByUuid = new LinkedHashMap<>();
 
             for (RawQueryKey key : options.getQueryKeys()) {
                 QualifiedPath source = key.source();
                 String tagPath = toStoredTagPath(source);
                 // Only query keys that resolved to a node; mapKeysToNodes omits the rest.
-                String uuid = keyToNode.containsKey(key) ? lookupUUID(tagPath) : null;
+                HistoricalNode node = keyToNode.get(key);
+                String uuid = nodeUUID(node);
 
                 if (uuid != null) {
-                    measurementUUIDs.add(uuid);
-                    uuidToKeyMap.put(uuid, key);
+                    keysByUuid.computeIfAbsent(uuid, k -> new ArrayList<>())
+                            .add(new KeyElement(key, nodeArrayIndex(node)));
                     if (settings.isDebugLogging()) {
                         logger.debug("Mapped " + source + " -> " + tagPath + " -> " + uuid);
                     }
@@ -352,7 +391,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 }
             }
 
-            if (measurementUUIDs.isEmpty()) {
+            if (keysByUuid.isEmpty()) {
                 processor.onComplete();
                 return Optional.of(0);
             }
@@ -362,7 +401,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             // every point comes back in a single series and reads back as Good, losing bad/
             // uncertain quality.
             QueryTimeseriesRequest.Builder reqBuilder = QueryTimeseriesRequest.newBuilder()
-                    .addAllMeasurementUUIDs(measurementUUIDs)
+                    .addAllMeasurementUUIDs(keysByUuid.keySet())
                     .addGroupBy("status");
 
             options.getTimeRange().ifPresent(tr -> {
@@ -375,36 +414,37 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             // A measurement now spans multiple status-series. Collect all of a measurement's points
             // (each carrying its series' quality), then merge-sort by timestamp before emitting —
             // Ignition expects time-ordered points per key.
-            record RawPt(long ts, Object value, QualityCode quality) {}
+            record RawPt(long ts, com.google.protobuf.Value value, QualityCode quality) {}
             Map<String, List<RawPt>> pointsByUuid = new LinkedHashMap<>();
             for (Series series : reply.getSeriesList()) {
                 String uuid = series.hasMeasurementUUID() ? series.getMeasurementUUID() : "";
-                if (!uuidToKeyMap.containsKey(uuid)) {
+                if (!keysByUuid.containsKey(uuid)) {
                     continue;
                 }
                 QualityCode quality = statusToQuality(seriesStatus(series));
                 List<RawPt> pts = pointsByUuid.computeIfAbsent(uuid, k -> new ArrayList<>());
                 for (SeriesPoint pt : series.getDataPointsList()) {
-                    pts.add(new RawPt(pt.getTimestamp(), protoValueToJava(pt.getValue()), quality));
+                    pts.add(new RawPt(pt.getTimestamp(), pt.getValue(), quality));
                 }
             }
 
             int totalPoints = 0;
             for (Map.Entry<String, List<RawPt>> entry : pointsByUuid.entrySet()) {
-                RawQueryKey key = uuidToKeyMap.get(entry.getKey());
-                QualifiedPath path = key.source();
                 List<RawPt> pts = entry.getValue();
                 pts.sort(Comparator.comparingLong(RawPt::ts));
 
-                for (RawPt p : pts) {
-                    AtomicPoint<?> atomicPoint = DataPointFactory.createAtomicPoint(
-                            p.value(), p.quality(), Instant.ofEpochMilli(p.ts()), path);
+                for (KeyElement ke : keysByUuid.get(entry.getKey())) {
+                    QualifiedPath path = ke.key().source();
+                    for (RawPt p : pts) {
+                        AtomicPoint<?> atomicPoint = DataPointFactory.createAtomicPoint(
+                                pointValue(p.value(), ke.arrayIndex()), p.quality(), Instant.ofEpochMilli(p.ts()), path);
 
-                    if (!processor.onPointAvailable(key, atomicPoint)) {
-                        processor.onComplete();
-                        return Optional.of(totalPoints);
+                        if (!processor.onPointAvailable(ke.key(), atomicPoint)) {
+                            processor.onComplete();
+                            return Optional.of(totalPoints);
+                        }
+                        totalPoints++;
                     }
-                    totalPoints++;
                 }
             }
 
@@ -460,7 +500,9 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 QualifiedPath source = key.source();
                 String tagPath = toStoredTagPath(source);
                 // Only query keys that resolved to a node; mapKeysToNodes omits the rest.
-                String uuid = keyToNode.containsKey(key) ? lookupUUID(tagPath) : null;
+                HistoricalNode node = keyToNode.get(key);
+                String uuid = nodeUUID(node);
+                int arrayIndex = nodeArrayIndex(node);
 
                 if (uuid == null) {
                     logger.warn("No measurement UUID found for aggregated query: " + tagPath);
@@ -471,12 +513,17 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 try {
                     String aggName = key.aggregationType().name();
 
-                    if ("MinMax".equals(aggName)) {
+                    if (arrayIndex >= 0 && !isArrayAggregate(aggName)) {
+                        // Factry only aggregates array measurements with count, first and last;
+                        // it rejects mean, min, max and the rest for "[]number".
+                        logger.warn("Aggregate " + aggName + " is not supported for array element: " + tagPath);
+                        processor.onKeyFailure(key, QualityCode.Bad_Unsupported);
+                    } else if ("MinMax".equals(aggName)) {
                         // MinMax: query min and max separately, emit pairs
                         pointCount += queryMinMax(uuid, source, key, period, options, processor);
                     } else {
                         String factryFunction = toFactryAggregateFunction(aggName);
-                        pointCount += querySingleAggregate(uuid, source, key, factryFunction, period, options, processor);
+                        pointCount += querySingleAggregate(uuid, arrayIndex, source, key, factryFunction, period, options, processor);
                     }
                 } catch (Exception e) {
                     logger.error("Error querying aggregated data for: " + tagPath, e);
@@ -596,7 +643,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     }
 
     private int querySingleAggregate(
-            String uuid, QualifiedPath source, AggregatedQueryKey key,
+            String uuid, int arrayIndex, QualifiedPath source, AggregatedQueryKey key,
             String factryFunction, String period,
             AggregatedQueryOptions options, AggregatedPointProcessor processor) {
 
@@ -628,7 +675,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             }
             for (SeriesPoint pt : series.getDataPointsList()) {
                 Instant timestamp = Instant.ofEpochMilli(pt.getTimestamp());
-                Object value = protoValueToJava(pt.getValue());
+                Object value = pointValue(pt.getValue(), arrayIndex);
 
                 AggregatedDataPoint<Object, AggregationType> point =
                         AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
@@ -713,6 +760,11 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         return count;
     }
 
+    /** Aggregates Factry can compute on an array measurement (count, first, last). */
+    static boolean isArrayAggregate(String aggName) {
+        return "LastValue".equals(aggName) || "Count".equals(aggName);
+    }
+
     static String toFactryAggregateFunction(String name) {
         switch (name) {
             case "Average":
@@ -789,16 +841,13 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
     private Optional<FactryRecord> findNode(String tagPath, QualifiedPath path) {
         // Try measurement
-        Measurement m = measurementCache.getMeasurementByName(tagPath);
-        if (m == null) {
+        Optional<FactryRecord> node = measurementNode(measurementCache, tagPath, path);
+        if (node.isEmpty()) {
             measurementCache.refresh(grpcClient);
-            m = measurementCache.getMeasurementByName(tagPath);
+            node = measurementNode(measurementCache, tagPath, path);
         }
-        if (m != null) {
-            Instant createdTime = m.hasCreatedAt()
-                    ? Instant.ofEpochSecond(m.getCreatedAt().getSeconds(), m.getCreatedAt().getNanos())
-                    : Instant.EPOCH;
-            return Optional.of(new FactryRecord(m.getUuid(), path, m.getDatatype(), createdTime));
+        if (node.isPresent()) {
+            return node;
         }
 
         // Try asset
@@ -813,21 +862,52 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         return Optional.empty();
     }
 
-    private String lookupUUID(String tagPath) {
-        // Try measurement
-        String uuid = measurementCache.getUUID(tagPath);
-        if (uuid != null) return uuid;
+    /**
+     * The node for a measurement in the cache, or empty. An array element path such as
+     * {@code Tag[2]} resolves to element 2 of the array measurement {@code Tag}: Ignition
+     * historizes each element as its own path and the storage engine merges them into one
+     * list-valued measurement (see {@link ArrayPointMerger}).
+     */
+    static Optional<FactryRecord> measurementNode(MeasurementCache cache, String tagPath, QualifiedPath path) {
+        Measurement m = cache.getMeasurementByName(tagPath);
+        if (m != null) {
+            // The base path of an array has no history of its own in Ignition, which only
+            // historizes the elements. A whole list also has no place in a numeric column.
+            if (isArrayType(m.getDatatype())) {
+                return Optional.empty();
+            }
+            return Optional.of(new FactryRecord(m.getUuid(), path, m.getDatatype(), createdTime(m)));
+        }
+        ArrayPointMerger.ArrayRef ref = ArrayPointMerger.parseArrayPath(tagPath);
+        if (ref != null) {
+            Measurement base = cache.getMeasurementByName(ref.basePath);
+            if (base != null && isArrayType(base.getDatatype())) {
+                String elementType = base.getDatatype().substring(2);
+                return Optional.of(new FactryRecord(base.getUuid(), ref.index, path, elementType, createdTime(base)));
+            }
+        }
+        return Optional.empty();
+    }
 
-        // Try asset
-        uuid = measurementCache.getAssetUUID(tagPath);
-        if (uuid != null) return uuid;
+    /** Factry names array data types "[]number", "[]string", "[]boolean". */
+    private static boolean isArrayType(String factryDataType) {
+        return factryDataType != null && factryDataType.startsWith("[]");
+    }
 
-        // Refresh and retry
-        measurementCache.refresh(grpcClient);
-        uuid = measurementCache.getUUID(tagPath);
-        if (uuid != null) return uuid;
-        uuid = measurementCache.getAssetUUID(tagPath);
-        return uuid;
+    private static Instant createdTime(Measurement m) {
+        return m.hasCreatedAt()
+                ? Instant.ofEpochSecond(m.getCreatedAt().getSeconds(), m.getCreatedAt().getNanos())
+                : Instant.EPOCH;
+    }
+
+    /** The Factry UUID a resolved query key reads from, or null if the key did not resolve. */
+    private static String nodeUUID(HistoricalNode node) {
+        return node instanceof FactryRecord r ? r.measurementUUID() : null;
+    }
+
+    /** The array element a resolved query key reads, or -1 for a plain measurement. */
+    private static int nodeArrayIndex(HistoricalNode node) {
+        return node instanceof FactryRecord r ? r.arrayIndex() : -1;
     }
 
     void updateSettings(FactryHistorianSettings newSettings) {
@@ -870,6 +950,20 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     /** A status that maps to Good quality (Good level, or an untagged series). */
     private static boolean isGoodStatus(String status) {
         return statusToQuality(status) == QualityCode.Good;
+    }
+
+    /**
+     * The Java value of a stored point. For an array element ({@code arrayIndex >= 0}) this is
+     * that element of the stored list, or null when the list is shorter. Values that are not a
+     * list (such as a count over an array) are returned as they are.
+     */
+    static Object pointValue(com.google.protobuf.Value value, int arrayIndex) {
+        if (arrayIndex >= 0 && value != null
+                && value.getKindCase() == com.google.protobuf.Value.KindCase.LIST_VALUE) {
+            var list = value.getListValue();
+            return arrayIndex < list.getValuesCount() ? protoValueToJava(list.getValues(arrayIndex)) : null;
+        }
+        return protoValueToJava(value);
     }
 
     static Object protoValueToJava(com.google.protobuf.Value value) {
