@@ -88,6 +88,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     private final MeasurementCache measurementCache;
     private final HistorianMetrics metrics;
 
+    /**
+     * Most raw points one query collects over all pens before it stops paging. Paging lifts the
+     * gRPC message limit, so without this a long range over many pens could fill the heap.
+     */
+    long maxRawPoints = ModuleProperties.getRawQueryMaxPoints();
+
     public FactryQueryEngine(
         GatewayContext context,
         String historianName,
@@ -397,11 +403,32 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             int pageSize = RAW_QUERY_PAGE_SIZE;
             List<String> pending = measurementUUIDs;
             long offset = 0;
+            long collected = 0;
+            // Last timestamp read per series (measurement and status), to see that a page moved on.
+            Map<String, Long> lastTsBySeries = new HashMap<>();
+            // Per pen still paging: the time up to which all its series are read. Set when the
+            // read stops early, so those pens end there instead of at a sparse series' last point.
+            Map<String, Long> readUntil = new HashMap<>();
+            Map<String, Long> cutAt = Map.of();
             while (!pending.isEmpty()) {
                 long limit = returnSize != null ? Math.min(pageSize, returnSize - offset) : pageSize;
                 if (limit <= 0) {
                     break;
                 }
+                // Stop at maxRawPoints and return what we have. The processor API has no way to
+                // mark a result as partial, so the warning in the log is the only signal.
+                long room = maxRawPoints - collected;
+                if (room <= 0) {
+                    logger.warn("Raw query stopped at " + collected + " points (query.raw.max.points="
+                            + maxRawPoints + "); " + pending.size() + " pen(s) have more data in "
+                            + options.getTimeRange().map(Object::toString).orElse("the range")
+                            + " that is not returned");
+                    cutAt = readUntil;
+                    break;
+                }
+                // Share what is left over the pens still paging so the last page fills up to the
+                // cap instead of passing it by a full page per pen.
+                limit = Math.min(limit, Math.max(1, room / pending.size()));
                 QueryTimeseriesResponse reply;
                 try {
                     reply = grpcClient.queryTimeseries(reqBuilder
@@ -427,7 +454,31 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     throw e;
                 }
 
+                // Each page should start where the previous one ended. A Factry that ignores offset
+                // answers the first page again, and paging on would loop and duplicate points.
+                // Equal timestamps are allowed: series merged under one status can share one. A
+                // Factry that repeats a page of equal timestamps slips past this, but the
+                // maxRawPoints cap still ends the read.
+                String stuck = null;
+                for (Series series : reply.getSeriesList()) {
+                    Long lastTs = series.getDataPointsCount() > 0
+                            ? lastTsBySeries.get(series.getMeasurementUUID() + "|" + seriesStatus(series))
+                            : null;
+                    if (lastTs != null && series.getDataPoints(0).getTimestamp() < lastTs) {
+                        stuck = series.getMeasurementUUID();
+                        break;
+                    }
+                }
+                if (stuck != null) {
+                    logger.warn("Raw query stopped at " + collected + " points: Factry answered offset "
+                            + offset + " for measurement " + stuck + " with points from before the "
+                            + "previous page. It may not support offset; returning the points read so far");
+                    cutAt = readUntil;
+                    break;
+                }
+
                 Set<String> more = new LinkedHashSet<>();
+                Map<String, Long> pageReadUntil = new HashMap<>();
                 for (Series series : reply.getSeriesList()) {
                     String uuid = series.hasMeasurementUUID() ? series.getMeasurementUUID() : "";
                     if (!uuidToKeyMap.containsKey(uuid)) {
@@ -435,14 +486,22 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     }
                     if (series.getDataPointsCount() >= limit) {
                         more.add(uuid);
+                        pageReadUntil.merge(uuid,
+                                series.getDataPoints(series.getDataPointsCount() - 1).getTimestamp(), Math::min);
                     }
                     QualityCode quality = statusToQuality(seriesStatus(series));
                     List<RawPt> pts = pointsByUuid.computeIfAbsent(uuid, k -> new ArrayList<>());
                     for (SeriesPoint pt : series.getDataPointsList()) {
                         pts.add(new RawPt(pt.getTimestamp(), protoValueToJava(pt.getValue()), quality));
                     }
+                    collected += series.getDataPointsCount();
+                    if (series.getDataPointsCount() > 0) {
+                        lastTsBySeries.put(uuid + "|" + seriesStatus(series),
+                                series.getDataPoints(series.getDataPointsCount() - 1).getTimestamp());
+                    }
                 }
                 pending = new ArrayList<>(more);
+                readUntil = pageReadUntil;
                 offset += limit;
             }
 
@@ -461,8 +520,11 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             }
             for (Map.Entry<String, List<RawPt>> entry : pointsByUuid.entrySet()) {
                 RawQueryKey key = uuidToKeyMap.get(entry.getKey());
+                Long cut = cutAt.get(entry.getKey());
                 for (RawPt p : entry.getValue()) {
-                    merged.add(new KeyedPt(key, p));
+                    if (cut == null || p.ts() <= cut) {
+                        merged.add(new KeyedPt(key, p));
+                    }
                 }
             }
             merged.sort(Comparator.comparingLong(k -> k.pt().ts()));
