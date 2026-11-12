@@ -396,6 +396,10 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             // applies limit and offset to each series (measurement and status) on its own, in time
             // order, so the same offset moves every series forward together. A series that returns
             // fewer points than the limit is done; only measurements with a full series go on.
+            //
+            // A pen Factry refuses on its own is marked Bad_Failure and the other pens still draw.
+            Set<String> failedPens = new LinkedHashSet<>();
+            Instant failedAt = failureTime(options.getTimeRange());
             int pageSize = RAW_QUERY_PAGE_SIZE;
             List<String> pending = measurementUUIDs;
             long offset = 0;
@@ -439,6 +443,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     if (e.getStatus().getCode() == Status.Code.RESOURCE_EXHAUSTED && pageSize > 1) {
                         pageSize /= 2;
                         logger.debug("Raw query page too large, retrying with page size " + pageSize);
+                        continue;
+                    }
+                    List<String> failed = penFailures(reqBuilder.build(), pending, e);
+                    pending = new ArrayList<>(pending);
+                    pending.removeAll(failed);
+                    if (failedPens.addAll(failed) && failedPens.size() < measurementUUIDs.size()) {
                         continue;
                     }
                     throw e;
@@ -501,6 +511,13 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             // the first pen's last value carried into them.
             record KeyedPt(RawQueryKey key, RawPt pt) {}
             List<KeyedPt> merged = new ArrayList<>();
+            // A failed pen gets one Bad_Failure point at the start, first in line, so every row
+            // shows it failed. Points it returned on earlier pages are dropped.
+            for (String uuid : failedPens) {
+                pointsByUuid.remove(uuid);
+                merged.add(new KeyedPt(uuidToKeyMap.get(uuid),
+                        new RawPt(failedAt.toEpochMilli(), null, QualityCode.Bad_Failure)));
+            }
             for (Map.Entry<String, List<RawPt>> entry : pointsByUuid.entrySet()) {
                 RawQueryKey key = uuidToKeyMap.get(entry.getKey());
                 Long cut = cutAt.get(entry.getKey());
@@ -537,8 +554,70 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         } catch (Exception e) {
             logger.error("Error querying raw data", e);
             processor.onError(e);
-            return Optional.empty();
+            throw readFailed(e);
         }
+    }
+
+    /**
+     * The exception a failed read leaves the query engine with. Ignition's history reader
+     * (HistorianPointQueryExecutor) stores what onError gets and never reads it back, so on its own
+     * a failed read shows as an empty, Good result. An exception out of the query engine reaches
+     * HistoryWriter, which ends the dataset with that error: the Power Chart answers with an error
+     * and the RPC to Vision and Designer clients carries it.
+     */
+    static IllegalStateException readFailed(Exception e) {
+        String detail = e.getMessage();
+        if (!(e instanceof StatusRuntimeException) && e.getCause() instanceof StatusRuntimeException s) {
+            detail = detail + ": " + s.getMessage();
+        }
+        return new IllegalStateException("Factry Historian read failed: " + detail, e);
+    }
+
+    /**
+     * The pens to blame for a raw page that failed as a whole: each pen asked for the same page on
+     * its own, and the ones that fail again. Factry answers one request for all pens, so one pen it
+     * cannot read would otherwise fail every pen. None when Factry itself cannot be read.
+     * A single pen is to blame without asking again.
+     */
+    private List<String> penFailures(QueryTimeseriesRequest page, List<String> pens, StatusRuntimeException e) {
+        if (failsEveryPen(e)) {
+            return List.of();
+        }
+        if (pens.size() == 1) {
+            return List.copyOf(pens);
+        }
+        List<String> failed = new ArrayList<>();
+        for (String uuid : pens) {
+            try {
+                grpcClient.queryTimeseries(page.toBuilder().clearMeasurementUUIDs().addMeasurementUUIDs(uuid).build());
+            } catch (StatusRuntimeException alone) {
+                if (failsEveryPen(alone)) {
+                    return List.of();
+                }
+                logger.error("Error querying raw data for measurement " + uuid, alone);
+                failed.add(uuid);
+            }
+        }
+        return failed;
+    }
+
+    /**
+     * Errors that say Factry itself cannot be read (down, too slow, token refused), not that one
+     * measurement failed. Those fail the whole read: asking again pen by pen only multiplies the wait.
+     */
+    static boolean failsEveryPen(Exception e) {
+        if (!(e instanceof StatusRuntimeException s)) {
+            return false;
+        }
+        return switch (s.getStatus().getCode()) {
+            case UNAVAILABLE, DEADLINE_EXCEEDED, UNAUTHENTICATED, CANCELLED -> true;
+            default -> false;
+        };
+    }
+
+    /** Where a failed pen's Bad_Failure point goes: the start of the range, so it covers every row. */
+    private static Instant failureTime(Optional<TimeRange> range) {
+        return range.map(TimeRange::startTime).orElseGet(Instant::now);
     }
 
     @Override
@@ -576,6 +655,9 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
             var queryKeys = options.getQueryKeys();
             int pointCount = 0;
+            Exception firstFailure = null;
+            int queriedPens = 0;
+            int failedPens = 0;
 
             for (AggregatedQueryKey key : queryKeys) {
                 QualifiedPath source = key.source();
@@ -589,6 +671,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     continue;
                 }
 
+                queriedPens++;
                 try {
                     String aggName = key.aggregationType().name();
 
@@ -600,9 +683,28 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                         pointCount += querySingleAggregate(uuid, source, key, factryFunction, period, options, processor);
                     }
                 } catch (Exception e) {
+                    if (failsEveryPen(e)) {
+                        throw e;
+                    }
+                    // Mark only this pen, so the other pens still draw. Once the columns are built,
+                    // Ignition ignores the quality given to onKeyFailure and shows Bad_NotFound (a tag
+                    // that does not exist); a point with a bad quality shows as it is, on every row.
                     logger.error("Error querying aggregated data for: " + tagPath, e);
-                    processor.onKeyFailure(key, QualityCode.Bad);
+                    processor.onPointAvailable(key, AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
+                            .value(null)
+                            .quality(QualityCode.Bad_Failure)
+                            .timestamp(failureTime(options.getTimeRange()))
+                            .build());
+                    if (firstFailure == null) {
+                        firstFailure = e;
+                    }
+                    failedPens++;
                 }
+            }
+
+            // Every pen failed: one error says more than a chart of empty pens.
+            if (firstFailure != null && failedPens == queriedPens) {
+                throw firstFailure;
             }
 
             processor.onComplete();
@@ -613,7 +715,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         } catch (Exception e) {
             logger.error("Error in aggregated query", e);
             processor.onError(e);
-            return Optional.empty();
+            throw readFailed(e);
         }
     }
 

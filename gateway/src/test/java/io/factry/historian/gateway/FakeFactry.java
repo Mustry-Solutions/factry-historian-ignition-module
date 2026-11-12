@@ -46,6 +46,8 @@ final class FakeFactry extends HistorianGrpc.HistorianImplBase implements AutoCl
     final List<QueryTimeseriesRequest> queries = new CopyOnWriteArrayList<>();
     /** Answers larger than this fail like Factry's own send limit. */
     volatile int maxAnswerBytes = Integer.MAX_VALUE;
+    /** QueryTimeseries calls that include one of these measurements fail. */
+    final java.util.Set<String> failingMeasurements = java.util.concurrent.ConcurrentHashMap.newKeySet();
     /** Answers every page from the start, like a Factry that does not support offset. */
     volatile boolean ignoreOffset = false;
 
@@ -107,6 +109,10 @@ final class FakeFactry extends HistorianGrpc.HistorianImplBase implements AutoCl
     public void queryTimeseries(QueryTimeseriesRequest request,
                                 StreamObserver<QueryTimeseriesResponse> observer) {
         queries.add(request);
+        if (request.getMeasurementUUIDsList().stream().anyMatch(failingMeasurements::contains)) {
+            observer.onError(Status.INTERNAL.withDescription("query failed").asRuntimeException());
+            return;
+        }
         long start = request.hasStart() ? com.google.protobuf.util.Timestamps.toMillis(request.getStart()) : Long.MIN_VALUE;
         long end = request.hasEnd() ? com.google.protobuf.util.Timestamps.toMillis(request.getEnd()) : Long.MAX_VALUE;
         List<Series> series = new ArrayList<>();
