@@ -285,8 +285,8 @@ Extends `AbstractQueryEngine`. Handles all data retrieval from Factry.
 1. Maps each `RawQueryKey` to stored tag path → measurement UUID (via `lookupUUID`)
 2. `lookupUUID` checks cache, then refreshes from Factry on miss
 3. Builds `QueryTimeseriesRequest` with measurement UUIDs and time range, grouped by status
-4. Reads in pages of `limit`/`offset` (Factry applies both per series), halving the page when an answer is too large, and keeps only the first `returnSize` points per pen when Ignition sets one
-5. Iterates response `Series` → `SeriesPoint`, converts protobuf values to Java, creates `AtomicPoint` objects, feeds them to the `RawPointProcessor`
+4. Reads in pages of `limit`/`offset` (Factry applies both per series), halving the page when an answer is too large, and keeps only the first `returnSize` points across all pens when Ignition sets one
+5. Iterates response `Series` → `SeriesPoint`, converts protobuf values to Java, creates `AtomicPoint` objects, and feeds them to the `RawPointProcessor` in one time order across all pens. Ignition builds wide-format rows from that single stream; pen by pen gives rows out of order with values carried between pens
 
 **`doQueryAggregated(options, processor)`**:
 - Same pattern but adds aggregation function and interval to the request

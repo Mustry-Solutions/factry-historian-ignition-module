@@ -382,8 +382,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             Integer returnSize = options.getReturnSize().filter(n -> n > 0).orElse(null);
 
             // A measurement now spans multiple status-series. Collect all of a measurement's points
-            // (each carrying its series' quality), then merge-sort by timestamp before emitting —
-            // Ignition expects time-ordered points per key.
+            // (each carrying its series' quality), then merge-sort by timestamp before emitting.
             record RawPt(long ts, Object value, QualityCode quality) {}
             Map<String, List<RawPt>> pointsByUuid = new LinkedHashMap<>();
 
@@ -437,28 +436,35 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 offset += limit;
             }
 
-            int totalPoints = 0;
+            // Ignition's raw reader builds wide rows from one stream: each point closes the rows up
+            // to its timestamp, so every pen must be handed over in one time order. Pen by pen,
+            // the second pen's points go back in time and the dataset gets rows out of order, with
+            // the first pen's last value carried into them.
+            record KeyedPt(RawQueryKey key, RawPt pt) {}
+            List<KeyedPt> merged = new ArrayList<>();
             for (Map.Entry<String, List<RawPt>> entry : pointsByUuid.entrySet()) {
                 RawQueryKey key = uuidToKeyMap.get(entry.getKey());
-                QualifiedPath path = key.source();
-                List<RawPt> pts = entry.getValue();
-                pts.sort(Comparator.comparingLong(RawPt::ts));
-                // Each status series was capped on its own, so a short Bad series can reach far
-                // past where the Good one stopped. Keep only the first returnSize points in time.
-                if (returnSize != null && pts.size() > returnSize) {
-                    pts = pts.subList(0, returnSize);
+                for (RawPt p : entry.getValue()) {
+                    merged.add(new KeyedPt(key, p));
                 }
+            }
+            merged.sort(Comparator.comparingLong(k -> k.pt().ts()));
+            // Like Ignition's own historians, returnSize counts points across all pens.
+            if (returnSize != null && merged.size() > returnSize) {
+                merged = merged.subList(0, returnSize);
+            }
 
-                for (RawPt p : pts) {
-                    AtomicPoint<?> atomicPoint = DataPointFactory.createAtomicPoint(
-                            p.value(), p.quality(), Instant.ofEpochMilli(p.ts()), path);
+            int totalPoints = 0;
+            for (KeyedPt kp : merged) {
+                RawPt p = kp.pt();
+                AtomicPoint<?> atomicPoint = DataPointFactory.createAtomicPoint(
+                        p.value(), p.quality(), Instant.ofEpochMilli(p.ts()), kp.key().source());
 
-                    if (!processor.onPointAvailable(key, atomicPoint)) {
-                        processor.onComplete();
-                        return Optional.of(totalPoints);
-                    }
-                    totalPoints++;
+                if (!processor.onPointAvailable(kp.key(), atomicPoint)) {
+                    processor.onComplete();
+                    return Optional.of(totalPoints);
                 }
+                totalPoints++;
             }
 
             processor.onComplete();
