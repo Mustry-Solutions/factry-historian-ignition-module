@@ -60,6 +60,9 @@ public class FactryGrpcClient {
             Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER);
 
     private static final long WRITE_DEADLINE_SECONDS = ModuleProperties.getWriteDeadlineSeconds();
+    private static final long READ_DEADLINE_SECONDS = ModuleProperties.getReadDeadlineSeconds();
+    private static final long CALL_DEADLINE_SECONDS = ModuleProperties.getCallDeadlineSeconds();
+    private static final long SHUTDOWN_GRACE_SECONDS = ModuleProperties.getShutdownGraceSeconds();
     private static final String CA_CERT_RESOURCE = "factry-historian-ca.crt";
 
     /**
@@ -103,7 +106,9 @@ public class FactryGrpcClient {
         logger.debug("Sending GetMeasurements");
         channelLock.readLock().lock();
         try {
-            return blockingStub.getMeasurements(request);
+            return blockingStub
+                    .withDeadlineAfter(CALL_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .getMeasurements(request);
         } finally {
             channelLock.readLock().unlock();
         }
@@ -117,7 +122,9 @@ public class FactryGrpcClient {
         logger.debug("Sending GetMeasurementsByFilter");
         channelLock.readLock().lock();
         try {
-            return blockingStub.getMeasurementsByFilter(request);
+            return blockingStub
+                    .withDeadlineAfter(READ_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .getMeasurementsByFilter(request);
         } finally {
             channelLock.readLock().unlock();
         }
@@ -153,7 +160,9 @@ public class FactryGrpcClient {
         logger.debug("Sending QueryTimeseries for {} measurements", request.getMeasurementUUIDsCount());
         channelLock.readLock().lock();
         try {
-            return blockingStub.queryTimeseries(request);
+            return blockingStub
+                    .withDeadlineAfter(READ_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .queryTimeseries(request);
         } finally {
             channelLock.readLock().unlock();
         }
@@ -163,7 +172,9 @@ public class FactryGrpcClient {
         logger.debug("Sending GetAssets");
         channelLock.readLock().lock();
         try {
-            return blockingStub.getAssets(GetAssetsRequest.newBuilder().build());
+            return blockingStub
+                    .withDeadlineAfter(CALL_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .getAssets(GetAssetsRequest.newBuilder().build());
         } finally {
             channelLock.readLock().unlock();
         }
@@ -173,7 +184,9 @@ public class FactryGrpcClient {
         logger.debug("Sending GetAssetProperties for {} assets", request.getAssetUUIDsCount());
         channelLock.readLock().lock();
         try {
-            return blockingStub.getAssetProperties(request);
+            return blockingStub
+                    .withDeadlineAfter(CALL_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .getAssetProperties(request);
         } finally {
             channelLock.readLock().unlock();
         }
@@ -183,7 +196,9 @@ public class FactryGrpcClient {
         logger.debug("Sending GetCollectors");
         channelLock.readLock().lock();
         try {
-            return blockingStub.getCollectors(GetCollectorsRequest.newBuilder().build());
+            return blockingStub
+                    .withDeadlineAfter(CALL_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .getCollectors(GetCollectorsRequest.newBuilder().build());
         } finally {
             channelLock.readLock().unlock();
         }
@@ -193,7 +208,9 @@ public class FactryGrpcClient {
         logger.debug("Sending RegisterCollector");
         channelLock.readLock().lock();
         try {
-            return blockingStub.registerCollector(schema);
+            return blockingStub
+                    .withDeadlineAfter(CALL_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .registerCollector(schema);
         } finally {
             channelLock.readLock().unlock();
         }
@@ -203,7 +220,9 @@ public class FactryGrpcClient {
         logger.debug("Sending UpdateHealth");
         channelLock.readLock().lock();
         try {
-            return blockingStub.updateHealth(updates);
+            return blockingStub
+                    .withDeadlineAfter(CALL_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .updateHealth(updates);
         } finally {
             channelLock.readLock().unlock();
         }
@@ -213,7 +232,9 @@ public class FactryGrpcClient {
         logger.debug("Sending UpdateCollectorState");
         channelLock.readLock().lock();
         try {
-            blockingStub.updateCollectorState(state);
+            blockingStub
+                    .withDeadlineAfter(CALL_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .updateCollectorState(state);
         } finally {
             channelLock.readLock().unlock();
         }
@@ -246,7 +267,7 @@ public class FactryGrpcClient {
     public void reconfigure(String host, int port, String collectorUUID, String token,
                             boolean useTls, boolean skipTlsVerification, String customCaCert) {
         logger.info("Reconfiguring gRPC client: {}:{}", host, port);
-        channelLock.writeLock().lock();
+        lockChannel();
         try {
             shutdownChannel();
             buildChannel(host, port, collectorUUID, token, useTls, skipTlsVerification, customCaCert);
@@ -395,12 +416,31 @@ public class FactryGrpcClient {
     }
 
     public void shutdown() {
-        channelLock.writeLock().lock();
+        lockChannel();
         try {
             shutdownChannel();
         } finally {
             channelLock.writeLock().unlock();
         }
+    }
+
+    /**
+     * Takes the write lock. Running calls hold the read lock, so this waits for them, but only for
+     * the grace period: then it cancels them, so a Factry that never answers cannot hold up a
+     * settings save or gateway shutdown until the calls time out. A cancelled call fails with
+     * UNAVAILABLE, which store and forward retries.
+     */
+    private void lockChannel() {
+        try {
+            if (channelLock.writeLock().tryLock(SHUTDOWN_GRACE_SECONDS, TimeUnit.SECONDS)) {
+                return;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        logger.warn("gRPC calls still running after {} s, cancelling them", SHUTDOWN_GRACE_SECONDS);
+        channel.shutdownNow();
+        channelLock.writeLock().lock();
     }
 
     /** Shuts down the channel. Caller must hold the write lock. */
