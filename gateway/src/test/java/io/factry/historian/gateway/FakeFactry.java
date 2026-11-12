@@ -46,6 +46,8 @@ final class FakeFactry extends HistorianGrpc.HistorianImplBase implements AutoCl
     final List<QueryTimeseriesRequest> queries = new CopyOnWriteArrayList<>();
     /** Answers larger than this fail like Factry's own send limit. */
     volatile int maxAnswerBytes = Integer.MAX_VALUE;
+    /** Answers every page from the start, like a Factry that does not support offset. */
+    volatile boolean ignoreOffset = false;
 
     private final Server server;
 
@@ -122,7 +124,8 @@ final class FakeFactry extends HistorianGrpc.HistorianImplBase implements AutoCl
                     pts = aggregate(pts, request.getAggregation().getName(),
                             periodMillis(request.getAggregation().getPeriod()), e.getKey());
                 }
-                int from = (int) Math.min(pts.size(), request.hasOffset() ? request.getOffset() : 0);
+                int from = (int) Math.min(pts.size(),
+                        request.hasOffset() && !ignoreOffset ? request.getOffset() : 0);
                 int to = request.hasLimit() ? (int) Math.min(pts.size(), from + request.getLimit()) : pts.size();
                 if (from >= to) {
                     continue;

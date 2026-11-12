@@ -14,6 +14,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,7 +22,9 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static io.factry.historian.gateway.FactryQueryEngine.RAW_QUERY_PAGE_SIZE;
 
 /** Raw reads through the public query entry point, against an in-process Factry. */
 class FactryQueryEngineRawTest {
@@ -192,6 +195,74 @@ class FactryQueryEngineRawTest {
         for (int i = 0; i < pts.size(); i++) {
             assertEquals(i + big, pts.get(i).value());
         }
+    }
+
+    @Test
+    void readStopsAtTheMaxRawPointsCap() {
+        for (String tag : List.of("a", "b", "c")) {
+            String uuid = factry.addMeasurement("default/" + tag, "number");
+            for (int s = 0; s < 86_400; s++) {
+                factry.addPoint(uuid, START + s * 1000L, s);
+            }
+        }
+        startEngine();
+        engine.maxRawPoints = 30_000;
+
+        Recorder rec = query(null, key("a"), key("b"), key("c"));
+
+        assertNull(rec.error, () -> "read failed: " + rec.error);
+        assertTrue(rec.completed);
+        // The cap is shared over the pens, and each pen keeps its first points in time.
+        for (String tag : List.of("a", "b", "c")) {
+            List<AtomicPoint<?>> pts = rec.points.get(key(tag));
+            assertEquals(10_000, pts.size(), tag);
+            assertEquals(START + 9_999_000L, pts.get(pts.size() - 1).timestamp().toEpochMilli(), tag);
+        }
+        assertEquals(1, factry.queries.size(), "should stop paging at the cap");
+    }
+
+    @Test
+    void penCutShortByTheCapEndsWhereItsPagingStopped() {
+        // The sparse Bad series fits whole in the first page and runs far past the Good one.
+        String uuid = factry.addMeasurement("default/a", "number");
+        for (int s = 0; s < 25_000; s++) {
+            factry.addPoint(uuid, START + s * 1000L, Value.newBuilder().setNumberValue(s).build(),
+                    s % 1000 == 7 ? "Bad" : "Good");
+        }
+        startEngine();
+        engine.maxRawPoints = 5_000;
+
+        Recorder rec = query(null, key("a"));
+
+        // 5,000 Good points reach second 5,004; the 5 Bad points before it fill the gaps. Bad
+        // points after it would draw a trend past where the data really stops.
+        List<AtomicPoint<?>> pts = rec.points.get(key("a"));
+        assertEquals(5_005, pts.size());
+        for (int i = 0; i < pts.size(); i++) {
+            assertEquals(START + i * 1000L, pts.get(i).timestamp().toEpochMilli());
+        }
+    }
+
+    @Test
+    void factryThatIgnoresOffsetDoesNotLoopOrDuplicate() {
+        String uuid = factry.addMeasurement("default/a", "number");
+        for (int s = 0; s < 25_000; s++) {
+            factry.addPoint(uuid, START + s * 1000L, s);
+        }
+        factry.ignoreOffset = true;
+        startEngine();
+
+        Recorder rec = assertTimeoutPreemptively(Duration.ofSeconds(30), () -> query(null, key("a")));
+
+        assertNull(rec.error, () -> "read failed: " + rec.error);
+        assertTrue(rec.completed);
+        // Only the first page is real; the second repeats it and must be dropped.
+        List<AtomicPoint<?>> pts = rec.points.get(key("a"));
+        assertEquals(RAW_QUERY_PAGE_SIZE, pts.size());
+        for (int i = 0; i < pts.size(); i++) {
+            assertEquals(START + i * 1000L, pts.get(i).timestamp().toEpochMilli());
+        }
+        assertEquals(2, factry.queries.size(), "should stop at the first page that does not move on");
     }
 
     @Test
