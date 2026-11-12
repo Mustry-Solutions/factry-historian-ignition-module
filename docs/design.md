@@ -152,7 +152,7 @@ In-memory cache of Factry measurements and assets. Both the storage engine and q
 - `tagPathToUUID` — maps stored tag path (e.g., `Ignition-abc:[default]Temperature`) to Factry UUID
 - `uuidToMeasurement` — maps UUID to full `Measurement` proto object
 - `refresh(grpcClient)` — fetches all measurements from Factry, replaces the maps. Only keeps measurements with `status=Active`
-- `getOrCreateUUID(tagPath, grpcClient, value)` — cache lookup with auto-creation: on miss, creates the measurement in Factry, polls until visible, returns UUID. Includes concurrent creation prevention (`pendingCreations` set) and data type detection from the value
+- `getOrCreateUUID(tagPath, grpcClient, value)` — cache lookup with auto-creation: on miss, creates the measurement in Factry, polls until visible, returns UUID. Includes concurrent creation prevention (`pendingCreations` set) and data type detection from the value. The data type comes from the tag's Ignition `dataType` metadata when known (Store and Forward hands Boolean values over as Long 0/1), else from the value. Dates are stored as epoch milliseconds in a `number` measurement. NaN and Infinity are written as a Bad point without a value, and Longs above 2^53 as the nearest double, with a warning once per tag
 - `evictByUUID(uuid)` — removes a measurement so it gets re-created on next write (used when Factry rejects points for deleted measurements)
 
 **Refreshed every 30 seconds** by `FactryHistoryProvider`'s scheduled executor.

@@ -188,7 +188,7 @@ public class MeasurementCache {
         logger.debug("Cache miss for '{}', cache size={}, keys={}", tagPath, tagPathToUUID.size(), tagPathToUUID.keySet());
 
         // Determine data type from value — refuse to create without it
-        String dataType = explicitDataType != null ? explicitDataType : toFactryDataType(value);
+        String dataType = explicitDataType != null ? explicitDataType : dataTypeFor(tagPath, value);
         if (dataType == null) {
             logger.debug("Skipping measurement creation for '{}': value is null or unknown type", tagPath);
             return "";
@@ -300,7 +300,7 @@ public class MeasurementCache {
             if (uuid != null) {
                 result.put(path, uuid);
             } else {
-                String dataType = toFactryDataType(entry.getValue());
+                String dataType = dataTypeFor(path, entry.getValue());
                 if (dataType != null) {
                     pathToDataType.put(path, dataType);
                 }
@@ -583,10 +583,46 @@ public class MeasurementCache {
         return builder.build();
     }
 
+    /**
+     * Factry data type for a new measurement. The tag's Ignition data type, from the metadata
+     * Ignition sends before the first value, wins over the value: Store and Forward hands Boolean
+     * values over as Long 0/1 (its storage format has no boolean type), so the value alone would
+     * turn a Boolean tag into a number measurement.
+     */
+    String dataTypeFor(String tagPath, Object value) {
+        Map<String, String> metadata = pendingMetadata.get(tagPath);
+        String fromTag = metadata != null ? fromIgnitionDataType(metadata.get("dataType")) : null;
+        return fromTag != null ? fromTag : toFactryDataType(value);
+    }
+
+    /**
+     * Map an Ignition DataType name to a Factry data type, or null when there is no mapping.
+     * Array types map to their element type.
+     */
+    private static String fromIgnitionDataType(String ignitionType) {
+        if (ignitionType == null) {
+            return null;
+        }
+        String type = ignitionType.endsWith("Array")
+                ? ignitionType.substring(0, ignitionType.length() - "Array".length())
+                : ignitionType;
+        if (type.equals("Boolean")) {
+            return "boolean";
+        }
+        if (type.startsWith("Int") || type.startsWith("Float") || type.equals("DateTime")) {
+            return "number";
+        }
+        if (type.equals("String") || type.equals("Text")) {
+            return "string";
+        }
+        return null;
+    }
+
     static String toFactryDataType(Object value) {
         if (value instanceof Boolean) {
             return "boolean";
-        } else if (value instanceof Number) {
+        } else if (value instanceof Number || value instanceof java.util.Date) {
+            // Dates are stored as epoch milliseconds, see FactryStorageEngine.toProtoValue.
             return "number";
         } else if (value instanceof String) {
             return "string";
