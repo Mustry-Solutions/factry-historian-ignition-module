@@ -60,6 +60,8 @@ class FactryStorageEngineValueTypesTest {
 
     /** Measurement name → data type it was created with. */
     private final Map<String, String> created = new ConcurrentHashMap<>();
+    /** Measurement name → settings it was created with. */
+    private final Map<String, com.google.protobuf.Struct> createdSettings = new ConcurrentHashMap<>();
     private final List<Point> written = new CopyOnWriteArrayList<>();
 
     private class FakeFactry extends HistorianGrpc.HistorianImplBase {
@@ -84,6 +86,7 @@ class FactryStorageEngineValueTypesTest {
                                        StreamObserver<CreateMeasurementsReply> observer) {
             for (CreateMeasurement m : request.getMeasurementsList()) {
                 created.put(m.getName(), m.getDataType());
+                createdSettings.put(m.getName(), m.getSettings());
             }
             observer.onNext(CreateMeasurementsReply.getDefaultInstance());
             observer.onCompleted();
@@ -202,6 +205,24 @@ class FactryStorageEngineValueTypesTest {
         assertEquals((double) when, sent.getValue().getNumberValue());
         assertEquals("Good", sent.getStatus());
         assertEquals(List.of(date), result.successfulData());
+    }
+
+    @Test
+    void dateTimeTagIsMarkedAsDateTimeOnItsMeasurement() throws Exception {
+        // The read side only gets tag paths, so the measurement must say its numbers are dates.
+        BasicPropertySet props = new BasicPropertySet();
+        props.set(WellKnownTagProps.DataType, DataType.DateTime);
+        engine.storeComplex(List.of(MetadataPoint.from(props, path("Line/Stamp"))))
+                .toCompletableFuture().get(30, TimeUnit.SECONDS);
+        // A Date stored without metadata (for example from a script) is marked too.
+        store(point("Line/Stamp", new Date(7_000L), 1_000L), point("Script/Stamp", new Date(7_000L), 1_000L),
+                point("Line/Speed", 1.5, 1_000L));
+
+        for (String name : List.of("default/Line/Stamp", "default/Script/Stamp")) {
+            assertEquals("DateTime", createdSettings.get(name).getFieldsMap()
+                    .get(MeasurementCache.IGNITION_DATA_TYPE_SETTING).getStringValue(), name);
+        }
+        assertEquals(0, createdSettings.get("default/Line/Speed").getFieldsCount());
     }
 
     @Test

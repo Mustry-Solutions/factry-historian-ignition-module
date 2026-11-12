@@ -366,9 +366,9 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
     /**
      * Convert a Java value to the protobuf Value Factry gets. Dates go as epoch milliseconds in a
-     * number measurement: they stay exact (well below 2^53), Factry can chart them, and Ignition
-     * reads them back as numbers. An ISO string would need a string measurement, which Ignition's
-     * raw queries return no rows for.
+     * number measurement: they stay exact (well below 2^53) and Factry can chart them. The
+     * measurement is marked DateTime at creation, so the query engine turns them back into Dates.
+     * An ISO string would need a string measurement, which Ignition's raw queries return no rows for.
      */
     private static Value toProtoValue(Object value) {
         if (value instanceof Boolean) {
