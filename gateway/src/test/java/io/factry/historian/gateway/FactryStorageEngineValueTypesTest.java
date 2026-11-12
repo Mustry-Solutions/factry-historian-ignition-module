@@ -237,6 +237,34 @@ class FactryStorageEngineValueTypesTest {
     }
 
     @Test
+    void nanInsideAnArrayIsStoredAsABadPointWithoutAValue() throws Exception {
+        AtomicPoint<?>[] withNan = {
+                point("Line/Temps[0]", 1.0, 1_000L), point("Line/Temps[1]", Double.NaN, 1_000L)};
+        // Array measurements are created on a background thread; Store and Forward retries meanwhile.
+        long deadline = System.currentTimeMillis() + 15_000L;
+        String log = "";
+        while (written.isEmpty() && System.currentTimeMillis() < deadline) {
+            log += logOf(() -> store(withNan));
+            Thread.sleep(50);
+        }
+        log += logOf(() -> store(point("Line/Temps[1]", 2.0, 2_000L)));
+
+        List<Point> rows = written.stream()
+                .filter(p -> p.getMeasurementUUID().equals("uuid-default/Line/Temps"))
+                .toList();
+        Point nanRow = rows.stream().filter(p -> p.getTimestamp().getSeconds() == 1).findFirst().orElseThrow();
+        assertEquals("Bad", nanRow.getStatus());
+        // Factry stores an array with a NaN element as an empty array; send no value at all.
+        assertFalse(nanRow.hasValue());
+        Point nextRow = rows.stream().filter(p -> p.getTimestamp().getSeconds() == 2).findFirst().orElseThrow();
+        assertEquals("Good", nextRow.getStatus());
+        assertEquals(List.of(1.0, 2.0), nextRow.getValue().getListValue().getValuesList().stream()
+                .map(Value::getNumberValue).toList());
+        assertEquals(1, count(log, "Array tag 'default/Line/Temps' has element value NaN"),
+                "warn once per tag, not per point:\n" + log);
+    }
+
+    @Test
     void longAbove2pow53IsSentAsTheNearestDoubleAndWarnedOncePerTag() throws Exception {
         long big = (1L << 53) + 1;
         String log = logOf(() -> {

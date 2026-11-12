@@ -333,17 +333,26 @@ public class FactryStorageEngine extends AbstractStorageEngine {
             }
 
             for (ArrayPointMerger.ArraySnapshot snap : snapshots) {
-                // Build a ListValue from the full merged array, in index order.
-                com.google.protobuf.ListValue.Builder listBuilder = com.google.protobuf.ListValue.newBuilder();
-                for (Object val : snap.values) {
-                    appendArrayValue(listBuilder, val);
-                }
-
                 Point.Builder pb = Point.newBuilder()
                         .setMeasurementUUID(measurementUUID)
-                        .setTimestamp(Timestamps.fromMillis(snap.timestampMillis))
-                        .setStatus(qualityToStatus(snap.qualityCode))
-                        .setValue(Value.newBuilder().setListValue(listBuilder));
+                        .setTimestamp(Timestamps.fromMillis(snap.timestampMillis));
+
+                // Build a ListValue from the full merged array, in index order.
+                com.google.protobuf.ListValue.Builder listBuilder = com.google.protobuf.ListValue.newBuilder();
+                Object nonFinite = snap.values.stream().filter(FactryStorageEngine::isNonFinite).findFirst().orElse(null);
+                if (nonFinite != null) {
+                    // Same as a scalar NaN: Factry cannot store it (one NaN element turns the whole
+                    // row into an empty array), so send the row as Bad without a value.
+                    pb.setStatus("Bad");
+                    warnOnce("non-finite", basePath, "Array tag '" + basePath + "' has element value " + nonFinite
+                            + "; Factry cannot store it, storing a Bad point instead");
+                } else {
+                    for (Object val : snap.values) {
+                        appendArrayValue(listBuilder, val);
+                    }
+                    pb.setStatus(qualityToStatus(snap.qualityCode))
+                            .setValue(Value.newBuilder().setListValue(listBuilder));
+                }
 
                 pointsBuilder.addPoints(pb.build());
                 logger.debug("Built array point for '" + basePath + "' at " + snap.timestampMillis
