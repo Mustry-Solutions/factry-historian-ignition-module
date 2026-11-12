@@ -48,7 +48,9 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -60,6 +62,9 @@ public class FactryGrpcClient {
             Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER);
 
     private static final long WRITE_DEADLINE_SECONDS = ModuleProperties.getWriteDeadlineSeconds();
+    private static final long WRITE_DEADLINE_MILLIS_PER_POINT = ModuleProperties.getWriteDeadlineMillisPerPoint();
+    private static final long WRITE_DEADLINE_MAX_SECONDS = ModuleProperties.getWriteDeadlineMaxSeconds();
+    private static final boolean WRITE_GZIP = ModuleProperties.isWriteGzip();
     private static final long READ_DEADLINE_SECONDS = ModuleProperties.getReadDeadlineSeconds();
     private static final long CALL_DEADLINE_SECONDS = ModuleProperties.getCallDeadlineSeconds();
     private static final long SHUTDOWN_GRACE_SECONDS = ModuleProperties.getShutdownGraceSeconds();
@@ -74,6 +79,7 @@ public class FactryGrpcClient {
     private volatile ManagedChannel channel;
     private volatile HistorianGrpc.HistorianBlockingStub blockingStub;
     private volatile boolean connected = true;
+    private final AtomicBoolean writeGzip = new AtomicBoolean(WRITE_GZIP);
 
     public FactryGrpcClient(String host, int port, String collectorUUID, String token,
                             boolean useTls, boolean skipTlsVerification, String customCaCert) {
@@ -86,9 +92,21 @@ public class FactryGrpcClient {
         logger.debug("Sending CreatePoints with {} points", points.getPointsCount());
         channelLock.readLock().lock();
         try {
-            CreatePointsReply reply = blockingStub
-                    .withDeadlineAfter(WRITE_DEADLINE_SECONDS, TimeUnit.SECONDS)
-                    .createPoints(points);
+            CreatePointsReply reply;
+            boolean gzip = writeGzip.get();
+            try {
+                reply = sendPoints(points, gzip);
+            } catch (StatusRuntimeException e) {
+                if (!gzip || !isGzipRejected(e)) {
+                    throw e;
+                }
+                // Without this the batch would fail the same way on every attempt.
+                if (writeGzip.compareAndSet(true, false)) {
+                    logger.warn("Factry does not accept gzip-compressed writes ({}), sending them uncompressed from now on",
+                            e.getStatus().getDescription());
+                }
+                reply = sendPoints(points, false);
+            }
             connected = true;
             return reply;
         } catch (StatusRuntimeException e) {
@@ -100,6 +118,38 @@ public class FactryGrpcClient {
         } finally {
             channelLock.readLock().unlock();
         }
+    }
+
+    private CreatePointsReply sendPoints(Points points, boolean gzip) {
+        HistorianGrpc.HistorianBlockingStub stub = blockingStub
+                .withDeadlineAfter(writeDeadlineMillis(points.getPointsCount()), TimeUnit.MILLISECONDS);
+        if (gzip) {
+            stub = stub.withCompression("gzip");
+        }
+        return stub.createPoints(points);
+    }
+
+    /**
+     * A server without a gzip decompressor answers UNIMPLEMENTED: grpc-go with "grpc:
+     * Decompressor is not installed for grpc-encoding \"gzip\"", grpc-java with "Can't find
+     * decompressor for gzip". An RPC the server does not know is also UNIMPLEMENTED ("unknown
+     * method", "Method not found"), so the message tells the two apart.
+     */
+    static boolean isGzipRejected(StatusRuntimeException e) {
+        String description = e.getStatus().getDescription();
+        return e.getStatus().getCode() == Status.Code.UNIMPLEMENTED
+                && description != null
+                && description.toLowerCase(Locale.ROOT).contains("decompressor");
+    }
+
+    /**
+     * A fixed deadline that fits one point is too short for a full store and forward batch on a
+     * slow link: the same batch would time out on every retry and the backlog would never
+     * shrink. So the deadline grows with the batch, up to a ceiling.
+     */
+    private static long writeDeadlineMillis(int pointCount) {
+        long millis = WRITE_DEADLINE_SECONDS * 1000 + pointCount * WRITE_DEADLINE_MILLIS_PER_POINT;
+        return Math.min(millis, WRITE_DEADLINE_MAX_SECONDS * 1000);
     }
 
     public Measurements getMeasurements(MeasurementRequest request) {
