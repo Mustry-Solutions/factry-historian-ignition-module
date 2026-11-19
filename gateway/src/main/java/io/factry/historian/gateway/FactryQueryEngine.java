@@ -1449,7 +1449,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 continue;
             }
             for (SeriesPoint pt : series.getDataPointsList()) {
-                out.merge(pt.getTimestamp(), protoValueToJava(pt.getValue()), (a, b) -> combine(function, a, b));
+                Object value = protoValueToJava(pt.getValue());
+                // Factry answers some buckets without a value (stddev of one sample): no value
+                // there, so the bucket is Bad.
+                if (value != null) {
+                    out.merge(pt.getTimestamp(), value, (a, b) -> combine(function, a, b));
+                }
             }
         }
         return out;
