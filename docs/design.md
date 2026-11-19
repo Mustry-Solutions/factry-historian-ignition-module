@@ -298,7 +298,8 @@ Extends `AbstractQueryEngine`. Handles all data retrieval from Factry.
 
 | Ignition | Factry |
 |----------|--------|
-| Average, SimpleAverage | `mean` |
+| Average | `twa` with fill `previous`, over Good time only (see below) |
+| SimpleAverage | `mean` |
 | Minimum | `min` |
 | Maximum | `max` |
 | Sum | `sum` |
@@ -309,7 +310,16 @@ Extends `AbstractQueryEngine`. Handles all data retrieval from Factry.
 | StdDev | `stddev` |
 | MinMax | queries `min` and `max` separately, emits pairs |
 
-- Time window → Go duration conversion (e.g., `TimeWindow(2h30m)` → `"2h30m0s"`)
+- Time window → Go duration conversion (e.g., `TimeWindow(2h30m)` → `"2h30m"`, 600 ms → `"600ms"`). The bucket length in milliseconds and the period string come from the same number.
+
+**Average (time-weighted, `GoodTimeAverage`)**:
+- Factry's `twa` is only right with fill `previous`: it then holds each value until the next sample, also from before the range. Its buckets start at the query start.
+- `twa` refuses group by, so Bad and Uncertain time is masked in the module. A `last` aggregate grouped by status and the last sample before the range tell per bucket: Good throughout → Factry's `twa`; not Good throughout → no point (a gap, as in Ignition's own Average); status changes inside → the bucket's raw samples are averaged over Good time.
+- Raw reads have a budget per pen: 50,000 samples per request, 200,000 and 10 requests per pen. Neighbouring buckets share a request. A `count` aggregate (only when some bucket needs raw samples) sizes the requests. A bucket beyond the budget gets `twa` over the samples with status exactly `Good`, marked Uncertain: it leaves Bad values out but holds the last Good value through Bad time and misses Good sub-statuses.
+- Requests per pen: 3 for a healthy tag (`twa`, `last`, sample before); at most 15 (plus `count`, up to 10 raw, 1 fallback).
+- The range stops at now: no buckets after the current time, and the current bucket is weighted up to now.
+- Booleans: Factry's `twa` refuses them, so every bucket with samples is read raw and averaged as the fraction of Good time true (true = 1). Beyond the budget: the `mean` of the Good samples, marked Uncertain. Strings keep `mean`.
+- Difference with Ignition's internal historian: Ignition interpolates analog (Float) tags linearly between Good values (trapezoids), Factry's `twa` and the raw path hold the previous value (steps). On a ramp the numbers differ; on a tag stored on change they agree.
 
 **`doBrowse(browseContext, publisher)`**:
 - Root level: publishes two category folders — "Measurements" and "Assets"
