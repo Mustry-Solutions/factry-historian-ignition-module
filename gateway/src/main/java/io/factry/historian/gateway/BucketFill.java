@@ -116,7 +116,8 @@ final class BucketFill {
             boolean exact = st.goodSeries <= 1;
             if (!exact && resolveLastGood && reads < maxReads) {
                 reads++;
-                List<Sample> last = before.apply(Math.min(b + periodMs, endMs));
+                // Up to now, as the statuses were read: a sample stamped later is not there yet.
+                List<Sample> last = before.apply(Math.min(b + periodMs, Math.min(endMs, nowMs)));
                 Sample good = latest(last, true);
                 if (good != null) {
                     lastGood = good.value();
