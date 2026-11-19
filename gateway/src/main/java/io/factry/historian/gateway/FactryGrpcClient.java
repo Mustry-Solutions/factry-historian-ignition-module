@@ -74,6 +74,7 @@ public class FactryGrpcClient {
     private volatile ManagedChannel channel;
     private volatile HistorianGrpc.HistorianBlockingStub blockingStub;
     private volatile boolean connected = true;
+    private volatile String collectorUUID;
 
     public FactryGrpcClient(String host, int port, String collectorUUID, String token,
                             boolean useTls, boolean skipTlsVerification, String customCaCert) {
@@ -319,6 +320,7 @@ public class FactryGrpcClient {
                     .build();
         }
 
+        this.collectorUUID = collectorUUID;
         Metadata headers = new Metadata();
         headers.put(COLLECTOR_UUID_KEY, collectorUUID);
         headers.put(AUTHORIZATION_KEY, "Bearer " + token);
@@ -464,6 +466,20 @@ public class FactryGrpcClient {
 
     public boolean isShutdown() {
         return channel.isShutdown();
+    }
+
+    /** The collector this client writes as: Factry only stores points for this collector's measurements. */
+    public String getCollectorUUID() {
+        return collectorUUID;
+    }
+
+    /** Whether {@code e} says Factry could not be reached in time: UNAVAILABLE or DEADLINE_EXCEEDED. */
+    static boolean isConnectionError(Throwable e) {
+        if (!(e instanceof StatusRuntimeException)) {
+            return false;
+        }
+        Status.Code code = ((StatusRuntimeException) e).getStatus().getCode();
+        return code == Status.Code.UNAVAILABLE || code == Status.Code.DEADLINE_EXCEEDED;
     }
 
     public boolean isConnected() {
