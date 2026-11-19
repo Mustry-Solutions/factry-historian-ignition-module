@@ -21,10 +21,11 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static io.factry.historian.gateway.FactryQueryEngine.RAW_QUERY_PAGE_SIZE;
 
 /** Raw reads through the public query entry point, against an in-process Factry. */
 class FactryQueryEngineRawTest {
@@ -198,10 +199,35 @@ class FactryQueryEngineRawTest {
     }
 
     @Test
-    void readStopsAtTheMaxRawPointsCap() {
+    void readOverTheMaxRawPointsCapFails() {
+        // A dense pen and a sparse one. Cut at the cap, the dense pen would stop after a few
+        // minutes while the sparse one runs on, and Ignition would repeat the dense pen's last
+        // value with Good quality to the end of the range.
+        String dense = factry.addMeasurement("default/a", "number");
+        String sparse = factry.addMeasurement("default/b", "number");
+        for (int s = 0; s < 600; s++) {
+            factry.addPoint(dense, START + s * 1000L, s);
+            if (s % 60 == 0) {
+                factry.addPoint(sparse, START + s * 1000L, s);
+            }
+        }
+        startEngine();
+        engine.maxRawPoints = 200;
+
+        Recorder rec = query(null, key("a"), key("b"));
+
+        assertNotNull(rec.error, "a read over the cap must fail, not return part of the range");
+        assertTrue(rec.error.getMessage().contains("query.raw.max.points"), rec.error.getMessage());
+        assertTrue(rec.error.getMessage().contains("200"), rec.error.getMessage());
+        assertTrue(rec.points.isEmpty(), "no partial result");
+        assertFalse(rec.completed);
+    }
+
+    @Test
+    void readOfExactlyTheMaxRawPointsComesBackComplete() {
         for (String tag : List.of("a", "b", "c")) {
             String uuid = factry.addMeasurement("default/" + tag, "number");
-            for (int s = 0; s < 86_400; s++) {
+            for (int s = 0; s < 10_000; s++) {
                 factry.addPoint(uuid, START + s * 1000L, s);
             }
         }
@@ -212,39 +238,13 @@ class FactryQueryEngineRawTest {
 
         assertNull(rec.error, () -> "read failed: " + rec.error);
         assertTrue(rec.completed);
-        // The cap is shared over the pens, and each pen keeps its first points in time.
         for (String tag : List.of("a", "b", "c")) {
-            List<AtomicPoint<?>> pts = rec.points.get(key(tag));
-            assertEquals(10_000, pts.size(), tag);
-            assertEquals(START + 9_999_000L, pts.get(pts.size() - 1).timestamp().toEpochMilli(), tag);
-        }
-        assertEquals(1, factry.queries.size(), "should stop paging at the cap");
-    }
-
-    @Test
-    void penCutShortByTheCapEndsWhereItsPagingStopped() {
-        // The sparse Bad series fits whole in the first page and runs far past the Good one.
-        String uuid = factry.addMeasurement("default/a", "number");
-        for (int s = 0; s < 25_000; s++) {
-            factry.addPoint(uuid, START + s * 1000L, Value.newBuilder().setNumberValue(s).build(),
-                    s % 1000 == 7 ? "Bad" : "Good");
-        }
-        startEngine();
-        engine.maxRawPoints = 5_000;
-
-        Recorder rec = query(null, key("a"));
-
-        // 5,000 Good points reach second 5,004; the 5 Bad points before it fill the gaps. Bad
-        // points after it would draw a trend past where the data really stops.
-        List<AtomicPoint<?>> pts = rec.points.get(key("a"));
-        assertEquals(5_005, pts.size());
-        for (int i = 0; i < pts.size(); i++) {
-            assertEquals(START + i * 1000L, pts.get(i).timestamp().toEpochMilli());
+            assertEquals(10_000, rec.count(key(tag)), tag);
         }
     }
 
     @Test
-    void factryThatIgnoresOffsetDoesNotLoopOrDuplicate() {
+    void factryThatIgnoresOffsetFailsTheRead() {
         String uuid = factry.addMeasurement("default/a", "number");
         for (int s = 0; s < 25_000; s++) {
             factry.addPoint(uuid, START + s * 1000L, s);
@@ -254,14 +254,10 @@ class FactryQueryEngineRawTest {
 
         Recorder rec = assertTimeoutPreemptively(Duration.ofSeconds(30), () -> query(null, key("a")));
 
-        assertNull(rec.error, () -> "read failed: " + rec.error);
-        assertTrue(rec.completed);
-        // Only the first page is real; the second repeats it and must be dropped.
-        List<AtomicPoint<?>> pts = rec.points.get(key("a"));
-        assertEquals(RAW_QUERY_PAGE_SIZE, pts.size());
-        for (int i = 0; i < pts.size(); i++) {
-            assertEquals(START + i * 1000L, pts.get(i).timestamp().toEpochMilli());
-        }
+        // Only the first page is real. Returning it alone would show the pen ending early.
+        assertNotNull(rec.error, "a Factry that repeats pages must fail the read");
+        assertTrue(rec.error.getMessage().contains("offset"), rec.error.getMessage());
+        assertTrue(rec.points.isEmpty(), "no partial result");
         assertEquals(2, factry.queries.size(), "should stop at the first page that does not move on");
     }
 
