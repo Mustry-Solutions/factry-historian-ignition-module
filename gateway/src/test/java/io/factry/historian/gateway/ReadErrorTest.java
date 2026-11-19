@@ -210,18 +210,37 @@ class ReadErrorTest {
     }
 
     @Test
-    void rawReadThatFactryRejectsForEveryPenIsNotAnError() throws Exception {
-        // An error would end the whole chart, including pens from other historians: Ignition runs
-        // one query per historian in a loop that the first error ends.
+    void rawReadThatFactryRejectsForEveryPenIsAnError() throws Exception {
+        // Raw rows come only from points, so Bad_Failure columns alone would be an empty, Good
+        // result that looks like no data.
         startEngine(true);
         factry.failingMeasurements.add("uuid-1");
         factry.failingMeasurements.add("uuid-2");
 
-        for (Dataset ds : new Dataset[]{raw("a", "b"), raw("a")}) {
-            assertNull(ds.error, ds::toString);
-            // Raw rows come only from points, so there is no row to carry Bad_Failure.
-            assertEquals(0, ds.rows.size(), ds::toString);
-        }
+        assertReadFailed(raw("a", "b"), "INTERNAL");
+        assertReadFailed(raw("a"), "INTERNAL");
+    }
+
+    @Test
+    void factryBackendDownOnEveryCallIsAnErrorForRaw() throws Exception {
+        // Factry answers UNKNOWN when its own database is down: not a code that says Factry cannot
+        // be reached, but every pen fails with it.
+        startEngine(true);
+        factry.queryFailure = Status.UNKNOWN.withDescription("influx: connection refused");
+
+        assertReadFailed(raw("a", "b"), "influx: connection refused");
+        assertReadFailed(raw("a"), "influx: connection refused");
+    }
+
+    @Test
+    void factryBackendDownOnEveryCallMarksEveryAggregatedPen() throws Exception {
+        // Not an error: with FillMode.DERIVED each pen is its own query, and an error would end
+        // the whole chart. Interval rows carry Bad_Failure on every pen, so it does not look
+        // like no data.
+        startEngine(true);
+        factry.queryFailure = Status.UNKNOWN.withDescription("influx: connection refused");
+
+        assertEveryPenFailed(average("a", "b"));
     }
 
     @Test

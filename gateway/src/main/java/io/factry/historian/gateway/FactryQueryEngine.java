@@ -448,16 +448,22 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                         continue;
                     }
                     Map<String, StatusRuntimeException> failed = penFailures(reqBuilder.build(), pending, e);
-                    // Pens Factry refuses do not fail the read, even when every pen is refused:
-                    // Ignition runs one query per historian in a loop that the first error ends,
-                    // so an error here would also drop other historians' pens from the chart. The
-                    // read fails when Factry itself cannot be read, or when no pen can be blamed
-                    // (the request for all pens failed, but each pen alone reads fine).
+                    // A pen Factry refuses does not fail the read: Ignition runs one query per
+                    // historian in a loop that the first error ends, so an error here would also
+                    // drop other historians' pens from the chart. The read fails when Factry
+                    // itself cannot be read, or when no pen can be blamed (the request for all pens
+                    // failed, but each pen alone reads fine).
                     if (failed.isEmpty()) {
                         throw e;
                     }
                     failed.forEach((uuid, why) -> failures.put(uuidToKeyMap.get(uuid), penFailed(why)));
                     refused.addAll(failed.keySet());
+                    // It also fails when every pen is refused, as when Factry's own database is
+                    // down (UNKNOWN on every call). Raw rows come only from points, so Bad_Failure
+                    // columns alone would be an empty, Good result: the same as no data.
+                    if (refused.size() == measurementUUIDs.size()) {
+                        throw failed.values().iterator().next();
+                    }
                     // Start over without the refused pens. Their points must go (the column reads
                     // Bad_Failure from the context; old points would make it look partly good),
                     // and with returnSize they may have decided which other pens stopped paging.
