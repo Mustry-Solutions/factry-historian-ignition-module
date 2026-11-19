@@ -174,7 +174,7 @@ public class FactryGrpcClient {
         channelLock.readLock().lock();
         try {
             return blockingStub
-                    .withDeadlineAfter(CALL_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .withDeadlineAfter(READ_DEADLINE_SECONDS, TimeUnit.SECONDS)
                     .getAssets(GetAssetsRequest.newBuilder().build());
         } finally {
             channelLock.readLock().unlock();
@@ -186,7 +186,7 @@ public class FactryGrpcClient {
         channelLock.readLock().lock();
         try {
             return blockingStub
-                    .withDeadlineAfter(CALL_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .withDeadlineAfter(READ_DEADLINE_SECONDS, TimeUnit.SECONDS)
                     .getAssetProperties(request);
         } finally {
             channelLock.readLock().unlock();

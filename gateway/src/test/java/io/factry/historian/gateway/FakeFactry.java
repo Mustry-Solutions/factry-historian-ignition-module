@@ -1,11 +1,13 @@
 package io.factry.historian.gateway;
 
+import io.factry.historian.proto.AssetProperties;
 import io.factry.historian.proto.Assets;
 import io.factry.historian.proto.Collectors;
 import io.factry.historian.proto.CreateMeasurement;
 import io.factry.historian.proto.CreateMeasurementsReply;
 import io.factry.historian.proto.CreateMeasurementsRequest;
 import io.factry.historian.proto.CreatePointsReply;
+import io.factry.historian.proto.GetAssetPropertiesRequest;
 import io.factry.historian.proto.GetMeasurementsByFilterRequest;
 import io.factry.historian.proto.Measurement;
 import io.factry.historian.proto.Measurements;
@@ -47,6 +49,10 @@ class FakeFactry extends FactryGrpcClient {
     String createdStatus = "Active";
     /** When set, creates fail with this gRPC status. */
     Status createFailure = null;
+    Assets assets = Assets.getDefaultInstance();
+    AssetProperties assetProperties = AssetProperties.getDefaultInstance();
+    /** When set, asset property fetches fail with this gRPC status. */
+    Status assetPropertiesFailure = null;
 
     FakeFactry() {
         super("localhost", 1, OWN, "token", false, false, null);
@@ -134,6 +140,14 @@ class FakeFactry extends FactryGrpcClient {
 
     @Override
     public Assets getAssets() {
-        return Assets.getDefaultInstance();
+        return assets;
+    }
+
+    @Override
+    public AssetProperties getAssetProperties(GetAssetPropertiesRequest request) {
+        if (assetPropertiesFailure != null) {
+            throw new StatusRuntimeException(assetPropertiesFailure);
+        }
+        return assetProperties;
     }
 }
