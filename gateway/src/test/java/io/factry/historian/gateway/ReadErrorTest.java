@@ -279,6 +279,19 @@ class ReadErrorTest {
     }
 
     @Test
+    void aggregatedReadOverThePointCapIsAnError() throws Exception {
+        // Every pen's points are held until all pens are read, and Average gives one per interval.
+        startEngine(true);
+        engine.maxRawPoints = 10;
+        assertNull(average("a", "b").error, "2 pens x 5 intervals is within a cap of 10");
+
+        engine.maxRawPoints = 9;
+        factry.queries.clear();
+        assertReadFailed(average("a", "b"), "query.raw.max.points");
+        assertEquals(0, factry.queries.size(), "the cap should be checked before asking Factry");
+    }
+
+    @Test
     void unknownTagIsStillNotFoundAndNotAnError() throws Exception {
         startEngine(true);
 

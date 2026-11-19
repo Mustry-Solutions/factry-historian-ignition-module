@@ -790,6 +790,26 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             long periodMs = timeWindowToMillis(options.getTimeWindow());
             String period = toPeriod(periodMs);
 
+            // Every pen's points are held until all pens are read (see HeldInit), and Average gives
+            // a point for every interval. Bound that the same way as a raw read, before asking
+            // Factry anything: fail rather than return part of the range.
+            if (options.getTimeRange().isPresent() && periodMs > 0) {
+                long rangeMs = options.getTimeRange().get().endTime().toEpochMilli()
+                        - options.getTimeRange().get().startTime().toEpochMilli();
+                long intervals = Math.max(1, (rangeMs + periodMs - 1) / periodMs);
+                long expected = 0;
+                for (AggregatedQueryKey key : options.getQueryKeys()) {
+                    // MinMax gives two points per interval.
+                    expected += "MinMax".equals(key.aggregationType().name()) ? 2 * intervals : intervals;
+                }
+                if (expected > maxRawPoints) {
+                    throw new IllegalStateException("the read would return about " + expected
+                            + " points (" + options.getQueryKeys().size() + " pen(s) x " + intervals
+                            + " intervals), more than " + maxRawPoints + " (query.raw.max.points)."
+                            + " Use a longer interval or a shorter time range");
+                }
+            }
+
             var queryKeys = options.getQueryKeys();
             int pointCount = 0;
             Map<AggregatedQueryKey, QualityCode> failures = new HashMap<>();
