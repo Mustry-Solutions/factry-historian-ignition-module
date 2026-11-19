@@ -7,6 +7,9 @@ import com.inductiveautomation.historian.common.model.data.StorageResult;
 import com.inductiveautomation.ignition.common.QualifiedPath;
 import com.inductiveautomation.ignition.common.model.values.QualityCode;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
+import io.factry.historian.proto.CreateMeasurement;
+import io.factry.historian.proto.CreateMeasurementsReply;
+import io.factry.historian.proto.CreateMeasurementsRequest;
 import io.factry.historian.proto.CreatePointsReply;
 import io.factry.historian.proto.GetMeasurementsByFilterRequest;
 import io.factry.historian.proto.HistorianGrpc;
@@ -52,6 +55,7 @@ class SlowLinkTest {
     private Server server;
     private FactryGrpcClient client;
     private final AtomicInteger storedPoints = new AtomicInteger();
+    private final AtomicInteger createdMeasurements = new AtomicInteger();
     private final AtomicReference<String> writeEncoding = new AtomicReference<>();
     private final List<String> writeEncodings = Collections.synchronizedList(new ArrayList<>());
 
@@ -78,6 +82,19 @@ class SlowLinkTest {
             }
             storedPoints.addAndGet(request.getPointsCount());
             observer.onNext(CreatePointsReply.getDefaultInstance());
+            observer.onCompleted();
+        }
+
+        @Override
+        public void createMeasurements(CreateMeasurementsRequest request,
+                                       StreamObserver<CreateMeasurementsReply> observer) {
+            try {
+                TimeUnit.NANOSECONDS.sleep(NANOS_PER_POINT * request.getMeasurementsCount());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            createdMeasurements.addAndGet(request.getMeasurementsCount());
+            observer.onNext(CreateMeasurementsReply.getDefaultInstance());
             observer.onCompleted();
         }
     }
@@ -179,6 +196,19 @@ class SlowLinkTest {
             noGzipServer.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
             noGzipClient.shutdown();
         }
+    }
+
+    @Test
+    void manyNewMeasurementsOnSlowLinkAreCreated() {
+        // A repeated create would add Discovered duplicates, so it must fit in one call.
+        CreateMeasurementsRequest.Builder request = CreateMeasurementsRequest.newBuilder();
+        for (int i = 0; i < 10_000; i++) {
+            request.addMeasurements(CreateMeasurement.newBuilder().setName("default/Tag" + i));
+        }
+
+        client.createMeasurements(request.build());
+
+        assertEquals(10_000, createdMeasurements.get());
     }
 
     @Test

@@ -146,10 +146,11 @@ public class FactryGrpcClient {
     /**
      * A fixed deadline that fits one point is too short for a full store and forward batch on a
      * slow link: the same batch would time out on every retry and the backlog would never
-     * shrink. So the deadline grows with the batch, up to a ceiling.
+     * shrink. So the deadline grows with the batch (points, or measurements to create), up to a
+     * ceiling.
      */
-    private static long writeDeadlineMillis(int pointCount) {
-        long millis = WRITE_DEADLINE_SECONDS * 1000 + pointCount * WRITE_DEADLINE_MILLIS_PER_POINT;
+    private static long writeDeadlineMillis(int itemCount) {
+        long millis = WRITE_DEADLINE_SECONDS * 1000 + itemCount * WRITE_DEADLINE_MILLIS_PER_POINT;
         return Math.min(millis, WRITE_DEADLINE_MAX_SECONDS * 1000);
     }
 
@@ -295,8 +296,11 @@ public class FactryGrpcClient {
         logger.debug("Sending CreateMeasurements with {} measurements", request.getMeasurementsCount());
         channelLock.readLock().lock();
         try {
+            // A create that times out may still be carried out by Factry, and creating the same
+            // names again adds Discovered duplicates. So it gets as long as a write of as many
+            // points, which lets thousands of new tags in one flush through on a slow link.
             CreateMeasurementsReply reply = blockingStub
-                    .withDeadlineAfter(WRITE_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .withDeadlineAfter(writeDeadlineMillis(request.getMeasurementsCount()), TimeUnit.MILLISECONDS)
                     .createMeasurements(request);
             connected = true;
             return reply;
