@@ -144,15 +144,19 @@ final class GoodTimeAverage {
             long start = buckets.get(i);
             BucketStatus st = statuses.getOrDefault(start, EMPTY);
             boolean inSpan = nextSpan < spans.size() && spans.get(nextSpan).first() == i;
-            if (unknown && (inSpan || !st.isMixed()) && seedReads < budget.seedReadsPerPen()) {
+            // A raw request always gets its read: there are at most requestsPerPen of them, and
+            // without it its first bucket would drop Good time yet still count as exact. Only
+            // the reads for buckets outside a request are capped.
+            if (unknown && (inSpan || (!st.isMixed() && seedReads < budget.seedReadsPerPen()))) {
                 held = source.before(start);
                 unknown = false;
-                seedReads++;
+                if (!inSpan) {
+                    seedReads++;
+                }
             }
             if (inSpan) {
                 Span span = spans.get(nextSpan++);
-                // Out of seed reads, the time before the span's first sample counts as not Good.
-                held = averageRaw(buckets, span, unknown ? null : held, periodMs, rangeEndMs, source, out);
+                held = averageRaw(buckets, span, held, periodMs, rangeEndMs, source, out);
                 unknown = false;
                 i = span.last() + 1;
                 continue;

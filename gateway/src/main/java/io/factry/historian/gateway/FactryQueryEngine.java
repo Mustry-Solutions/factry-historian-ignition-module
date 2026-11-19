@@ -650,9 +650,9 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      * Limits on the raw samples one Average pen may read (see {@link GoodTimeAverage}). A sample
      * is about 25 bytes on the wire, so 50,000 per request stays far below the 4 MiB gRPC
      * message limit, and 200,000 per pen (about 5 MB over at most 10 requests) keeps a trend
-     * refresh quick. Buckets beyond this get Factry's twa over the Good samples instead. Up to
-     * 10 more one-sample reads find the status at a bucket start after a bucket that was not
-     * read.
+     * refresh quick. Buckets beyond this get Factry's twa over the Good samples instead. One-sample
+     * reads find the status at a bucket start after a bucket that was not read: one per raw
+     * request when needed, and up to 10 for buckets outside a request.
      */
     static final GoodTimeAverage.Budget RAW_BUDGET = new GoodTimeAverage.Budget(50_000, 200_000, 10, 10);
 

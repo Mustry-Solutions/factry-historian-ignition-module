@@ -316,4 +316,25 @@ class GoodTimeAverageTest {
 
         assertEquals(0, raw.fallbackCalls);
     }
+
+    @Test
+    void oldBucketsCannotUseUpTheReadANewRawRequestNeeds() {
+        // One read outside raw requests, and budget for only the newest bucket. Walking from
+        // 08:00, 08:10 spends that read; 08:30 is the raw request and still needs the status at
+        // its start (08:20 held both statuses and was not read): Good 30 since 08:25.
+        Raw raw = new Raw(good("08:02", 10), bad("08:05"), good("08:12", 20), bad("08:21"),
+                good("08:25", 30), bad("08:35"));
+        raw.fallback = buckets("08:00=10", "08:10=20", "08:20=25");
+        Map<Long, BucketStatus> statuses = Map.of(
+                t("08:00"), status(10.0, true), t("08:10"), status(20.0, false),
+                t("08:20"), status(30.0, true), t("08:30"), status(null, true));
+
+        Map<Long, Result> out = GoodTimeAverage.compute(buckets("08:00=0", "08:10=0", "08:20=0", "08:30=0"),
+                statuses, null, 10 * MIN, t("08:40"), new Budget(100, 1, 10, 1), raw);
+
+        // 08:30: 5 minutes at 30 (Good), then Bad.
+        assertEquals(new Result(30, true), out.get(t("08:30")));
+        assertEquals(List.of("before 2026-11-10T08:10:00Z", "before 2026-11-10T08:30:00Z",
+                "2026-11-10T08:30:00Z..2026-11-10T08:40:00Z"), raw.calls);
+    }
 }
