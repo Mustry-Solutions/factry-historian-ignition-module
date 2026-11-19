@@ -212,19 +212,26 @@ class RefusedWritesStatusTest {
         assertEquals(ProfileStatus.State.Good, health.status().getState(), "only one write was refused");
     }
 
-    /** Refusals, then Factry restarted (check fails for 2 min), back and healthy before any write. */
+    /**
+     * Refusals over 25 s, then Factry restarted (the check fails for 2 min). Back, the first write
+     * is refused again: one refusal since it came back is no alarm, whatever happened before.
+     */
     @Test
     void refusalsBeforeAnOutageAreForgottenAfterIt() throws Exception {
         createPointsStatus = Status.INTERNAL.withDescription("influx down");
         flush();
+        after(25);
+        flush();
         after(10);
         health.connectionChecked(Status.UNAVAILABLE.withDescription("io exception"));
         after(120);
-        createPointsStatus = Status.OK;
         health.connectionChecked(client.checkConnection());
+        assertEquals(ProfileStatus.State.Good, health.status().getState(), "back, no write tried yet");
+
+        after(5);
         flush();
 
-        assertEquals(ProfileStatus.State.Good, health.status().getState(), "no write refused since it came back");
+        assertEquals(ProfileStatus.State.Good, health.status().getState(), "one refusal since it came back");
     }
 
     @Test
