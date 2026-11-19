@@ -1,5 +1,6 @@
 package io.factry.historian.gateway;
 
+import com.google.protobuf.Value;
 import com.inductiveautomation.ignition.common.FillMode;
 import com.inductiveautomation.ignition.common.model.values.QualityCode;
 import com.inductiveautomation.ignition.common.sqltags.history.AggregationMode;
@@ -145,21 +146,31 @@ class ReadErrorTest {
 
     @Test
     void averageWithOnePenRejectedKeepsTheTimeWeightedPathForTheOther() throws Exception {
-        // Average has its own path (Good-time twa, a point for every bucket). A pen Factry refuses
-        // there must still be a null Bad_Failure column, and no cell may be NaN: the Power Chart
-        // writes history as strict JSON, which throws at a NaN.
+        // Average has its own path (Good-time twa, a point for every bucket, a Bad bucket without
+        // a value). A pen Factry refuses there must still be a null Bad_Failure column, and no
+        // cell may be NaN: the Power Chart writes history as strict JSON, which throws at a NaN.
+        // Pen c is Bad for the whole third minute, so that bucket has no Good time.
+        String c = factry.addMeasurement("default/c", "number");
+        for (int s = 0; s < 300; s++) {
+            factry.addPoint(c, START + s * 1000L, Value.newBuilder().setNumberValue(s).build(),
+                    s >= 120 && s < 180 ? "Bad" : "Good");
+        }
         startEngine(true);
         factry.failingMeasurements.add("uuid-2");
 
-        Dataset ds = average("a", "b");
+        Dataset ds = average("c", "b");
 
         assertTrue(factry.queries.stream().anyMatch(q -> q.hasAggregation()
                         && FactryQueryEngine.TIME_WEIGHTED_AVERAGE.equals(q.getAggregation().getName())),
                 "Average should read Factry's twa");
-        assertOnlySecondPenFailed(ds);
+        assertNull(ds.error, ds::toString);
         assertEquals(5, ds.rows.size(), ds::toString);
-        for (Object[] row : ds.rows) {
-            for (Object cell : row) {
+        for (int i = 0; i < ds.rows.size(); i++) {
+            QualityCode[] q = ds.qualities.get(i);
+            assertTrue(q[2].is(QualityCode.Bad_Failure), ds::toString);
+            assertNull(ds.rows.get(i)[2], ds::toString);
+            assertEquals(i != 2, q[1].isGood(), ds::toString);
+            for (Object cell : ds.rows.get(i)) {
                 assertFalse(cell instanceof Double d && d.isNaN(), ds::toString);
             }
         }

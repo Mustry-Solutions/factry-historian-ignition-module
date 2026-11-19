@@ -134,13 +134,18 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
         for (String uuid : request.getMeasurementUUIDsList()) {
             Map<String, List<Pt>> byStatus = new TreeMap<>();
             for (Pt p : points.getOrDefault(uuid, List.of())) {
-                if (p.ts() >= start && p.ts() <= end) {
-                    byStatus.computeIfAbsent(p.status(), k -> new ArrayList<>()).add(p);
+                var tf = request.getTags().getFieldsMap().get("status");
+                if (tf != null && !tf.getStringValue().equals(p.status())) continue;
+                boolean endExcl = request.getDesc();
+                if (p.ts() >= start && (endExcl ? p.ts() < end : p.ts() <= end)) {
+                    String grp = request.getGroupByList().contains("status") ? p.status() : "";
+                    byStatus.computeIfAbsent(grp, k -> new ArrayList<>()).add(p);
                 }
             }
             for (Map.Entry<String, List<Pt>> e : byStatus.entrySet()) {
                 List<Pt> pts = e.getValue();
                 pts.sort(Comparator.comparingLong(Pt::ts));
+                if (request.getDesc()) { pts = new ArrayList<>(pts); Collections.reverse(pts); }
                 if (request.hasAggregation()) {
                     pts = aggregate(pts, request.getAggregation().getName(),
                             periodMillis(request.getAggregation().getPeriod()), e.getKey());
@@ -190,6 +195,9 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
             double v = switch (function) {
                 case "min" -> stats.getMin();
                 case "max" -> stats.getMax();
+                case "count" -> stats.getCount();
+                case "sum" -> stats.getSum();
+                case "last" -> b.getValue().get(b.getValue().size() - 1);
                 default -> stats.getAverage();
             };
             out.add(new Pt(b.getKey(), Value.newBuilder().setNumberValue(v).build(), status));
