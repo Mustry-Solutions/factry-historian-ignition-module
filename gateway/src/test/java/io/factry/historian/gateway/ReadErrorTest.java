@@ -251,6 +251,25 @@ class ReadErrorTest {
     }
 
     @Test
+    void everyTagUnknownAnswersAtOnce() throws Exception {
+        // Without columns, Ignition waits 5 s for them before it gives up.
+        startEngine(true);
+
+        for (boolean aggregated : new boolean[]{false, true}) {
+            long t0 = System.nanoTime();
+            Dataset ds = aggregated ? average("x", "y") : raw("x", "y");
+            long ms = (System.nanoTime() - t0) / 1_000_000;
+
+            assertTrue(ms < 2_000, () -> "took " + ms + " ms:\n" + ds);
+            assertNull(ds.error, ds::toString);
+            for (QualityCode[] q : ds.qualities) {
+                assertTrue(q[1].is(QualityCode.Bad_NotFound), ds::toString);
+                assertTrue(q[2].is(QualityCode.Bad_NotFound), ds::toString);
+            }
+        }
+    }
+
+    @Test
     void rangeWithoutDataIsEmptyAndNotAnError() throws Exception {
         startEngine(true);
 

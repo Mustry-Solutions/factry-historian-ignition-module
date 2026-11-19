@@ -340,12 +340,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             Map<RawQueryKey, ? extends HistoricalNode> keyToNode =
                     mapKeysToNodes(options, held, RawQueryKey::source);
 
-            // mapKeysToNodes only initializes the processor when it resolves at least one
-            // node. If NOTHING resolved (every tag is unknown), the processor is not
-            // initialized, so calling onKeyFailure/onComplete on it would throw
-            // "Processor not initialized". Nothing to return in that case — report zero rows.
+            // Every tag unknown: mapKeysToNodes builds no columns, and Ignition would wait 5 s
+            // for them. Build them as Bad_NotFound so the read answers at once.
             if (keyToNode.isEmpty()) {
                 logger.debug("Raw query resolved no measurements; returning 0 rows");
+                held.initialize(notFound(options.getQueryKeys()));
+                processor.onComplete();
                 return Optional.of(0);
             }
 
@@ -621,6 +621,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         return failed;
     }
 
+    private static <K> Map<K, QualityCode> notFound(Collection<K> keys) {
+        Map<K, QualityCode> failures = new HashMap<>();
+        keys.forEach(k -> failures.put(k, QualityCode.Bad_NotFound));
+        return failures;
+    }
+
     /** The quality a pen's column gets when Factry refuses that pen, with Factry's reason. */
     private static QualityCode penFailed(Exception e) {
         return QualityCode.Bad_Failure.derive("Factry Historian read failed: " + e.getMessage());
@@ -669,7 +675,9 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         /** Initializes the real processor, with each key in {@code failures} given that quality. */
         @SuppressWarnings("unchecked")
         void initialize(Map<K, QualityCode> failures) {
-            ProcessingContext<K, DataPointType> resolved = context;
+            // No context when mapKeysToNodes resolved no key at all.
+            ProcessingContext<K, DataPointType> resolved =
+                    context != null ? context : DefaultProcessingContext.<K, DataPointType>builder().build();
             processor.onInitialize(new ProcessingContext<>() {
                 @Override
                 public <V> Optional<V> getContextValue(K key, Property<V> property) {
@@ -682,9 +690,13 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             });
         }
 
+        /**
+         * mapKeysToNodes reports "no nodes found" here when every key is unknown. The engine then
+         * initializes the processor with Bad_NotFound columns instead, which ends the read at once;
+         * passed on, the error builds no columns and Ignition waits 5 s for them.
+         */
         @Override
         public void onError(QualityCode quality) {
-            processor.onError(quality);
         }
 
         @Override
@@ -733,11 +745,11 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             Map<AggregatedQueryKey, ? extends HistoricalNode> keyToNode =
                     mapKeysToNodes(options, held, AggregatedQueryKey::source);
 
-            // mapKeysToNodes only initializes the processor when it resolves at least one node.
-            // If NOTHING resolved, the processor is not initialized, so calling
-            // onKeyFailure/onComplete on it would throw "Processor not initialized".
+            // Every tag unknown: build the columns as Bad_NotFound, as in doQueryRaw.
             if (keyToNode.isEmpty()) {
                 logger.debug("Aggregated query resolved no measurements; returning 0 rows");
+                held.initialize(notFound(options.getQueryKeys()));
+                processor.onComplete();
                 return Optional.of(0);
             }
 
