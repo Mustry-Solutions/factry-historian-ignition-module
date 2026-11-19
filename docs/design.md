@@ -321,8 +321,8 @@ Extends `AbstractQueryEngine`. Handles all data retrieval from Factry.
 | Count | `count` |
 | LastValue | `last` |
 | Range | `spread` |
-| Variance | `stddev`, squared: Factry 8.2.3 has no `variance` and refuses it (checked live) |
-| StdDev | `stddev` |
+| Variance | `stddev` and `count`: s² (n - 1) / n, 0 for one sample (see below) |
+| StdDev | `stddev` and `count`: s √((n - 1) / n), 0 for one sample (see below) |
 | MinMax | queries `min` and `max` separately, a pair per bucket |
 
 **Other aggregates (`BucketFill`)**: every aggregate except Average and Count gives every bucket a point, like Average does. Ignition fills a bucket without a point with a neighbouring value marked Good, so a Bad stretch, the time before the first sample and the empty buckets of a tag stored on change read a value that was never there (Good 7 at 10:00:05 and 8 at 10:00:45, LastValue in 10 s buckets, read `7, 8, 8, 8, 8, 8` instead of `7, 7, 7, 7, 8, 8`).
@@ -332,6 +332,7 @@ Extends `AbstractQueryEngine`. Handles all data retrieval from Factry.
 - Requests per pen: Factry's `last` per status (which is the LastValue itself) says which statuses each bucket holds and the value held after it, plus the aggregate per status (two for MinMax). The last sample before a bucket is read when the range starts with empty buckets (once), after a bucket holding several statuses when an empty bucket follows, and for LastValue at the end of a bucket with several Good statuses: up to 10 such reads per pen. Past that an empty bucket after a bucket holding several statuses is Bad (a gap is safer than a guess), and such a LastValue is Uncertain.
 - A String tag has only LastValue and Count: Factry 8.2.3 refuses every other aggregate of a string measurement, so those read null with `Bad_Unsupported` on every row, like Sum of a DateTime tag.
 - Count counts the Good samples in each bucket, summed over Good statuses. A bucket without Good samples counts 0 (Good), as Ignition's own Count does; Ignition would otherwise copy a neighbour's count into it. Buckets from now on are Bad. One request per pen.
+- Variance and StdDev: Ignition's are the population values (they divide by the number of samples, `VarianceAggregate`); Factry's `stddev` is the sample standard deviation (divides by one less) and has no value for a bucket with one sample, and Factry 8.2.3 has no `variance` at all (it refuses it, checked live). So a `count` of the Good samples per bucket is read too and the `stddev` scaled; one sample gives 0, as in Ignition. Samples 1, 2, 3 give Variance 0.667 and StdDev 0.816 (Factry's `stddev` alone says 1.0).
 - Count of a tag that is not numeric (String, DateTime) gets a number column: Ignition types a Count column after the tag, so it would otherwise return the text `"600"` or a Date in 1970
 - Time window → Go duration conversion (e.g., `TimeWindow(2h30m)` → `"2h30m"`, 600 ms → `"600ms"`). The bucket length in milliseconds and the period string come from the same number.
 

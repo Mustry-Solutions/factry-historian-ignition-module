@@ -1436,15 +1436,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     good.add(Map.of()); // LastValue takes its value from the buckets below.
                     continue;
                 }
-                // Factry has no variance aggregate (it refuses "variance", checked live on 8.2.3);
-                // its stddev is the sample standard deviation, so its square is the variance.
-                boolean variance = "variance".equals(function);
-                Map<Long, Object> values = goodAggregate(function, grpcClient.queryTimeseries(withRange(
-                        perStatusRequest(uuid, variance ? "stddev" : function, period), startMs, endMs).build()));
-                if (variance) {
-                    values.replaceAll((ts, v) -> v instanceof Number n ? n.doubleValue() * n.doubleValue() : v);
+                if ("variance".equals(function) || "stddev".equals(function)) {
+                    good.add(populationSpread(uuid, function, period, startMs, endMs));
+                    continue;
                 }
-                good.add(values);
+                good.add(goodAggregate(function, grpcClient.queryTimeseries(withRange(
+                        perStatusRequest(uuid, function, period), startMs, endMs).build())));
             }
         }
 
@@ -1537,6 +1534,34 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             case "mean" -> held instanceof Boolean b ? (b ? 1.0 : 0.0) : held;
             default -> held;
         };
+    }
+
+    /**
+     * Ignition's Variance or StdDev per bucket, over the Good samples. Ignition divides by the
+     * number of samples (population variance, VarianceAggregate); Factry's stddev divides by one
+     * less (sample standard deviation) and has no value for a single sample, and Factry has no
+     * variance at all (it refuses "variance", checked live on 8.2.3). So the Good samples are
+     * counted too and the stddev scaled: variance = s^2 (n - 1) / n, stddev = s sqrt((n - 1) / n),
+     * and 0 for one sample, as Ignition gives.
+     */
+    private Map<Long, Object> populationSpread(String uuid, String function, String period, long startMs, long endMs) {
+        Map<Long, Object> stddev = goodAggregate("stddev", grpcClient.queryTimeseries(withRange(
+                perStatusRequest(uuid, "stddev", period), startMs, endMs).build()));
+        Map<Long, Object> counts = goodAggregate("count", grpcClient.queryTimeseries(withRange(
+                perStatusRequest(uuid, "count", period), startMs, endMs).build()));
+        Map<Long, Object> out = new HashMap<>();
+        counts.forEach((ts, c) -> {
+            double n = ((Number) c).doubleValue();
+            Double value = n == 1 ? Double.valueOf(0.0)
+                    : stddev.get(ts) instanceof Number s ? Double.valueOf("variance".equals(function)
+                            ? s.doubleValue() * s.doubleValue() * (n - 1) / n
+                            : s.doubleValue() * Math.sqrt((n - 1) / n))
+                    : null;
+            if (value != null) {
+                out.put(ts, value);
+            }
+        });
+        return out;
     }
 
     /**
