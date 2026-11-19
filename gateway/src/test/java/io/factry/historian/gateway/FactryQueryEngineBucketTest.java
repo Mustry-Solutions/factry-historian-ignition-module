@@ -357,4 +357,31 @@ class FactryQueryEngineBucketTest {
         }
         assertColumn(read(AggregationMode.LastValue), "run", "run", "run", "run", "run", "run");
     }
+
+    @Test
+    void lastValue_withSeveralGoodStatuses_ignoresSamplesAfterNow() {
+        String u = factry.addMeasurement("default/out", "number");
+        factry.add(u, T0 + 1_000, 3, "Good");
+        factry.add(u, T0 + 2_000, 5, "GoodLocalOverride");
+        // Stamped in the future, as a collector with a clock ahead can store it.
+        factry.add(u, T0 + 8_000, 7, "Good");
+
+        FactryQueryEngineAverageTest.Recorder rec = aggregated(AggregationMode.LastValue, T0 + 5_000);
+
+        assertEquals(Arrays.asList(5.0, BAD, BAD, BAD, BAD, BAD), values(rec));
+    }
+
+    @Test
+    void variance_isTheSquaredStandardDeviation() throws Exception {
+        // Factry has no variance aggregate; before the fix every Variance pen read Bad_Failure.
+        String u = factry.addMeasurement("default/out", "number");
+        factry.add(u, T0 + 1_000, 1, "Good");
+        factry.add(u, T0 + 2_000, 2, "Good");
+        factry.add(u, T0 + 3_000, 3, "Good");
+
+        AverageHistoryQuery.Dataset ds = read(AggregationMode.Variance);
+
+        assertEquals(1.0, ((Number) ds.rows.get(0)[1]).doubleValue(), 1e-9, ds::toString);
+        assertTrue(ds.qualities.get(0)[1].isGood(), ds::toString);
+    }
 }
