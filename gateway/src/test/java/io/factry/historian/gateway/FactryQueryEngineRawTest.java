@@ -199,10 +199,13 @@ class FactryQueryEngineRawTest {
     }
 
     @Test
-    void readOverTheMaxRawPointsCapFails() {
+    void readOverTheMaxRawPointsCapEndsWithOnErrorAndNoPoints() {
         // A dense pen and a sparse one. Cut at the cap, the dense pen would stop after a few
         // minutes while the sparse one runs on, and Ignition would repeat the dense pen's last
         // value with Good quality to the end of the range.
+        // This checks what the engine hands the processor. Ignition's reader ignores onError, so
+        // on its own this shows as an empty result; the error reaches the user once read failures
+        // also throw (#50).
         String dense = factry.addMeasurement("default/a", "number");
         String sparse = factry.addMeasurement("default/b", "number");
         for (int s = 0; s < 600; s++) {
@@ -216,7 +219,7 @@ class FactryQueryEngineRawTest {
 
         Recorder rec = query(null, key("a"), key("b"));
 
-        assertNotNull(rec.error, "a read over the cap must fail, not return part of the range");
+        assertNotNull(rec.error, "a read over the cap must end with onError, not return part of the range");
         assertTrue(rec.error.getMessage().contains("query.raw.max.points"), rec.error.getMessage());
         assertTrue(rec.error.getMessage().contains("200"), rec.error.getMessage());
         assertTrue(rec.points.isEmpty(), "no partial result");
@@ -255,7 +258,8 @@ class FactryQueryEngineRawTest {
         Recorder rec = assertTimeoutPreemptively(Duration.ofSeconds(30), () -> query(null, key("a")));
 
         // Only the first page is real. Returning it alone would show the pen ending early.
-        assertNotNull(rec.error, "a Factry that repeats pages must fail the read");
+        // As above, this checks onError on the processor, not what Ignition shows.
+        assertNotNull(rec.error, "a Factry that repeats pages must end the read with onError");
         assertTrue(rec.error.getMessage().contains("offset"), rec.error.getMessage());
         assertTrue(rec.points.isEmpty(), "no partial result");
         assertEquals(2, factry.queries.size(), "should stop at the first page that does not move on");
