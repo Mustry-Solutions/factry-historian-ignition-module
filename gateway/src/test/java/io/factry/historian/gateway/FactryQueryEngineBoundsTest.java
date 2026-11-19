@@ -96,10 +96,30 @@ class FactryQueryEngineBoundsTest {
     }
 
     @Test
+    void queryRawPoints_inIgnition836_returnsTheValuesAroundTheRangeOnlyWhenTheOptionsAskForThem() throws Exception {
+        onChangeTag("out");
+        QualifiedPath path = QualifiedPath.parseSafe("sys:gw:/prov:default:/tag:out");
+
+        // queryRawPoints(paths, startTime, endTime): Ignition turns its options into legacy query
+        // flags and runs the legacy path, which sets "no seed values". includeBounds=True only
+        // makes the range inclusive, and that is dropped on the way. The Core Historian gives no
+        // bounds there either.
+        assertEquals(List.of("30=6.0"), rows(AverageHistoryQuery.rawPoints(engine(),
+                RawQueryOptions.builder().startTime(T0).endTime(END).addQueryKey(new RawQueryKey(path)).build())));
+        assertEquals(List.of("30=6.0"), rows(AverageHistoryQuery.rawPoints(engine(),
+                RawQueryOptions.builder().startTime(T0).endTime(END).addQueryKey(new RawQueryKey(path))
+                        .includeBounds().build())));
+        // A RawQueryOptions passed as its first argument can ask for them (YES_BOUND_VALUES).
+        assertEquals(List.of("-600=5.0", "30=6.0", "120=7.0"), rows(AverageHistoryQuery.rawPoints(engine(),
+                RawQueryOptions.builder().startTime(T0).endTime(END).addQueryKey(new RawQueryKey(path))
+                        .addPropertyValue(HistorianProperties.YES_BOUND_VALUES, true).build())));
+    }
+
+    @Test
     void theQueryEngineApi_returnsTheValuesAroundTheRangeUnlessTheOptionsSayNo() {
         onChangeTag("out");
 
-        // system.historian.queryRawPoints sets no seed option, so the bounds come by default.
+        // A caller of the query engine itself (another module) that sets no option gets the bounds.
         assertEquals(List.of("-600=5.0", "30=6.0", "120=7.0"),
                 stream(RawQueryOptions.builder().startTime(T0).endTime(END).addQueryKey(key("out")).build()));
         assertEquals(List.of("30=6.0"), stream(RawQueryOptions.builder().startTime(T0).endTime(END)
