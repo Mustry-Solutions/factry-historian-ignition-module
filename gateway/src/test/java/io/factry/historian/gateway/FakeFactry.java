@@ -53,6 +53,11 @@ class FakeFactry extends FactryGrpcClient {
     AssetProperties assetProperties = AssetProperties.getDefaultInstance();
     /** When set, asset property fetches fail with this gRPC status. */
     Status assetPropertiesFailure = null;
+    /** The answer to every history query. */
+    QueryTimeseriesResponse queryResponse = QueryTimeseriesResponse.getDefaultInstance();
+    /** How many of the next history queries fail with {@link #queryFailure}. */
+    int queryFailures = 0;
+    Status queryFailure = Status.UNAVAILABLE;
 
     FakeFactry() {
         super("localhost", 1, OWN, "token", false, false, null);
@@ -130,7 +135,11 @@ class FakeFactry extends FactryGrpcClient {
 
     @Override
     public QueryTimeseriesResponse queryTimeseries(QueryTimeseriesRequest request) {
-        return QueryTimeseriesResponse.getDefaultInstance();
+        if (queryFailures > 0) {
+            queryFailures--;
+            throw new StatusRuntimeException(queryFailure);
+        }
+        return queryResponse;
     }
 
     @Override
