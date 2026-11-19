@@ -21,9 +21,11 @@ import java.util.function.LongFunction;
  *
  * <p>The status held at an empty bucket comes from the bucket before it. After a bucket that
  * holds more than one status the order of its samples is unknown, so the last sample before the
- * empty bucket is read. Those reads are capped per pen; past the cap such a bucket's last Good
- * value is held as Good. Before the first bucket with samples, the sample before the range says
- * what is held; that read is not capped and happens at most once.
+ * empty bucket is read. For LastValue a bucket with several Good statuses is read the same way,
+ * since Factry's {@code last} per status does not say which Good sample came last. Those reads
+ * are capped per pen. Past the cap the empty bucket is Bad (a gap is safer than a guess) and such
+ * a LastValue is not exact. Before the first bucket with samples, the sample before the range
+ * says what is held; that read is not capped and happens at most once.
  *
  * <p>Free of Ignition SDK and gRPC types so it can be unit-tested without Factry.
  */
@@ -60,56 +62,87 @@ final class BucketFill {
 
     enum Kind { GOOD_SAMPLES, HELD, BAD }
 
-    /** One bucket; {@code held} is the value held for {@link Kind#HELD}, else null. */
-    record Bucket(long start, Kind kind, Object held) {}
+    /**
+     * One bucket. {@code value} is the value held for {@link Kind#HELD}, and the last Good value
+     * for {@link Kind#GOOD_SAMPLES}. {@code exact} is false when that last Good value is a guess
+     * between several Good statuses.
+     */
+    record Bucket(long start, Kind kind, Object value, boolean exact) {}
 
     /**
-     * @param statuses per bucket start, which statuses it holds (buckets without samples absent)
-     * @param before   the last sample before a time, of any status, or null when there is none
-     * @param maxReads most reads of {@code before} after a bucket that holds several statuses
+     * @param statuses       per bucket start, which statuses it holds (buckets without samples absent)
+     * @param before         the last sample of each status before a time; empty when there is none
+     * @param maxReads       most reads of {@code before} after the first bucket with samples
+     * @param resolveLastGood read which Good sample of a bucket with several Good statuses came
+     *                       last (LastValue needs it)
      * @return every bucket from {@code startMs} to {@code endMs}, in time order
      */
     static List<Bucket> fill(long startMs, long endMs, long periodMs, long nowMs,
-                             Map<Long, Status> statuses, LongFunction<Sample> before, int maxReads) {
+                             Map<Long, Status> statuses, LongFunction<List<Sample>> before, int maxReads,
+                             boolean resolveLastGood) {
         List<Bucket> out = new ArrayList<>();
         Sample held = null;
         // False until the status held is known: before the first bucket with samples, and after
         // a bucket that holds several statuses.
         boolean known = false;
-        // The last Good value of that bucket; null before the first bucket with samples.
-        Object mixedLastGood = null;
-        boolean mixedSeen = false;
+        boolean started = false;
         int reads = 0;
         for (long b = startMs; b < endMs; b += periodMs) {
             if (b >= nowMs) {
                 // Nothing is stored yet; Ignition's own aggregates have no value after now.
-                out.add(new Bucket(b, Kind.BAD, null));
+                out.add(new Bucket(b, Kind.BAD, null, true));
                 continue;
             }
             Status st = statuses.get(b);
             if (st == null || (!st.hasGood && !st.hasNotGood)) {
                 if (!known) {
-                    if (!mixedSeen || reads < maxReads) {
-                        held = before.apply(b);
-                        reads += mixedSeen ? 1 : 0;
+                    if (!started) {
+                        held = latest(before.apply(b), false);
+                    } else if (reads < maxReads) {
+                        reads++;
+                        held = latest(before.apply(b), false);
                     } else {
-                        held = new Sample(b, mixedLastGood, true);
+                        held = null;
                     }
                     known = true;
                 }
                 out.add(held != null && held.good()
-                        ? new Bucket(b, Kind.HELD, held.value())
-                        : new Bucket(b, Kind.BAD, null));
+                        ? new Bucket(b, Kind.HELD, held.value(), true)
+                        : new Bucket(b, Kind.BAD, null, true));
                 continue;
             }
-            out.add(new Bucket(b, st.hasGood ? Kind.GOOD_SAMPLES : Kind.BAD, null));
-            if (st.isMixed()) {
+            started = true;
+            Object lastGood = st.lastGood;
+            boolean exact = st.goodSeries <= 1;
+            if (!exact && resolveLastGood && reads < maxReads) {
+                reads++;
+                List<Sample> last = before.apply(Math.min(b + periodMs, endMs));
+                Sample good = latest(last, true);
+                if (good != null) {
+                    lastGood = good.value();
+                    exact = true;
+                }
+                held = latest(last, false);
+                known = held != null;
+            } else if (st.isMixed()) {
                 known = false;
-                mixedSeen = true;
-                mixedLastGood = st.lastGood;
             } else {
                 held = new Sample(b, st.hasGood ? st.lastGood : null, st.hasGood);
                 known = true;
+            }
+            out.add(st.hasGood
+                    ? new Bucket(b, Kind.GOOD_SAMPLES, lastGood, exact)
+                    : new Bucket(b, Kind.BAD, null, true));
+        }
+        return out;
+    }
+
+    /** The latest of {@code samples} (only Good ones when {@code good}), or null. */
+    private static Sample latest(List<Sample> samples, boolean good) {
+        Sample out = null;
+        for (Sample s : samples) {
+            if ((!good || s.good()) && (out == null || s.ts() > out.ts())) {
+                out = s;
             }
         }
         return out;

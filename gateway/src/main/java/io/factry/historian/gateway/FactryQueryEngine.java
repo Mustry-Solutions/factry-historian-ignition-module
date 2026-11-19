@@ -833,6 +833,13 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     String aggName = key.aggregationType().name();
                     boolean dateTime = isDateTime(keyToNode.get(key));
 
+                    DataType dataType = keyToNode.get(key).dataType().orElse(DataType.Float8);
+                    if (dataType == DataType.String && !STRING_AGGREGATES.contains(aggName)) {
+                        // Factry refuses every other aggregate of a string measurement.
+                        logger.debug("Aggregate " + aggName + " is not supported for String tag: " + tagPath);
+                        failures.put(key, QualityCode.Bad_Unsupported);
+                        continue;
+                    }
                     if (dateTime && !DATE_AGGREGATES.contains(aggName)) {
                         // A sum or spread of dates is not a date; Count is the only number that fits.
                         logger.debug("Aggregate " + aggName + " is not supported for DateTime tag: " + tagPath);
@@ -845,11 +852,6 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     boolean asDate = dateTime && !"Count".equals(aggName);
 
                     String factryFunction = "MinMax".equals(aggName) ? null : toFactryAggregateFunction(aggName);
-                    DataType dataType = keyToNode.get(key).dataType().orElse(DataType.Float8);
-                    if (TIME_WEIGHTED_AVERAGE.equals(factryFunction) && dataType == DataType.String) {
-                        // Factry's twa only takes numbers, and a String has no average.
-                        factryFunction = "mean";
-                    }
                     if (TIME_WEIGHTED_AVERAGE.equals(factryFunction) && options.getTimeRange().isPresent()) {
                         pointCount += queryTimeWeightedAverage(uuid, source, key, period,
                                 periodMs, dataType == DataType.Boolean, asDate, options, pts);
@@ -1336,20 +1338,22 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 }
             }
             for (String function : functions) {
-                good.add("last".equals(function) ? lastGood(statuses)
+                // LastValue takes its value from the buckets below.
+                good.add("last".equals(function) ? Map.of()
                         : goodAggregate(function, grpcClient.queryTimeseries(withRange(
                                 perStatusRequest(uuid, function, period), startMs, endMs).build())));
             }
         }
 
         List<BucketFill.Bucket> buckets = BucketFill.fill(startMs, rangeEndMs, periodMs, nowMs, statuses,
-                ts -> lastSampleBefore(uuid, ts), RAW_BUDGET.seedReadsPerPen());
+                ts -> samplesBefore(uuid, ts), RAW_BUDGET.seedReadsPerPen(), functions.contains("last"));
         int count = 0;
         for (BucketFill.Bucket bucket : buckets) {
             for (int f = 0; f < functions.size(); f++) {
+                String function = functions.get(f);
                 Object value = switch (bucket.kind()) {
-                    case GOOD_SAMPLES -> good.get(f).get(bucket.start());
-                    case HELD -> heldValue(functions.get(f), bucket.held());
+                    case GOOD_SAMPLES -> "last".equals(function) ? bucket.value() : good.get(f).get(bucket.start());
+                    case HELD -> heldValue(function, bucket.value());
                     case BAD -> null;
                 };
                 // No value is a Bad point. Not NaN: the Power Chart streams history as strict
@@ -1360,7 +1364,9 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 }
                 out.add(AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
                         .value(value == null ? null : asDate ? toDate(value) : value)
-                        .quality(value == null ? QualityCode.Bad : QualityCode.Good)
+                        .quality(value == null ? QualityCode.Bad
+                                : exact(function, bucket, statuses.get(bucket.start())) ? QualityCode.Good
+                                : QualityCode.Uncertain)
                         .timestamp(Instant.ofEpochMilli(bucket.start()))
                         .build());
                 count++;
@@ -1399,6 +1405,23 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     }
 
     /**
+     * Whether a bucket's value is right. With several Good statuses in one bucket ("Good",
+     * "GoodLocalOverride"; only data from other collectors has them), Factry aggregates each on
+     * its own: min, max, sum and count combine exactly, a mean, spread, variance or standard
+     * deviation does not, and LastValue is exact only once the latest Good sample was read.
+     */
+    private static boolean exact(String function, BucketFill.Bucket bucket, BucketFill.Status status) {
+        if (bucket.kind() != BucketFill.Kind.GOOD_SAMPLES) {
+            return true;
+        }
+        return switch (function) {
+            case "last" -> bucket.exact();
+            case "min", "max", "sum", "count" -> true;
+            default -> status == null || status.goodSeries <= 1;
+        };
+    }
+
+    /**
      * What an empty bucket of a tag holding a Good value gets, as Ignition's own aggregates
      * answer for a block without samples: the value itself, a spread of 0, and no sum, variance
      * or standard deviation (null, so a Bad point).
@@ -1411,17 +1434,6 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             case "mean" -> held instanceof Boolean b ? (b ? 1.0 : 0.0) : held;
             default -> held;
         };
-    }
-
-    /** The last Good value per bucket, from the {@code last} per status. */
-    private static Map<Long, Object> lastGood(Map<Long, BucketFill.Status> statuses) {
-        Map<Long, Object> out = new HashMap<>();
-        statuses.forEach((ts, st) -> {
-            if (st.hasGood) {
-                out.put(ts, st.lastGood);
-            }
-        });
-        return out;
     }
 
     /**
@@ -1463,18 +1475,16 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         return a;
     }
 
-    /** The last sample before {@code ts}, of any status, or null when there is none. */
-    private BucketFill.Sample lastSampleBefore(String uuid, long ts) {
-        BucketFill.Sample last = null;
+    /** The last sample of each status before {@code ts}. */
+    private List<BucketFill.Sample> samplesBefore(String uuid, long ts) {
+        List<BucketFill.Sample> out = new ArrayList<>();
         for (Series series : grpcClient.queryTimeseries(sampleBeforeRequest(uuid, ts)).getSeriesList()) {
             boolean isGood = isGoodStatus(seriesStatus(series));
             for (SeriesPoint pt : series.getDataPointsList()) {
-                if (last == null || pt.getTimestamp() > last.ts()) {
-                    last = new BucketFill.Sample(pt.getTimestamp(), protoValueToJava(pt.getValue()), isGood);
-                }
+                out.add(new BucketFill.Sample(pt.getTimestamp(), protoValueToJava(pt.getValue()), isGood));
             }
         }
-        return last;
+        return out;
     }
 
     static String toFactryAggregateFunction(String name) {
@@ -1659,6 +1669,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     private static boolean isGoodStatus(String status) {
         return statusToQuality(status) == QualityCode.Good;
     }
+
+    /**
+     * Aggregates of a String tag: Factry 8.2.3 refuses every other aggregate of a string
+     * measurement (checked live), so those read Bad_Unsupported, like a Sum of dates.
+     */
+    private static final Set<String> STRING_AGGREGATES = Set.of("LastValue", "Count");
 
     /**
      * Aggregates that still mean something for a DateTime tag. Factry stores dates as epoch
