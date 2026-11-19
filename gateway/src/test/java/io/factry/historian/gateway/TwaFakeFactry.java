@@ -52,9 +52,19 @@ class TwaFakeFactry extends FactryGrpcClient {
 
     /** Adds a measurement ("number" or "boolean") and returns its UUID. */
     String addMeasurement(String name, String datatype) {
+        return addMeasurement(Measurement.newBuilder().setName(name).setDatatype(datatype));
+    }
+
+    /** Adds a number measurement holding an Ignition DateTime tag (epoch ms), as the module creates it. */
+    String addDateTimeMeasurement(String name) {
+        return addMeasurement(Measurement.newBuilder().setName(name).setDatatype("number")
+                .setSettings(Struct.newBuilder().putFields(MeasurementCache.IGNITION_DATA_TYPE_SETTING,
+                        Value.newBuilder().setStringValue("DateTime").build())));
+    }
+
+    private String addMeasurement(Measurement.Builder m) {
         String uuid = "uuid-" + (measurements.size() + 1);
-        measurements.put(uuid, Measurement.newBuilder().setUuid(uuid).setName(name)
-                .setStatus("Active").setDatatype(datatype).setCollectorUUID("collector").build());
+        measurements.put(uuid, m.setUuid(uuid).setStatus("Active").setCollectorUUID("collector").build());
         points.put(uuid, new ArrayList<>());
         return uuid;
     }

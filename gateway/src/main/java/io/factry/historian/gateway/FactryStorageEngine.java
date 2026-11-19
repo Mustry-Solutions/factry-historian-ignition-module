@@ -58,10 +58,13 @@ public class FactryStorageEngine extends AbstractStorageEngine {
             Status.Code code = e.getStatus().getCode();
             if (code == Status.Code.UNAVAILABLE || code == Status.Code.DEADLINE_EXCEEDED) {
                 logger.warn("Connection error storing points, S&F will retry: " + e.getMessage());
-                return StorageResult.exception(e, points);
+            } else {
+                logger.error("Factry refused " + points.size() + " points (" + code + "), S&F keeps them"
+                        + " and retries: " + e.getMessage());
             }
-            logger.error("Server rejected points (" + code + "): " + e.getMessage());
-            return StorageResult.failure(points);
+            // Always attach the error. TagHistoryDataSinkBridge only keeps a batch in S&F when the
+            // result carries one; a failure without an error counts as handled and the points are lost.
+            return StorageResult.exception(e, points);
         } catch (Exception e) {
             metrics.recordStoreError();
             logger.error("Unexpected error storing points via gRPC", e);
@@ -96,9 +99,15 @@ public class FactryStorageEngine extends AbstractStorageEngine {
 
     @Override
     protected StorageResult<SourceChangePoint> applySourceChanges(List<SourceChangePoint> changes) {
-        // Measurement lifecycle is managed by the Factry platform, not by this collector.
-        // No retirement action needed — just acknowledge the changes.
-        logger.debug("applySourceChanges called with " + changes.size() + " changes (no-op for Factry)");
+        // Measurement lifecycle is managed by the Factry platform, not by this collector. Only the
+        // cached metadata of retired or renamed tags is dropped, so the cache does not grow with them.
+        logger.debug("applySourceChanges called with " + changes.size() + " changes");
+        for (SourceChangePoint change : changes) {
+            // A retirement has no new source; a rename has a different one.
+            if (change.oldSource() != null && !change.oldSource().equals(change.newSource())) {
+                measurementCache.forgetMetadata(TagPathUtil.storagePathToStoredPath(change.oldSource().toString()));
+            }
+        }
         return StorageResult.success(changes);
     }
 
@@ -111,7 +120,7 @@ public class FactryStorageEngine extends AbstractStorageEngine {
         // then silently drops the points (failure has no error, so no DataStorageException is thrown).
         //
         // Buffering during downtime is handled by toggling the S&F sink's accepting state
-        // in FactryHistoryProvider.getStatus(). When the sink is not accepting, S&F keeps
+        // in FactryHistoryProvider.refreshConnectionStatus(). When the sink is not accepting, S&F keeps
         // points in pending without attempting to forward them.
         //
         // Verified by decompiling AbstractStorageEngine and TagHistoryDataSinkBridge

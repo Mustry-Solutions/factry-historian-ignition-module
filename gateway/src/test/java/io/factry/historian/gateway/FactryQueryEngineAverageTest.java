@@ -325,4 +325,19 @@ class FactryQueryEngineAverageTest {
         assertValues(Map.of(t("08:00"), 0.5, t("09:00"), 0.1), rec.values());
         assertEquals(Map.of(t("08:00"), QualityCode.Uncertain, t("09:00"), QualityCode.Good), rec.qualities());
     }
+
+    @Test
+    void dateTimeAverage_isTimeWeightedAndADate() {
+        // A DateTime tag is a number measurement of epoch milliseconds. Its Average goes through
+        // the time-weighted path like any number and comes back as a Date.
+        String u = factry.addDateTimeMeasurement("default/stamp");
+        factry.add(u, t("07:00"), t("01:00"), "Good");
+        factry.add(u, t("08:30"), t("03:00"), "Good");
+
+        Recorder rec = average(engine(), "stamp", t("08:00"), t("09:00"), TimeWindow.ofHours(1));
+
+        assertEquals(1, rec.points.size());
+        assertEquals(new java.util.Date(t("02:00")), rec.points.get(0).value());
+        assertEquals(1, factry.aggregateQueries("twa").size());
+    }
 }
