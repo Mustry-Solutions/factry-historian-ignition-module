@@ -168,10 +168,11 @@ final class GoodTimeAverage {
                     && !(heldGood && st.hasNotGood) && !(heldNotGood && st.hasGood);
             // Without a twa a Good bucket is known only when nothing changes inside it: no
             // samples, or only samples equal to the value held (or the first ever).
+            // Boxed on purpose: a primitive branch would unbox the null one and throw.
             Double good = twa.get(start) != null ? twa.get(start)
-                    : st.isEmpty() && heldGood ? held.value()
-                    : heldGood && st.onlyGood(held.value()) ? held.value()
-                    : held == null && !unknown && st.onlyGood(st.sameGood) ? st.sameGood
+                    : st.isEmpty() && heldGood ? Double.valueOf(held.value())
+                    : heldGood && st.onlyGood(held.value()) ? Double.valueOf(held.value())
+                    : held == null && !unknown && st.onlyGood(st.sameGood) ? Double.valueOf(st.sameGood)
                     : null;
             if (consistent && !heldGood && !st.hasGood) {
                 // Not Good the whole bucket: a gap.

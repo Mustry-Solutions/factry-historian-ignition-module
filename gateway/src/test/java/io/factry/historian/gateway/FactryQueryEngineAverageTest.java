@@ -306,4 +306,21 @@ class FactryQueryEngineAverageTest {
         assertEquals(1, factry.rawQueries().size());
         assertEquals(60, factry.rawAnswerPoints.get(0)); // only the last bucket, at 10 s
     }
+
+    @Test
+    void booleanBucketBeyondTheBudget_fallsBackToItsMean() {
+        // 08:00-09:00 toggles every 50 ms (72,000 samples, more than one raw request may hold);
+        // 09:00-10:00 is on for 6 minutes. The first falls back to the sample mean.
+        String u = factry.addMeasurement("default/run", "boolean");
+        for (long ts = t("08:00"); ts < t("09:00"); ts += 50) {
+            factry.add(u, ts, (ts / 50) % 2 == 0, "Good");
+        }
+        factry.add(u, t("09:00"), false, "Good");
+        factry.add(u, t("09:30"), true, "Good");
+        factry.add(u, t("09:36"), false, "Good");
+
+        Recorder rec = average(engine(), "run", t("08:00"), t("10:00"), TimeWindow.ofHours(1));
+
+        assertValues(Map.of(t("08:00"), 0.5, t("09:00"), 0.1), rec.values());
+    }
 }
