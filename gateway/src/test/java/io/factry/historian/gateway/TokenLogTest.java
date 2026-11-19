@@ -74,6 +74,24 @@ class TokenLogTest {
         }
     }
 
+    @Test
+    void levelClearedByALogbackReloadIsSetAgainBeforeTheNextCall() {
+        FactryGrpcClient client = new FactryGrpcClient(InetAddress.getLoopbackAddress().getHostAddress(),
+                factry.port(), "collector", TOKEN, false, false, null);
+        try {
+            client.getCollectors();
+            frameLogger.setLevel(null); // what a reload does to a level set in code
+            String log;
+            try (LogCapture capture = new LogCapture("io.grpc", Level.DEBUG)) {
+                client.getCollectors();
+                log = capture.text();
+            }
+            assertFalse(log.contains(SIGNATURE), "the token is in the log after a logback reload");
+        } finally {
+            client.shutdown();
+        }
+    }
+
     private void getCollectors() {
         FactryGrpcClient client = new FactryGrpcClient(InetAddress.getLoopbackAddress().getHostAddress(),
                 factry.port(), "collector", TOKEN, false, false, null);
