@@ -326,6 +326,9 @@ public class FactryGrpcClient {
         try {
             shutdownChannel();
             buildChannel(host, port, collectorUUID, token, useTls, skipTlsVerification, customCaCert);
+            // New settings may point at another Factry, or the same one after an upgrade, so
+            // gzip is tried again instead of staying off for the life of the client.
+            writeGzip.set(WRITE_GZIP);
             logger.info("gRPC client reconfigured ({}), target={}:{}, collectorUUID={}",
                     tlsLabel(useTls, skipTlsVerification), host, port, collectorUUID);
         } finally {

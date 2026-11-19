@@ -15,6 +15,7 @@ import io.factry.historian.proto.GetMeasurementsByFilterRequest;
 import io.factry.historian.proto.HistorianGrpc;
 import io.factry.historian.proto.Measurement;
 import io.factry.historian.proto.Measurements;
+import io.factry.historian.proto.Point;
 import io.factry.historian.proto.Points;
 import io.grpc.DecompressorRegistry;
 import io.grpc.Metadata;
@@ -209,6 +210,27 @@ class SlowLinkTest {
         client.createMeasurements(request.build());
 
         assertEquals(10_000, createdMeasurements.get());
+    }
+
+    @Test
+    void newSettingsTurnGzipBackOn() throws Exception {
+        Server noGzipServer = NettyServerBuilder.forPort(0)
+                .decompressorRegistry(DecompressorRegistry.emptyInstance())
+                .addService(ServerInterceptors.intercept(new SlowFactry(), new EncodingRecorder()))
+                .build().start();
+        Points points = Points.newBuilder().addPoints(Point.newBuilder().setMeasurementUUID("uuid")).build();
+        try {
+            client.reconfigure("localhost", noGzipServer.getPort(), "collector-uuid", "token", false, false, null);
+            client.createPoints(points);
+            assertNull(writeEncoding.get(), "gzip turned off by the fallback");
+
+            client.reconfigure("localhost", server.getPort(), "collector-uuid", "token", false, false, null);
+            client.createPoints(points);
+
+            assertEquals("gzip", writeEncoding.get(), "a settings save sends gzip again");
+        } finally {
+            noGzipServer.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
+        }
     }
 
     @Test
