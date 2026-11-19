@@ -557,9 +557,14 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             // and qualities, unless the query asks for none. An on-change tag then has a value at
             // the start of a trend, also when it did not change inside the range. Two requests for
             // all pens; a pen Factry refused has no column left to bound.
+            //
+            // Ignition 8.3.6 (historian 1.3.6) sets NO_SEED_VALUES on every raw read through its
+            // legacy query path (queryTagHistory), so there an explicit includeBoundingValues=True
+            // (YES_BOUND_VALUES) has to win over it, as in Ignition's legacy loaders.
+            boolean yesBounds = options.getExtendedPropertyValue(HistorianProperties.YES_BOUND_VALUES).orElse(false);
             if (options.getTimeRange().isPresent()
-                    && !options.getExtendedPropertyValue(HistorianProperties.NO_SEED_VALUES).orElse(false)
-                    && !options.getExtendedPropertyValue(HistorianProperties.NO_BOUND_VALUES).orElse(false)) {
+                    && !options.getExtendedPropertyValue(HistorianProperties.NO_BOUND_VALUES).orElse(false)
+                    && (yesBounds || !options.getExtendedPropertyValue(HistorianProperties.NO_SEED_VALUES).orElse(false))) {
                 List<String> bounded = new ArrayList<>(measurementUUIDs);
                 bounded.removeAll(refused);
                 long rangeStart = options.getTimeRange().get().startTime().toEpochMilli();

@@ -1,5 +1,6 @@
 package io.factry.historian.gateway;
 
+import com.inductiveautomation.historian.common.model.HistorianProperties;
 import com.inductiveautomation.historian.common.model.data.AtomicPoint;
 import com.inductiveautomation.historian.common.model.data.DataPointType;
 import com.inductiveautomation.historian.common.model.options.RawQueryKey;
@@ -82,16 +83,29 @@ class FactryQueryEngineBoundsTest {
     }
 
     @Test
-    void theValuesAroundTheRange_areReturnedUnlessTheOptionsSayNo() throws Exception {
+    void queryTagHistory_returnsTheValuesAroundTheRangeWhenAskedFor() throws Exception {
         onChangeTag("out");
 
-        // Before the fix only the 30 s row came back, whatever the flags.
-        for (int flags : new int[]{0, YES_BOUNDS}) {
-            assertEquals(List.of("-600=5.0", "30=6.0", "120=7.0"), rows(raw(-1, flags, "out")), "flags " + flags);
-        }
-        for (int flags : new int[]{NO_BOUNDS, NO_SEED}) {
+        // Before the fix: only the 30 s row. Ignition 8.3.6 sets "no seed values" on every raw
+        // read through this path, so includeBoundingValues=True must win over it.
+        assertEquals(List.of("-600=5.0", "30=6.0", "120=7.0"), rows(raw(-1, YES_BOUNDS, "out")));
+        // Left out or False: none, as Ignition's Core Historian answers the same call.
+        for (int flags : new int[]{0, NO_BOUNDS, NO_SEED}) {
             assertEquals(List.of("30=6.0"), rows(raw(-1, flags, "out")), "flags " + flags);
         }
+    }
+
+    @Test
+    void theQueryEngineApi_returnsTheValuesAroundTheRangeUnlessTheOptionsSayNo() {
+        onChangeTag("out");
+
+        // system.historian.queryRawPoints sets no seed option, so the bounds come by default.
+        assertEquals(List.of("-600=5.0", "30=6.0", "120=7.0"),
+                stream(RawQueryOptions.builder().startTime(T0).endTime(END).addQueryKey(key("out")).build()));
+        assertEquals(List.of("30=6.0"), stream(RawQueryOptions.builder().startTime(T0).endTime(END)
+                .addQueryKey(key("out")).addPropertyValue(HistorianProperties.NO_SEED_VALUES, true).build()));
+        assertEquals(List.of("30=6.0"), stream(RawQueryOptions.builder().startTime(T0).endTime(END)
+                .addQueryKey(key("out")).addPropertyValue(HistorianProperties.NO_BOUND_VALUES, true).build()));
     }
 
     @Test
@@ -100,7 +114,7 @@ class FactryQueryEngineBoundsTest {
         factry.add(u, T0 - 600_000, 5, "Good");
         factry.add(u, T0 + 120_000, 7, "Good");
 
-        assertEquals(List.of("-600=5.0", "120=7.0"), rows(raw(-1, 0, "out")));
+        assertEquals(List.of("-600=5.0", "120=7.0"), rows(raw(-1, YES_BOUNDS, "out")));
     }
 
     @Test
@@ -110,7 +124,7 @@ class FactryQueryEngineBoundsTest {
         factry.add(u, T0 - 600_000, 5, "Bad");
         factry.add(u, T0 + 30_000, 6, "Good");
 
-        AverageHistoryQuery.Dataset ds = raw(-1, 0, "out");
+        AverageHistoryQuery.Dataset ds = raw(-1, YES_BOUNDS, "out");
 
         assertEquals(List.of("-600=5.0", "30=6.0"), rows(ds));
         assertTrue(ds.qualities.get(0)[1].isBad(), ds::toString);
@@ -120,9 +134,9 @@ class FactryQueryEngineBoundsTest {
     void returnSize_countsTheValueBeforeTheStartFirst_andTheValueAfterTheEndLast() throws Exception {
         onChangeTag("out");
 
-        assertEquals(List.of("-600=5.0"), rows(raw(1, 0, "out")));
-        assertEquals(List.of("-600=5.0", "30=6.0"), rows(raw(2, 0, "out")));
-        assertEquals(List.of("-600=5.0", "30=6.0", "120=7.0"), rows(raw(10, 0, "out")));
+        assertEquals(List.of("-600=5.0"), rows(raw(1, YES_BOUNDS, "out")));
+        assertEquals(List.of("-600=5.0", "30=6.0"), rows(raw(2, YES_BOUNDS, "out")));
+        assertEquals(List.of("-600=5.0", "30=6.0", "120=7.0"), rows(raw(10, YES_BOUNDS, "out")));
     }
 
     @Test
@@ -137,40 +151,46 @@ class FactryQueryEngineBoundsTest {
 
         // The stream the engine hands to Ignition: Ignition's wide writer keeps only the first
         // row past the end, as it does for its own Core Historian.
-        List<Long> times = new ArrayList<>();
-        engine().query(RawQueryOptions.builder().startTime(T0).endTime(END)
-                .addQueryKey(key("a")).addQueryKey(key("b")).addQueryKey(key("c")).build(), new RawPointProcessor() {
-                    @Override
-                    public boolean onInitialize(ProcessingContext<RawQueryKey, DataPointType> context) {
-                        return true;
-                    }
+        List<String> stream = stream(RawQueryOptions.builder().startTime(T0).endTime(END)
+                .addQueryKey(key("a")).addQueryKey(key("b")).addQueryKey(key("c")).build());
 
-                    @Override
-                    public boolean onPointAvailable(RawQueryKey key, AtomicPoint<?> point) {
-                        times.add((point.timestamp().toEpochMilli() - T0) / 1000);
-                        return true;
-                    }
-
-                    @Override
-                    public void onKeyFailure(RawQueryKey key, QualityCode quality) {
-                    }
-
-                    @Override
-                    public void onError(QualityCode quality) {
-                    }
-
-                    @Override
-                    public void onError(Exception e) {
-                    }
-
-                    @Override
-                    public void onComplete() {
-                    }
-                });
-
-        assertEquals(List.of(-600L, -300L, 10L, 20L, 30L, 90L, 120L), times);
+        assertEquals(List.of("-600=5.0", "-300=1.0", "10=2.0", "20=9.0", "30=6.0", "90=3.0", "120=7.0"), stream);
         // One read of the range and one each for before and after, whatever the number of pens.
         assertEquals(3, factry.queries.size(), () -> factry.queries.toString());
+    }
+
+    /** "seconds from T0 = value" per point, in the order the engine hands them to Ignition. */
+    private List<String> stream(RawQueryOptions options) {
+        List<String> out = new ArrayList<>();
+        engine().query(options, new RawPointProcessor() {
+            @Override
+            public boolean onInitialize(ProcessingContext<RawQueryKey, DataPointType> context) {
+                return true;
+            }
+
+            @Override
+            public boolean onPointAvailable(RawQueryKey key, AtomicPoint<?> point) {
+                out.add((point.timestamp().toEpochMilli() - T0) / 1000 + "=" + point.value());
+                return true;
+            }
+
+            @Override
+            public void onKeyFailure(RawQueryKey key, QualityCode quality) {
+            }
+
+            @Override
+            public void onError(QualityCode quality) {
+            }
+
+            @Override
+            public void onError(Exception e) {
+            }
+
+            @Override
+            public void onComplete() {
+            }
+        });
+        return out;
     }
 
     private static RawQueryKey key(String tag) {
@@ -183,7 +203,7 @@ class FactryQueryEngineBoundsTest {
         String b = onChangeTag("b");
         factry.failingMeasurements.add(b);
 
-        AverageHistoryQuery.Dataset ds = raw(-1, 0, "a", "b");
+        AverageHistoryQuery.Dataset ds = raw(-1, YES_BOUNDS, "a", "b");
 
         assertEquals(List.of("-600=5.0", "30=6.0", "120=7.0"), rows(ds));
         for (QualityCode[] q : ds.qualities) {
@@ -196,6 +216,6 @@ class FactryQueryEngineBoundsTest {
         onChangeTag("out");
         refuseBounds = true;
 
-        assertEquals(List.of("30=6.0"), rows(raw(-1, 0, "out")));
+        assertEquals(List.of("30=6.0"), rows(raw(-1, YES_BOUNDS, "out")));
     }
 }
