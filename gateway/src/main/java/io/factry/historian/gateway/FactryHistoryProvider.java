@@ -11,6 +11,7 @@ import com.inductiveautomation.ignition.common.resourcecollection.ResourceBuilde
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 import com.inductiveautomation.ignition.gateway.model.ProfileStatus;
 import com.inductiveautomation.ignition.gateway.storeforward.StorageKey;
+import com.inductiveautomation.ignition.gateway.storeforward.StoreAndForwardManager;
 import com.inductiveautomation.ignition.gateway.storeforward.engine.EngineInformation;
 import com.inductiveautomation.ignition.gateway.storeforward.quarantine.QuarantineInterface;
 import com.inductiveautomation.ignition.gateway.storeforward.quarantine.QuarantinedDataInfo;
@@ -232,6 +233,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
     @Override
     public boolean handleNameChange(String newName) {
         logger.info("Historian name changed: {} -> {}", historianName, newName);
+        writeHealth.rename(newName);
         // Measurement names in Factry don't contain the historian profile name,
         // so no data migration is needed.
         // The framework updates the historianName field in AbstractHistorian.
@@ -276,8 +278,8 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
             return true;
         } catch (Exception e) {
             logger.error("Failed to apply settings change", e);
-            // Reflect the failure immediately rather than waiting for the next check.
-            writeHealth.settingsRejected(e);
+            // No status to set: on false, Ignition removes this instance and starts a new one
+            // with the new settings, whose own connection check then says what is wrong.
             return false;
         }
     }
@@ -380,16 +382,20 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
     }
 
     private void retryQuarantinedData(String engineName) {
+        retryQuarantinedData(context.getStoreAndForwardManager(), grpcClient.isConnected(), writeHealth, engineName);
+    }
+
+    static void retryQuarantinedData(StoreAndForwardManager storeAndForwardManager, boolean connected,
+                                     WriteHealth writeHealth, String engineName) {
         try {
             // checkConnection() re-enables forwarding once Factry is back; until then a retry
             // would only fail again.
-            if (!grpcClient.isConnected()) {
+            if (!connected) {
                 logger.debug("Factry server unreachable, not retrying quarantined data yet");
                 return;
             }
 
-            Optional<QuarantineInterface<?>> qi =
-                    context.getStoreAndForwardManager().getQuarantineInterface(engineName);
+            Optional<QuarantineInterface<?>> qi = storeAndForwardManager.getQuarantineInterface(engineName);
             if (qi.isPresent()) {
                 int count = qi.get().getQuarantinedCount();
                 if (count > 0) {
@@ -397,8 +403,13 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
                             .map(QuarantinedDataInfo::id)
                             .collect(Collectors.toList());
                     qi.get().retryQuarantined(ids);
-                    logger.info("Retrying {} quarantined data entries for S&F engine '{}'",
-                            ids.size(), engineName);
+                    // Every 30 s while Factry does not store writes: WriteHealth logs that story.
+                    String line = "Retrying {} quarantined data entries for S&F engine '{}'";
+                    if (writeHealth.writesFailing()) {
+                        logger.debug(line, ids.size(), engineName);
+                    } else {
+                        logger.info(line, ids.size(), engineName);
+                    }
                 }
             }
         } catch (Exception e) {
