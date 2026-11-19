@@ -664,8 +664,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      * so they show as a gap.
      *
      * <p>A Boolean is averaged the same way, as the fraction of Good time it was true: a run bit
-     * on for 1 minute of the hour averages 0.017 (as in Ignition's own historian), where
-     * Factry's sample {@code mean} says 0.5. Factry's twa refuses Booleans, so a
+     * on for 1 minute of the hour averages 0.017, where Factry's sample {@code mean} says 0.5. Factry's twa refuses Booleans, so a
      * per-status {@code mean} stands in: a Good mean of exactly 0 or 1 means the bucket never
      * changes value, and the bucket needs no raw read when that value is the one held. Other
      * buckets with samples are read raw; beyond the budget a bucket falls back to that mean.
