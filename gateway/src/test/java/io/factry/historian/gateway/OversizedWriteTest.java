@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -44,6 +45,13 @@ class OversizedWriteTest {
     /** Every CreatePoints message the server accepted. */
     private final List<Points> received = new CopyOnWriteArrayList<>();
     private volatile int maxMessageBytes;
+    /** How a too-large write is refused: Factry's own answer, or a proxy's HTTP 413 as grpc-java sees it. */
+    private volatile Status tooLarge;
+    /** Writes refused for their size. */
+    private final AtomicInteger refused = new AtomicInteger();
+    /** How long the server takes to answer a write, like a slow link. */
+    private volatile long answerDelayMs;
+    private FactryStorageEngine engine;
 
     /** Answers every lookup with an Active string measurement of that name, keeps every write. */
     private class Factry extends HistorianGrpc.HistorianImplBase {
@@ -64,11 +72,16 @@ class OversizedWriteTest {
         @Override
         public void createPoints(Points request, StreamObserver<CreatePointsReply> observer) {
             if (request.getSerializedSize() > maxMessageBytes) {
-                // Factry v8.2.3's answer, verbatim (grpc-go checks the size after decompression)
-                observer.onError(Status.RESOURCE_EXHAUSTED.withDescription(
-                        "grpc: received message after decompression larger than max " + maxMessageBytes)
-                        .asRuntimeException());
+                refused.incrementAndGet();
+                observer.onError(tooLarge.asRuntimeException());
                 return;
+            }
+            if (answerDelayMs > 0) {
+                try {
+                    Thread.sleep(answerDelayMs);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
             }
             received.add(request);
             observer.onNext(CreatePointsReply.getDefaultInstance());
@@ -79,6 +92,9 @@ class OversizedWriteTest {
     /** A Factry whose message limit is {@code maxBytes}. */
     private void startFactry(int maxBytes) throws Exception {
         maxMessageBytes = maxBytes;
+        // Factry v8.2.3's answer, verbatim (grpc-go checks the size after decompression)
+        tooLarge = Status.RESOURCE_EXHAUSTED.withDescription(
+                "grpc: received message after decompression larger than max " + maxBytes);
         server = NettyServerBuilder.forAddress(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0))
                 .maxInboundMessageSize(Integer.MAX_VALUE) // the limit is checked in createPoints
                 .addService(new Factry()).build().start();
@@ -102,8 +118,10 @@ class OversizedWriteTest {
                     }
                     throw new UnsupportedOperationException(method.getName());
                 });
-        FactryStorageEngine engine = new FactryStorageEngine(context, "factry", new FactryHistorianSettings(),
-                client, new MeasurementCache(), new HistorianMetrics());
+        if (engine == null) {
+            engine = new FactryStorageEngine(context, "factry", new FactryHistorianSettings(),
+                    client, new MeasurementCache(), new HistorianMetrics());
+        }
         return engine.storeAtomic(points).toCompletableFuture().get(30, TimeUnit.SECONDS);
     }
 
@@ -170,5 +188,48 @@ class OversizedWriteTest {
         assertFalse(sent.get(1).hasValue(), "no value for the point Factry cannot take");
         assertEquals(1_001L, sent.get(1).getTimestamp().getNanos() / 1_000_000 + sent.get(1).getTimestamp().getSeconds() * 1000);
         assertTrue(sent.get(2).getValue().getStringValue().startsWith("2:"));
+    }
+
+    /**
+     * A proxy in front of Factry that refuses a large body (nginx: 1 MiB by default) answers HTTP
+     * 413, which grpc-java reports as UNKNOWN "HTTP status code 413".
+     */
+    @Test
+    void aProxysHttp413IsTooLargeToo() throws Exception {
+        startFactry(64 * 1024);
+        tooLarge = Status.UNKNOWN.withDescription("HTTP status code 413\ninvalid content-type: text/html");
+
+        StorageResult<AtomicPoint<?>> result = store(textPoints(40, 10 * 1024));
+
+        assertEquals(StorageResult.Type.SUCCESS, result.type(), "error: " + result.error());
+        assertEquals(40, receivedPoints().size());
+    }
+
+    @Test
+    void theSizeThatWorkedIsRememberedForTheNextFlush() throws Exception {
+        startFactry(64 * 1024);
+        store(textPoints(40, 10 * 1024));
+        int refusedFirst = refused.get();
+        assertTrue(refusedFirst > 0, "the first flush finds the limit");
+
+        StorageResult<AtomicPoint<?>> result = store(textPoints(40, 10 * 1024));
+
+        assertEquals(StorageResult.Type.SUCCESS, result.type(), "error: " + result.error());
+        assertEquals(refusedFirst, refused.get(), "the second flush sends parts that fit at once");
+        assertEquals(80, receivedPoints().size());
+    }
+
+    /**
+     * The write deadline grew with the point count only: a part of a few big strings got about
+     * the base deadline, and on a slow link timed out on every retry.
+     */
+    @Test
+    void aBigPartGetsTimeToTravelOverASlowLink() throws Exception {
+        startFactry(64 * 1024 * 1024);
+        answerDelayMs = 2_500; // the test write deadline is 1 s plus 1 ms per point
+
+        StorageResult<AtomicPoint<?>> result = store(textPoints(1, 1024 * 1024));
+
+        assertEquals(StorageResult.Type.SUCCESS, result.type(), "error: " + result.error());
     }
 }

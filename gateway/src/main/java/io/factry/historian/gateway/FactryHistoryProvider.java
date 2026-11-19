@@ -47,7 +47,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
     private volatile String sfEngineName;
 
     /** The profile status, from the connection check (on the scheduler) and the writes. */
-    private final WriteHealth writeHealth = new WriteHealth();
+    private final WriteHealth writeHealth;
     private static final long STATUS_CHECK_MS = ModuleProperties.getStatusCacheMs();
 
     public FactryHistoryProvider(GatewayContext context, String historianName, FactryHistorianSettings settings) {
@@ -57,6 +57,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         settings.applyTokenDefaults(settings.getToken());
         settings.validate();
         this.metrics = new HistorianMetrics();
+        this.writeHealth = new WriteHealth(historianName);
 
         this.grpcClient = new FactryGrpcClient(
                 settings.getGrpcHost(),

@@ -255,9 +255,10 @@ Loads tuning values from `factry-historian.properties` (bundled in the .modl). T
 | Property | Default | Controls |
 |----------|---------|----------|
 | `grpc.write.deadline.seconds` | 3 | Timeout on store lookups; base timeout on `createPoints()` and `createMeasurements()` |
-| `grpc.write.deadline.ms.per.point` | 1 | Added to the `createPoints()` timeout per point, and to the `createMeasurements()` timeout per measurement |
+| `grpc.write.deadline.ms.per.point` | 1 | Added to the `createPoints()` timeout per point (plus time for its size, see `grpc.write.min.bytes.per.second`), and to the `createMeasurements()` timeout per measurement |
 | `grpc.write.deadline.max.seconds` | 30 | Ceiling on the `createPoints()` and `createMeasurements()` timeouts |
-| `grpc.write.max.message.bytes` | 4194304 | Largest `createPoints()` message; a bigger flush goes in several calls |
+| `grpc.write.max.message.bytes` | 4194304 | Largest `createPoints()` message (at least 64 KiB); a bigger flush goes in several calls |
+| `grpc.write.min.bytes.per.second` | 262144 | Link speed the `createPoints()` timeout allows for: the message's size divided by this is added to it, within the ceiling |
 | `grpc.write.gzip` | true | Send `createPoints()` gzip-compressed. If Factry has no gzip decompressor, the client resends the batch uncompressed and stops using gzip until the historian settings are saved |
 | `grpc.read.deadline.seconds` | 30 | Timeout on history queries, on each page of the measurement cache refresh, and on the asset and asset property fetches |
 | `grpc.call.deadline.seconds` | 10 | Timeout on the small calls: collectors, health, collector state |
@@ -282,7 +283,7 @@ Extends `AbstractStorageEngine`. Receives data points from Ignition's tag system
 3. Looks up (or auto-creates) the measurement UUID via `MeasurementCache`
 4. Converts value to protobuf `Value` (Boolean, Number, String)
 5. Maps Ignition `QualityCode` to status string ("Good", "Uncertain", "Bad")
-6. Sends `CreatePoints` gRPC call, in parts of at most `grpc.write.max.message.bytes`. Factry refuses a message over 64 MiB (`RESOURCE_EXHAUSTED`, checked after decompression) every time, so a part it still finds too large is sent in halves. A single point too large on its own can never be stored; it is sent as a Bad point without a value, with a WARN naming the tag and time. Factry v8.2.3 also answers OK to string values over about 1 MiB but does not store them.
+6. Sends `CreatePoints` gRPC call, in parts of at most `grpc.write.max.message.bytes`. Factry refuses a message over 64 MiB (`RESOURCE_EXHAUSTED`, checked after decompression) every time, so a part it still finds too large is sent in halves; so is a part a proxy refuses with HTTP 413 (grpc-java: `UNKNOWN` "HTTP status code 413"). Half the refused size is then the most per call until the settings are saved, so the next flush is not refused again. A single point too large on its own can never be stored; it is sent as a Bad point without a value, with a WARN naming the tag and time. Factry v8.2.3 also answers OK to string values over about 1 MiB but does not store them.
 7. On failure: distinguishes connection errors (UNAVAILABLE, DEADLINE_EXCEEDED) from server rejections. On NOT_FOUND or INVALID_ARGUMENT, evicts the measurement UUIDs and retries once (handles deleted measurements), except for NOT_FOUND "collector is deleted", which Factry answers to every call once the collector is gone
 
 Steps 2 to 7 live in `PointWriter`, which the engine calls; it uses no Ignition gateway classes, so unit tests can run it against a fake Factry client.
@@ -403,7 +404,9 @@ Extends `AbstractHistorian<FactryHistorianSettings>`. The orchestrator that ties
 
 **`getStorageEngine()`** — returns S&F bridge if configured, otherwise the direct storage engine
 
-**`getStatus()`** — from `WriteHealth`, fed by the scheduled connection check and by Factry's answer to every write: Errored when the last check failed, with the reason (`UNAVAILABLE`/`DEADLINE_EXCEEDED`: "Factry Historian unreachable"; `UNAUTHENTICATED`/`PERMISSION_DENIED`: "Factry refused the collector token"; `NOT_FOUND` "collector is deleted": "Collector deleted in Factry") and Factry's own text in the details; one WARN when the reason changes, one INFO when the check passes again. Also Errored ("Factry refuses writes") when Factry refused every write for 30 s while the check passes (for example `INTERNAL` while its InfluxDB is down), until it accepts one again. Not reaching Factry (`UNAVAILABLE`, `DEADLINE_EXCEEDED`) is not a refusal; the check covers it. Data handling does not change: store and forward keeps refused data and the quarantine retry sends it again. The gateway's Historians page shows an Errored profile as a red "Error" badge with the status details as its tooltip. One WARN when the refusals start counting, one INFO when Factry accepts a write again.
+**`getStatus()`** — from `WriteHealth`, fed by the scheduled connection check and by what becomes of every write. Errored when the last check failed, with the reason (`UNAVAILABLE`/`DEADLINE_EXCEEDED`: "Factry Historian unreachable"; `UNAUTHENTICATED`/`PERMISSION_DENIED`: "Factry refused the collector token"; `NOT_FOUND` "collector is deleted": "Collector deleted in Factry") and Factry's own text in the details; one WARN when the reason changes, one INFO when the check passes again. Also Errored ("Factry does not store writes") when every write failed over at least 30 s while the check passes, refused (for example `INTERNAL` while Factry's InfluxDB is down) or timed out (InfluxDB hanging), until a write is stored again. A failed check forgets the failed writes, so they are judged afresh after an outage. Data handling does not change: store and forward keeps the data and the quarantine retry sends it again. The gateway's Historians page shows an Errored profile as a red "Error" badge with the status details as its tooltip. Write logging, each line naming the profile: one WARN per new answer from Factry (repeats at DEBUG), one WARN when the status turns Errored, a summary of failed flushes and points about every 5 minutes while it lasts, and one INFO with the totals when writes are stored again.
+
+With Factry as a History Splitter's primary, an Errored status also sends the splitter's queries to the secondary: Ignition's splitter uses a historian only while its status is Good.
 
 **`handleSettingsChange()`** — reconfigures gRPC client, refreshes cache, updates engines. No restart needed.
 

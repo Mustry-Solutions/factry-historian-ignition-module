@@ -43,6 +43,14 @@ class PointWriter {
     private final RefusalLog refusalLog = new RefusalLog();
     /** For tests. */
     long maxMessageBytes = ModuleProperties.getWriteMaxMessageBytes();
+    /** Below this, grpc.write.max.message.bytes would mean a call per point, not a safer write. */
+    static final long MIN_MESSAGE_BYTES = 64 * 1024;
+    /**
+     * Half the size of the last write Factry (or a proxy in front of it) refused as too large,
+     * so the next flush starts with parts that fit instead of being refused again on the way
+     * down. Forgotten with new settings.
+     */
+    private volatile long fittingMessageBytes = Long.MAX_VALUE;
 
     private final WriteHealth writeHealth;
 
@@ -60,16 +68,16 @@ class PointWriter {
 
     /**
      * Write a flush of points. Connection errors (UNAVAILABLE, DEADLINE_EXCEEDED) and server
-     * rejections that remain after the retry are thrown, for the engine to report.
+     * rejections that remain after the retry are recorded in {@link WriteHealth}, which logs
+     * them, and thrown for the engine to report to store and forward.
      */
     StorageResult<AtomicPoint<?>> write(List<AtomicPoint<?>> points) {
         try {
             return sendPoints(points, true);
         } catch (StatusRuntimeException e) {
-            // Not reaching Factry is the connection check's business, not a refusal.
-            if (!FactryGrpcClient.isConnectionError(e)) {
-                writeHealth.writeRefused(e.getStatus());
-            }
+            // Timeouts too: an InfluxDB that hangs lets every write time out while the
+            // connection check passes.
+            writeHealth.writeFailed(e.getStatus(), points.size());
             throw e;
         }
     }
@@ -79,6 +87,7 @@ class PointWriter {
      * settings (the collector may have changed): they are judged and logged afresh.
      */
     void clearRefusals() {
+        fittingMessageBytes = Long.MAX_VALUE;
         refusalLog.clear();
         measurementCache.clearWriteRefusals();
     }
@@ -142,7 +151,8 @@ class PointWriter {
         try {
             logger.debug("Sending " + built.pointsBuilder.getPointsCount() + " points via createPoints");
             long beforeMs = System.currentTimeMillis();
-            for (List<Point> part : parts(built.pointsBuilder.getPointsList(), maxMessageBytes)) {
+            long partBytes = Math.min(Math.max(MIN_MESSAGE_BYTES, maxMessageBytes), fittingMessageBytes);
+            for (List<Point> part : parts(built.pointsBuilder.getPointsList(), partBytes)) {
                 sendPart(part);
             }
             long elapsedMs = System.currentTimeMillis() - beforeMs;
@@ -227,12 +237,20 @@ class PointWriter {
      * flush is not held back.
      */
     private void sendPart(List<Point> part) {
+        Points message = Points.newBuilder().addAllPoints(part).build();
         try {
-            grpcClient.createPoints(Points.newBuilder().addAllPoints(part).build());
+            grpcClient.createPoints(message);
             writeHealth.writeAccepted();
         } catch (StatusRuntimeException e) {
             if (!isTooLarge(e)) {
                 throw e;
+            }
+            long fitting = message.getSerializedSize() / 2;
+            if (fitting < fittingMessageBytes) {
+                fittingMessageBytes = fitting;
+                logger.info("Factry refused a write of {} bytes as too large ({}); sending at most {} bytes"
+                        + " per call until the settings are saved", message.getSerializedSize(),
+                        e.getStatus().getDescription(), fitting);
             }
             if (part.size() > 1) {
                 sendPart(part.subList(0, part.size() / 2));
@@ -253,15 +271,21 @@ class PointWriter {
     }
 
     /**
-     * Whether Factry refused a write for its size: RESOURCE_EXHAUSTED "grpc: received message
-     * (after decompression) larger than max" from grpc-go, "exceeds maximum size" from grpc-java.
-     * Not any RESOURCE_EXHAUSTED: a proxy may use it for a quota, and that is worth a retry.
+     * Whether a write was refused for its size: RESOURCE_EXHAUSTED "grpc: received message (after
+     * decompression) larger than max" from grpc-go (Factry), "exceeds maximum size" from
+     * grpc-java, or a proxy's HTTP 413, which grpc-java reports as UNKNOWN "HTTP status code 413"
+     * (nginx refuses bodies over 1 MiB by default). Not any RESOURCE_EXHAUSTED: a proxy may use it
+     * for a quota, and that is worth a retry.
      */
     static boolean isTooLarge(StatusRuntimeException e) {
         String description = e.getStatus().getDescription();
-        return e.getStatus().getCode() == Status.Code.RESOURCE_EXHAUSTED
-                && description != null
-                && (description.contains("larger than max") || description.contains("exceeds maximum"));
+        if (description == null) {
+            return false;
+        }
+        Status.Code code = e.getStatus().getCode();
+        return code == Status.Code.RESOURCE_EXHAUSTED
+                && (description.contains("larger than max") || description.contains("exceeds maximum"))
+                || code == Status.Code.UNKNOWN && description.startsWith("HTTP status code 413");
     }
 
     private static class BuildResult {

@@ -9,77 +9,132 @@ import org.slf4j.LoggerFactory;
 import java.util.function.LongSupplier;
 
 /**
- * What the profile status says, from the connection check and from Factry's answers to writes.
- * A failed check says why: unreachable, a refused token or a deleted collector.
- * The connection check (GetCollector) passes while Factry refuses every CreatePoints, for
- * example INTERNAL while its InfluxDB is down; store and forward keeps that data and retries it,
- * but the profile would show Running. So writes that are refused, and only refused, for
- * {@link #REFUSING_AFTER_MS} turn the status Errored, until Factry accepts one again.
+ * What the profile status says, from the connection check and from what becomes of the writes.
+ * The connection check (GetCollector) passes while Factry stores nothing: it refuses every
+ * CreatePoints (INTERNAL while its InfluxDB is down) or lets them all time out (InfluxDB
+ * hanging). Store and forward keeps that data and retries it, but the profile would show
+ * Running. So writes that all failed over at least {@link #FAILING_AFTER_MS} turn the status
+ * Errored, until one is stored again. A failed check comes first and says why: unreachable, a
+ * refused token or a deleted collector.
+ * <p>
+ * Also logs the failed writes: one WARN per new answer from Factry, a summary about every
+ * {@link #SUMMARY_EVERY_MS} while it lasts, and the totals when writes are stored again.
  */
 final class WriteHealth {
     private static final Logger logger = LoggerFactory.getLogger(WriteHealth.class);
 
-    /** One connection check interval: a single refused flush is not a reason to alarm anyone. */
-    static final long REFUSING_AFTER_MS = 30_000;
+    /** One connection check interval: a single failed flush is not a reason to alarm anyone. */
+    static final long FAILING_AFTER_MS = 30_000;
+    static final long SUMMARY_EVERY_MS = 5 * 60_000;
 
+    private final String prefix;
     private final LongSupplier clock;
 
     /** Factry's answer to the last connection check; null until the first one. */
     private Status check;
-    /** When Factry refused the first write after the last accepted one; null while it accepts. */
-    private Long refusedSince;
-    private Status lastRefusal;
-    /** Whether the switch to refusing was logged. */
-    private boolean refusingLogged;
+    /** When the first write failed after the last stored one; null while writes are stored. */
+    private Long failingSince;
+    private long lastFailedAt;
+    private Status lastFailure;
+    /** The answer last logged at WARN, digits left out (a deadline names its exact time). */
+    private String lastLoggedAnswer;
+    /** Whether the switch to failing was logged; then when the last summary was. */
+    private boolean failingLogged;
+    private long summaryAt;
+    private long failedFlushes, failedPoints, windowFlushes, windowPoints;
 
     WriteHealth() {
-        this(System::currentTimeMillis);
+        this("Factry Historian", System::currentTimeMillis);
     }
 
-    WriteHealth(LongSupplier clock) {
+    WriteHealth(String historianName) {
+        this(historianName, System::currentTimeMillis);
+    }
+
+    WriteHealth(String historianName, LongSupplier clock) {
+        this.prefix = "Historian '" + historianName + "': ";
         this.clock = clock;
     }
 
     /**
      * Record the connection check. Logs one WARN when the reason it fails changes, rather than
-     * a line per check, and one INFO when it passes again.
+     * a line per check, and one INFO when it passes again. A failed check forgets the writes:
+     * after the outage they are judged afresh.
      */
     synchronized void connectionChecked(Status status) {
         Status previous = check;
         check = status;
-        if (!status.isOk() && (previous == null || previous.isOk()
-                || checkFailure(previous) != checkFailure(status) || previous.getCode() != status.getCode())) {
-            logger.warn(checkFailure(status).details(status));
-        } else if (status.isOk() && previous != null && !previous.isOk()) {
-            logger.info("Factry Historian answers the connection check again");
+        if (!status.isOk()) {
+            if (previous == null || previous.isOk()
+                    || checkFailure(previous) != checkFailure(status) || previous.getCode() != status.getCode()) {
+                logger.warn(prefix + checkFailure(status).details(status));
+            }
+            clearWrites();
+            return;
         }
-        logIfRefusing();
+        if (previous != null && !previous.isOk()) {
+            logger.info(prefix + "Factry Historian answers the connection check again");
+        }
+        if (failingLogged && clock.getAsLong() - summaryAt >= SUMMARY_EVERY_MS) {
+            summaryAt = clock.getAsLong();
+            logger.warn(prefix + "Factry still does not store writes: " + windowFlushes + " flushes / "
+                    + windowPoints + " points in the last 5 min (last answer: " + describe(lastFailure) + ")");
+            windowFlushes = 0;
+            windowPoints = 0;
+        }
     }
 
     /** Factry answered OK to a CreatePoints. */
     synchronized void writeAccepted() {
-        if (refusingLogged) {
-            logger.info("Factry accepts writes again");
+        if (failingLogged) {
+            logger.info(prefix + "Factry stores writes again, after " + failedFlushes + " failed flushes / "
+                    + failedPoints + " points");
         }
-        refusedSince = null;
-        lastRefusal = null;
-        refusingLogged = false;
+        clearWrites();
     }
 
-    /** Factry answered a CreatePoints with an error. Not for UNAVAILABLE or DEADLINE_EXCEEDED. */
-    synchronized void writeRefused(Status status) {
-        if (refusedSince == null) {
-            refusedSince = clock.getAsLong();
+    /** A flush of {@code points} points was not stored: Factry refused it, or did not answer in time. */
+    synchronized void writeFailed(Status status, int points) {
+        long now = clock.getAsLong();
+        if (failingSince == null) {
+            failingSince = now;
         }
-        lastRefusal = status;
-        logIfRefusing();
+        lastFailedAt = now;
+        lastFailure = status;
+        failedFlushes++;
+        failedPoints += points;
+        windowFlushes++;
+        windowPoints += points;
+
+        String answer = status.getCode() + ":" + String.valueOf(status.getDescription()).replaceAll("[0-9.]+", "#");
+        String line = prefix + "Factry did not store " + points + " points (" + describe(status)
+                + "); store and forward keeps them and retries";
+        if (!answer.equals(lastLoggedAnswer)) {
+            lastLoggedAnswer = answer;
+            logger.warn(line + ". The same answer again is logged at debug level.");
+        } else {
+            logger.debug(line);
+        }
+
+        if (!failingLogged && failing()) {
+            failingLogged = true;
+            summaryAt = now;
+            windowFlushes = 0;
+            windowPoints = 0;
+            logger.warn(prefix + failingDetails() + " The profile shows Errored until a write is stored.");
+        }
     }
 
-    /** Forget the writes, for new settings: they are judged afresh. */
+    /** Forget the writes, for new settings or after an outage: they are judged afresh. */
     synchronized void clearWrites() {
-        refusedSince = null;
-        lastRefusal = null;
-        refusingLogged = false;
+        failingSince = null;
+        lastFailure = null;
+        lastLoggedAnswer = null;
+        failingLogged = false;
+        failedFlushes = 0;
+        failedPoints = 0;
+        windowFlushes = 0;
+        windowPoints = 0;
     }
 
     synchronized ProfileStatus status() {
@@ -91,30 +146,24 @@ final class WriteHealth {
             return new ProfileStatus(ProfileStatus.State.Errored, LocalizedString.createRaw(failure.message),
                     failure.details(check));
         }
-        if (refusing()) {
+        if (failing()) {
             // The gateway's historian page shows an Errored profile as "Error" with the details as
             // its tooltip, so the details carry the whole story.
             return new ProfileStatus(ProfileStatus.State.Errored,
-                    LocalizedString.createRaw("Factry refuses writes"), refusingDetails());
+                    LocalizedString.createRaw("Factry does not store writes"), failingDetails());
         }
         return ProfileStatus.RUNNING;
     }
 
-    private boolean refusing() {
-        return refusedSince != null && clock.getAsLong() - refusedSince >= REFUSING_AFTER_MS;
+    /** Failed writes spread over the interval, not one failure and then silence. */
+    private boolean failing() {
+        return failingSince != null && lastFailedAt - failingSince >= FAILING_AFTER_MS;
     }
 
-    private String refusingDetails() {
-        return "Factry has refused every write for " + duration(clock.getAsLong() - refusedSince)
-                + " (last answer: " + describe(lastRefusal) + "). Store and forward keeps the data and"
+    private String failingDetails() {
+        return "No write to Factry has succeeded for " + duration(lastFailedAt - failingSince)
+                + " (last answer: " + describe(lastFailure) + "). Store and forward keeps the data and"
                 + " retries it.";
-    }
-
-    private void logIfRefusing() {
-        if (!refusingLogged && refusing()) {
-            refusingLogged = true;
-            logger.warn(refusingDetails() + " The profile shows Errored until Factry accepts a write.");
-        }
     }
 
     /** Why the connection check fails, in words an operator can act on. */
