@@ -6,6 +6,8 @@ on:
     branches:
       - feature/**
       - hotfix/**
+      - fix/**
+      - chore/**
       - develop
       - main
     paths-ignore:

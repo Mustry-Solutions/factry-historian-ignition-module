@@ -3,12 +3,10 @@ package io.factry.historian.gateway;
 import com.google.protobuf.Struct;
 import com.google.protobuf.Value;
 import io.factry.historian.proto.CreateMeasurement;
-import io.factry.historian.proto.CreateMeasurementsReply;
-import io.factry.historian.proto.CreateMeasurementsRequest;
-import io.factry.historian.proto.GetMeasurementsByFilterRequest;
 import io.factry.historian.proto.Measurement;
-import io.factry.historian.proto.Measurements;
 import io.factry.historian.proto.MetadataProperty;
+import io.grpc.Status;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
@@ -111,55 +109,21 @@ class MeasurementCacheTest {
         }
     }
 
-    /**
-     * Stands in for Factry: the gRPC channel is never used for measurements, because the calls the
-     * cache makes for them are overridden. Like Factry, a create with a name that already exists
-     * does not return the existing measurement.
-     */
-    static class FakeFactry extends FactryGrpcClient {
-        final List<Measurement> measurements = new ArrayList<>();
-        final List<String> createdNames = new ArrayList<>();
-        /** How many of the next single-name lookups fail, as a timed-out call would. */
-        int lookupFailures = 0;
+    /** Polls for a created measurement without waiting. */
+    static final long[] NO_WAIT = {0, 0, 0, 0, 0};
 
-        FakeFactry() {
-            super("localhost", 1, "collector", "token", false, false, null);
-        }
+    /** Fake Factry clients made by the current test, shut down after it. */
+    private final List<FakeFactry> fakes = new ArrayList<>();
 
-        void add(String name, String uuid) {
-            measurements.add(Measurement.newBuilder().setName(name).setUuid(uuid).setStatus("Active").build());
-        }
+    FakeFactry fakeFactry() {
+        FakeFactry factry = new FakeFactry();
+        fakes.add(factry);
+        return factry;
+    }
 
-        @Override
-        public Measurements getMeasurementsByFilterWithDeadline(GetMeasurementsByFilterRequest request) {
-            if (lookupFailures > 0) {
-                lookupFailures--;
-                throw new RuntimeException("lookup timed out");
-            }
-            return getMeasurementsByFilter(request);
-        }
-
-        @Override
-        public Measurements getMeasurementsByFilter(GetMeasurementsByFilterRequest request) {
-            Measurements.Builder b = Measurements.newBuilder();
-            for (Measurement m : measurements) {
-                if (!request.hasKeyword() || m.getName().contains(request.getKeyword())) {
-                    b.addMeasurements(m);
-                }
-            }
-            return b.setTotal(b.getMeasurementsCount()).build();
-        }
-
-        @Override
-        public CreateMeasurementsReply createMeasurements(CreateMeasurementsRequest request) {
-            for (CreateMeasurement m : request.getMeasurementsList()) {
-                createdNames.add(m.getName());
-                if (measurements.stream().noneMatch(e -> e.getName().equals(m.getName()))) {
-                    add(m.getName(), "new-" + m.getName());
-                }
-            }
-            return CreateMeasurementsReply.getDefaultInstance();
-        }
+    @AfterEach
+    void shutDownFakes() {
+        fakes.forEach(FactryGrpcClient::shutdown);
     }
 
     @Nested
@@ -167,8 +131,8 @@ class MeasurementCacheTest {
 
         @Test
         void getOrCreateUsesTheExistingMeasurementInsteadOfCreating() {
-            FakeFactry factry = new FakeFactry();
-            MeasurementCache cache = new MeasurementCache();
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
             // Created in Factry after the cache was last refreshed.
             factry.add("[default]Tank/Temp", "existing-uuid");
 
@@ -181,8 +145,8 @@ class MeasurementCacheTest {
 
         @Test
         void batchCreatesOnlyTheNamesFactryDoesNotHave() {
-            FakeFactry factry = new FakeFactry();
-            MeasurementCache cache = new MeasurementCache();
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
             factry.add("[default]Tank/Temp", "existing-uuid");
 
             Map<String, Object> values = new LinkedHashMap<>();
@@ -196,10 +160,148 @@ class MeasurementCacheTest {
         }
 
         @Test
-        void batchCreatesWhenTheLookupFails() {
-            FakeFactry factry = new FakeFactry();
-            MeasurementCache cache = new MeasurementCache();
-            // The lookup before create fails; the polling after the create succeeds.
+        void aNameThatOnlyContainsTheTagPathDoesNotCount() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            // The keyword filter matches substrings; only an exact name is the same measurement.
+            factry.add("[default]Tank/Temp2", "other-uuid");
+
+            String uuid = cache.getOrCreateUUID("[default]Tank/Temp", factry, 21.5);
+
+            assertEquals("new-[default]Tank/Temp", uuid);
+            assertEquals(List.of("[default]Tank/Temp"), factry.createdNames);
+        }
+
+        @Test
+        void theLookupReadsFurtherPagesForTheExactName() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            for (int i = 0; i < 60; i++) {
+                factry.add("[default]Tank/Temp/" + i, "sub-" + i);
+            }
+            factry.add("[default]Tank/Temp", "existing-uuid");
+
+            assertEquals("existing-uuid", cache.getOrCreateUUID("[default]Tank/Temp", factry, 21.5));
+            assertTrue(factry.createdNames.isEmpty());
+            assertEquals(2, factry.lookups);
+        }
+
+        @Test
+        void theLookupGivesUpAfterItsPageBoundAndCreates() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            for (int i = 0; i < 300; i++) {
+                factry.add("[default]Tank/Temp/" + i, "sub-" + i);
+            }
+
+            Map<String, String> uuids = cache.batchGetOrCreateUUIDs(Map.of("[default]Tank/Temp", 21.5), factry);
+
+            assertEquals("new-[default]Tank/Temp", uuids.get("[default]Tank/Temp"));
+            assertEquals(List.of("[default]Tank/Temp"), factry.createdNames);
+        }
+
+        @Test
+        void anActiveMeasurementWinsOverADiscoveredDuplicate() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add("[default]Tank/Temp", "discovered-uuid", "Discovered");
+            factry.add("[default]Tank/Temp", "active-uuid");
+
+            assertEquals("active-uuid", cache.getOrCreateUUID("[default]Tank/Temp", factry, 21.5));
+            assertTrue(factry.createdNames.isEmpty());
+        }
+
+        @Test
+        void aPathAnotherCallIsCreatingIsPolledNotCreatedAgain() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add("[default]Tank/Temp", "existing-uuid");
+            Map<String, Object> second = new LinkedHashMap<>();
+            second.put("[default]Tank/Level", 3.2);
+            second.put("[default]Tank/Temp", 21.5);
+            List<Map<String, String>> secondResult = new ArrayList<>();
+            // While the first call creates Tank/Level, a second call asks for it and Tank/Temp.
+            factry.onCreate = () -> {
+                factry.onCreate = () -> { };
+                secondResult.add(cache.batchGetOrCreateUUIDs(second, factry));
+            };
+
+            Map<String, String> first = cache.batchGetOrCreateUUIDs(Map.of("[default]Tank/Level", 3.2), factry);
+
+            assertEquals("new-[default]Tank/Level", first.get("[default]Tank/Level"));
+            assertEquals(Map.of("[default]Tank/Level", "new-[default]Tank/Level",
+                    "[default]Tank/Temp", "existing-uuid"), secondResult.get(0));
+            assertEquals(List.of("[default]Tank/Level"), factry.createdNames);
+        }
+    }
+
+    @Nested
+    class NameThatIsNotActive {
+
+        private static final String TEMP = "[default]Tank/Temp";
+
+        @Test
+        void foundByTheLookupItIsRefusedNotCreatedAndCached() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add(TEMP, "discovered-uuid", "Discovered");
+
+            assertTrue(cache.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry).isEmpty());
+            assertEquals(MeasurementCache.WriteRefusal.NOT_ACTIVE, cache.writeRefusal(TEMP, FakeFactry.OWN));
+            int lookups = factry.lookups;
+            assertEquals("", cache.getOrCreateUUID(TEMP, factry, 21.5));
+            assertTrue(cache.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry).isEmpty());
+
+            assertTrue(factry.createdNames.isEmpty(), "creating would add another Discovered duplicate");
+            assertEquals(lookups, factry.lookups, "cached: no lookup per flush");
+        }
+
+        @Test
+        void fromTheRefreshItCostsNoLookup() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add(TEMP, "discovered-uuid", "Discovered");
+            cache.refresh(factry);
+
+            assertTrue(cache.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry).isEmpty());
+            assertEquals(0, factry.lookups);
+            assertEquals(MeasurementCache.WriteRefusal.NOT_ACTIVE, cache.writeRefusal(TEMP, FakeFactry.OWN));
+        }
+
+        @Test
+        void isWrittenToFromTheRefreshAfterItIsActive() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add(TEMP, "discovered-uuid", "Discovered");
+            cache.refresh(factry);
+            factry.setStatus("discovered-uuid", "Active");
+            cache.refresh(factry);
+
+            assertNull(cache.writeRefusal(TEMP, FakeFactry.OWN));
+            assertEquals(Map.of(TEMP, "discovered-uuid"), cache.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry));
+        }
+
+        @Test
+        void browseAndQueryDoNotSeeIt() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add(TEMP, "discovered-uuid", "Discovered");
+            cache.refresh(factry);
+
+            assertNull(cache.getMeasurementByName(TEMP));
+            assertTrue(cache.getAllMeasurements().isEmpty());
+            assertEquals(0, cache.size());
+        }
+    }
+
+    @Nested
+    class LookupFailure {
+
+        @Test
+        void batchCreatesWhenFactryRefusesTheLookup() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            // The lookup before create is refused; the polling after the create succeeds.
             factry.lookupFailures = 1;
 
             Map<String, String> uuids = cache.batchGetOrCreateUUIDs(
@@ -210,16 +312,348 @@ class MeasurementCacheTest {
         }
 
         @Test
-        void aNameThatOnlyContainsTheTagPathDoesNotCount() {
-            FakeFactry factry = new FakeFactry();
-            MeasurementCache cache = new MeasurementCache();
-            // The keyword filter matches substrings; only an exact name is the same measurement.
-            factry.add("[default]Tank/Temp2", "other-uuid");
+        void batchStopsAtTheFirstConnectionErrorAndCreatesNothing() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add("[default]Tank/Temp", "cached-uuid");
+            cache.refresh(factry);
+            factry.lookupFailures = 10;
+            factry.lookupFailure = Status.DEADLINE_EXCEEDED;
+            Map<String, Object> values = new LinkedHashMap<>();
+            values.put("[default]Tank/Temp", 21.5);
+            for (int i = 0; i < 5; i++) {
+                values.put("[default]New/" + i, i);
+            }
 
-            String uuid = cache.getOrCreateUUID("[default]Tank/Temp", factry, 21.5);
+            Map<String, String> uuids = cache.batchGetOrCreateUUIDs(values, factry);
 
-            assertEquals("new-[default]Tank/Temp", uuid);
-            assertEquals(List.of("[default]Tank/Temp"), factry.createdNames);
+            assertEquals(Map.of("[default]Tank/Temp", "cached-uuid"), uuids, "cache hits still resolve");
+            assertEquals(1, factry.lookups, "one deadline per flush, not one per new tag");
+            assertTrue(factry.createdNames.isEmpty());
+        }
+
+        @Test
+        void singlePathCreatesWhenFactryRefusesTheLookup() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.lookupFailures = 1;
+
+            assertEquals("new-[default]Tank/Level", cache.getOrCreateUUID("[default]Tank/Level", factry, 3.2));
+        }
+
+        @Test
+        void singlePathCreatesNothingWhenFactryIsUnavailable() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.lookupFailures = 1;
+            factry.lookupFailure = Status.UNAVAILABLE;
+
+            assertEquals("", cache.getOrCreateUUID("[default]Tank/Level", factry, 3.2));
+            assertTrue(factry.createdNames.isEmpty());
+            assertEquals(1, factry.lookups);
+        }
+    }
+
+    @Nested
+    class MeasurementOfAnotherCollector {
+
+        private static final String TEMP = "[default]Tank/Temp";
+
+        @Test
+        void inTheSameDatabaseItIsCreatedOnceThenRefused() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add(TEMP, "other-uuid", FakeFactry.OTHER, "Active");
+            cache.refresh(factry);
+            assertNull(cache.writeRefusal(TEMP, FakeFactry.OWN), "not settled before the module tried");
+
+            assertTrue(cache.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry).isEmpty());
+            assertEquals(List.of(TEMP), factry.createdNames, "one try, accepting a Discovered duplicate");
+            assertEquals(MeasurementCache.WriteRefusal.OTHER_COLLECTOR, cache.writeRefusal(TEMP, FakeFactry.OWN));
+
+            int lookups = factry.lookups;
+            assertTrue(cache.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry).isEmpty());
+            assertEquals("", cache.getOrCreateUUID(TEMP, factry, 21.5));
+            assertEquals(List.of(TEMP), factry.createdNames, "never created again");
+            assertEquals(lookups, factry.lookups, "settled refusals cost no gRPC call");
+        }
+
+        @Test
+        void aRestartDoesNotCreateItAgain() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add(TEMP, "other-uuid", FakeFactry.OTHER, "Active");
+            cache.refresh(factry);
+            cache.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry);
+            int measurements = factry.measurements.size();
+
+            MeasurementCache afterRestart = new MeasurementCache(NO_WAIT);
+            afterRestart.refresh(factry);
+
+            assertTrue(afterRestart.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry).isEmpty());
+            assertEquals(List.of(TEMP), factry.createdNames, "the earlier duplicate shows it was tried");
+            assertEquals(measurements, factry.measurements.size());
+            assertEquals(MeasurementCache.WriteRefusal.OTHER_COLLECTOR,
+                    afterRestart.writeRefusal(TEMP, FakeFactry.OWN));
+        }
+
+        @Test
+        void aRestartWithoutARefreshDoesNotCreateItAgainEither() {
+            FakeFactry factry = fakeFactry();
+            factry.add(TEMP, "other-uuid", FakeFactry.OTHER, "Active");
+            factry.add(TEMP, "duplicate-uuid", FakeFactry.OWN, "Discovered");
+            MeasurementCache afterRestart = new MeasurementCache(NO_WAIT);
+
+            assertEquals("", afterRestart.getOrCreateUUID(TEMP, factry, 21.5));
+            assertTrue(factry.createdNames.isEmpty());
+        }
+
+        @Test
+        void inAnotherDatabaseOurOwnIsCreatedAndWrittenTo() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add(TEMP, "other-uuid", FakeFactry.OTHER, "Active");
+            factry.existingInOtherDatabase = true;
+            cache.refresh(factry);
+
+            assertEquals(Map.of(TEMP, "own-" + TEMP), cache.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry));
+            assertNull(cache.writeRefusal(TEMP, FakeFactry.OWN));
+            // Query by name prefers this collector's measurement too.
+            assertEquals("own-" + TEMP, cache.getUUID(TEMP));
+        }
+
+        @Test
+        void foundByTheLookupItIsAlsoCreatedOnceThenRefused() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            // Created by the other collector after the cache was last refreshed.
+            factry.add(TEMP, "other-uuid", FakeFactry.OTHER, "Active");
+
+            assertEquals("", cache.getOrCreateUUID(TEMP, factry, 21.5));
+            assertEquals(List.of(TEMP), factry.createdNames);
+            assertEquals(MeasurementCache.WriteRefusal.OTHER_COLLECTOR, cache.writeRefusal(TEMP, FakeFactry.OWN));
+        }
+
+        @Test
+        void anotherCollectorsPausedOrDiscoveredNameIsAlsoTriedOnce() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add(TEMP, "other-uuid", FakeFactry.OTHER, "Paused");
+            cache.refresh(factry);
+
+            assertTrue(cache.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry).isEmpty());
+            assertTrue(cache.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry).isEmpty());
+
+            assertEquals(List.of(TEMP), factry.createdNames);
+            assertEquals(MeasurementCache.WriteRefusal.NOT_ACTIVE, cache.writeRefusal(TEMP, FakeFactry.OWN),
+                    "what is left is this collector's Discovered duplicate");
+        }
+
+        @Test
+        void aConnectionErrorLeavesItUnsettled() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add(TEMP, "other-uuid", FakeFactry.OTHER, "Active");
+            cache.refresh(factry);
+            factry.lookupFailures = 1;
+            factry.lookupFailure = Status.UNAVAILABLE;
+
+            assertTrue(cache.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry).isEmpty());
+            assertTrue(factry.createdNames.isEmpty());
+            assertNull(cache.writeRefusal(TEMP, FakeFactry.OWN), "its points are retried, not discarded");
+        }
+
+        @Test
+        void aCreateFactryRefusesCountsAsTriedUntilTheSettingsChange() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add(TEMP, "other-uuid", FakeFactry.OTHER, "Active");
+            cache.refresh(factry);
+            factry.createFailure = Status.ALREADY_EXISTS;
+
+            assertTrue(cache.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry).isEmpty());
+            assertEquals(MeasurementCache.WriteRefusal.OTHER_COLLECTOR, cache.writeRefusal(TEMP, FakeFactry.OWN));
+
+            cache.clearWriteRefusals();
+
+            assertNull(cache.writeRefusal(TEMP, FakeFactry.OWN));
+        }
+
+        @Test
+        void pollingStopsWhenAnotherCollectorsMeasurementAppears() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.createdCollector = FakeFactry.OTHER;
+
+            assertTrue(cache.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry).isEmpty());
+            assertEquals(2, factry.lookups, "the lookup before create and one poll");
+        }
+
+        @Test
+        void browseAndQueryStillSeeIt() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add(TEMP, "other-uuid", FakeFactry.OTHER, "Active");
+            cache.refresh(factry);
+
+            assertEquals("other-uuid", cache.getMeasurementByName(TEMP).getUuid());
+            assertEquals(1, cache.getAllMeasurements().size());
+        }
+
+        @Test
+        void ownMeasurementWinsANameClashInTheRefreshAndTheLookup() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add(TEMP, "other-uuid", FakeFactry.OTHER, "Active");
+            factry.add(TEMP, "own-uuid");
+            factry.add("[default]Tank/Level", "other-level", FakeFactry.OTHER, "Active");
+            cache.refresh(factry);
+            factry.add("[default]Tank/Level", "own-level");
+
+            assertEquals("own-uuid", cache.getUUID(TEMP));
+            assertEquals("own-level", cache.getOrCreateUUID("[default]Tank/Level", factry, 3.2));
+            assertEquals(4, cache.getAllMeasurements().size(), "browse keeps every collector's");
+            assertTrue(factry.createdNames.isEmpty());
+        }
+
+        @Test
+        void ownershipIsJudgedByCollectorUUIDAndUnknownMeansOwn() {
+            Measurement m = Measurement.newBuilder().setName("x").setUuid("u")
+                    .setCollectorUUID("ABC-123").setStatus("Active").build();
+
+            assertNull(MeasurementCache.writeRefusal(m, "abc-123"));
+            assertEquals(MeasurementCache.WriteRefusal.OTHER_COLLECTOR, MeasurementCache.writeRefusal(m, "def-456"));
+            assertNull(MeasurementCache.writeRefusal(m.toBuilder().clearCollectorUUID().build(), "abc-123"),
+                    "a measurement without a collector is written to as before");
+            assertNull(MeasurementCache.writeRefusal(m, ""), "so is any measurement without our own UUID");
+            assertNull(MeasurementCache.writeRefusal((Measurement) null, "abc-123"));
+        }
+    }
+
+    @Nested
+    class PausedMeasurement {
+
+        private static final String TEMP = "[default]Tank/Temp";
+
+        @Test
+        void isNeitherWrittenToNorCreatedNorLookedUp() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add(TEMP, "own-uuid", "Paused");
+            cache.refresh(factry);
+
+            assertTrue(cache.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry).isEmpty());
+            assertEquals("", cache.getOrCreateUUID(TEMP, factry, 21.5));
+            assertTrue(factry.createdNames.isEmpty(), "creating would add a Discovered duplicate");
+            assertEquals(0, factry.lookups, "known from the refresh, no gRPC call per flush");
+            assertEquals(MeasurementCache.WriteRefusal.PAUSED, cache.writeRefusal(TEMP, FakeFactry.OWN));
+        }
+
+        @Test
+        void theLookupBeforeCreateFindsItToo() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            // Paused after the cache was last refreshed, then evicted (or never cached).
+            factry.add(TEMP, "own-uuid", "Paused");
+
+            assertTrue(cache.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry).isEmpty());
+            assertTrue(factry.createdNames.isEmpty());
+            assertEquals(MeasurementCache.WriteRefusal.PAUSED, cache.writeRefusal(TEMP, FakeFactry.OWN));
+        }
+
+        @Test
+        void isWrittenToAgainFromTheRefreshAfterItIsActive() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add(TEMP, "own-uuid", "Paused");
+            cache.refresh(factry);
+            factry.setStatus("own-uuid", "Active");
+
+            assertEquals(MeasurementCache.WriteRefusal.PAUSED, cache.writeRefusal(TEMP, FakeFactry.OWN),
+                    "until the next refresh");
+
+            cache.refresh(factry);
+
+            assertNull(cache.writeRefusal(TEMP, FakeFactry.OWN));
+            assertEquals(Map.of(TEMP, "own-uuid"), cache.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry));
+        }
+
+        @Test
+        void isPausedAgainFromTheRefreshAfterItIsPaused() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add(TEMP, "own-uuid");
+            cache.refresh(factry);
+            factry.setStatus("own-uuid", "Paused");
+
+            cache.refresh(factry);
+
+            assertEquals(MeasurementCache.WriteRefusal.PAUSED, cache.writeRefusal(TEMP, FakeFactry.OWN));
+            assertTrue(cache.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry).isEmpty());
+            assertTrue(factry.createdNames.isEmpty());
+        }
+
+        @Test
+        void browseAndQueryDoNotSeeIt() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add(TEMP, "own-uuid", "Paused");
+            cache.refresh(factry);
+
+            assertNull(cache.getMeasurementByName(TEMP));
+            assertNull(cache.getUUID(TEMP));
+            assertTrue(cache.getAllMeasurements().isEmpty());
+            assertEquals(0, cache.size());
+        }
+
+        @Test
+        void anotherCollectorsPausedMeasurementIsNotPausedForUs() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add(TEMP, "other-uuid", FakeFactry.OTHER, "Paused");
+            cache.refresh(factry);
+
+            assertNull(cache.writeRefusal(TEMP, FakeFactry.OWN), "another collector's: create once first");
+            cache.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry);
+            assertEquals(MeasurementCache.WriteRefusal.NOT_ACTIVE, cache.writeRefusal(TEMP, FakeFactry.OWN));
+        }
+
+        @Test
+        void theOwnPausedMeasurementWinsOverOtherMeasurementsWithTheName() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.add(TEMP, "other-uuid", FakeFactry.OTHER, "Active");
+            factry.add(TEMP, "duplicate-uuid", "Discovered");
+            factry.add(TEMP, "own-uuid", "Paused");
+            factry.add(TEMP, "other-discovered", FakeFactry.OTHER, "Discovered");
+            cache.refresh(factry);
+
+            assertEquals(MeasurementCache.WriteRefusal.PAUSED, cache.writeRefusal(TEMP, FakeFactry.OWN));
+            assertTrue(cache.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry).isEmpty());
+            assertTrue(factry.createdNames.isEmpty());
+            // Browse and query still see the Active one.
+            assertEquals("other-uuid", cache.getUUID(TEMP));
+        }
+
+        @Test
+        void pollingStopsWhenTheCreatedMeasurementIsPaused() {
+            FakeFactry factry = fakeFactry();
+            MeasurementCache cache = new MeasurementCache(NO_WAIT);
+            factry.createdStatus = "Paused";
+
+            assertTrue(cache.batchGetOrCreateUUIDs(Map.of(TEMP, 21.5), factry).isEmpty());
+            assertEquals(2, factry.lookups, "the lookup before create and one poll");
+            assertEquals(MeasurementCache.WriteRefusal.PAUSED, cache.writeRefusal(TEMP, FakeFactry.OWN));
+        }
+
+        @Test
+        void refusalIsJudgedOnOwnershipFirst() {
+            Measurement paused = Measurement.newBuilder().setName("x").setUuid("u")
+                    .setCollectorUUID("abc-123").setStatus("Paused").build();
+
+            assertEquals(MeasurementCache.WriteRefusal.PAUSED, MeasurementCache.writeRefusal(paused, "abc-123"));
+            assertEquals(MeasurementCache.WriteRefusal.OTHER_COLLECTOR,
+                    MeasurementCache.writeRefusal(paused, "def-456"));
         }
     }
 }
