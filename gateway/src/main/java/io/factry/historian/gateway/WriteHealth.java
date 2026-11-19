@@ -6,6 +6,8 @@ import io.grpc.Status;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.HashSet;
+import java.util.Set;
 import java.util.function.LongSupplier;
 
 /**
@@ -26,7 +28,7 @@ final class WriteHealth {
     static final long FAILING_AFTER_MS = 30_000;
     static final long SUMMARY_EVERY_MS = 5 * 60_000;
 
-    private final String prefix;
+    private volatile String prefix;
     private final LongSupplier clock;
 
     /** Null until the first connection check. */
@@ -35,9 +37,17 @@ final class WriteHealth {
     private Long failingSince;
     private long lastFailedAt;
     private Status lastFailure;
-    /** The answer last logged at WARN, digits left out (a deadline names its exact time). */
-    private String lastLoggedAnswer;
-    /** Whether the switch to failing was logged; then when the last summary was. */
+    /**
+     * The answers logged at WARN since writes started failing, digits left out (a deadline names
+     * its exact time). A set, not the last one: two answers taking turns (some writes time out,
+     * some are refused) would otherwise give a WARN per flush.
+     */
+    private final Set<String> loggedAnswers = new HashSet<>();
+    /**
+     * Whether the switch to failing was logged; then when the last summary was. This episode
+     * lasts until a write is stored (or new settings), not until the next failed check, so a
+     * check that comes and goes neither repeats it nor loses its end.
+     */
     private boolean failingLogged;
     private long summaryAt;
     private long failedFlushes, failedPoints, windowFlushes, windowPoints;
@@ -51,15 +61,23 @@ final class WriteHealth {
     }
 
     WriteHealth(String historianName, LongSupplier clock) {
-        this.prefix = "Historian '" + historianName + "': ";
+        rename(historianName);
         this.clock = clock;
     }
 
-    /** A failed check forgets the writes: after the outage they are judged afresh. */
+    /** The profile was renamed; Ignition keeps this instance. */
+    void rename(String historianName) {
+        prefix = "Historian '" + historianName + "': ";
+    }
+
+    /**
+     * A failed check restarts the status's count of failed writes, so after an outage they are
+     * judged afresh. What was logged stays, and the totals keep counting, until a write is stored.
+     */
     synchronized void connectionChecked(boolean ok) {
         connected = ok;
         if (!ok) {
-            clearWrites();
+            failingSince = null;
             return;
         }
         if (failingLogged && clock.getAsLong() - summaryAt >= SUMMARY_EVERY_MS) {
@@ -96,8 +114,7 @@ final class WriteHealth {
         String answer = status.getCode() + ":" + String.valueOf(status.getDescription()).replaceAll("[0-9.]+", "#");
         String line = prefix + "Factry did not store " + points + " points (" + describe(status)
                 + "); store and forward keeps them and retries";
-        if (!answer.equals(lastLoggedAnswer)) {
-            lastLoggedAnswer = answer;
+        if (loggedAnswers.add(answer)) {
             logger.warn(line + ". The same answer again is logged at debug level.");
         } else {
             logger.debug(line);
@@ -112,11 +129,16 @@ final class WriteHealth {
         }
     }
 
-    /** Forget the writes, for new settings or after an outage: they are judged afresh. */
+    /** Whether writes fail: some failed since the last stored one. */
+    synchronized boolean writesFailing() {
+        return failingSince != null || failingLogged;
+    }
+
+    /** Forget the writes, for new settings: they are judged afresh. */
     synchronized void clearWrites() {
         failingSince = null;
         lastFailure = null;
-        lastLoggedAnswer = null;
+        loggedAnswers.clear();
         failingLogged = false;
         failedFlushes = 0;
         failedPoints = 0;
