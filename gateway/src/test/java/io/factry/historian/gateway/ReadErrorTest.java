@@ -342,6 +342,8 @@ class ReadErrorTest {
         Dataset ds = IgnitionHistoryQuery.wide(engine, START - 60_000L, START - 1L, -1, null, "a", "b");
 
         assertNull(ds.error);
-        assertEquals(0, ds.rows.size(), ds::toString);
+        // Only the value after the range, as Ignition's own historians return it.
+        assertEquals(1, ds.rows.size(), ds::toString);
+        assertEquals(START, ds.time(0), ds::toString);
     }
 }

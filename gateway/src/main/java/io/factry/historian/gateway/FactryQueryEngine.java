@@ -403,7 +403,6 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
             // A measurement now spans multiple status-series. Collect all of a measurement's points
             // (each carrying its series' quality), then merge-sort by timestamp before emitting.
-            record RawPt(RawQueryKey key, long ts, Object value, QualityCode quality) {}
             Map<String, List<RawPt>> pointsByUuid = new LinkedHashMap<>();
 
             // Read in pages: one answer for a long range does not fit in a gRPC message. Factry
@@ -553,6 +552,37 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 offset += limit;
             }
 
+            // Like Ignition's own historians (the Core Historian's seed values), each pen also gets
+            // its last sample before the start and its first after the end, at their own times
+            // and qualities, unless the query asks for none. An on-change tag then has a value at
+            // the start of a trend, also when it did not change inside the range. Two requests for
+            // all pens; a pen Factry refused has no column left to bound.
+            if (options.getTimeRange().isPresent()
+                    && !options.getExtendedPropertyValue(HistorianProperties.NO_SEED_VALUES).orElse(false)
+                    && !options.getExtendedPropertyValue(HistorianProperties.NO_BOUND_VALUES).orElse(false)) {
+                List<String> bounded = new ArrayList<>(measurementUUIDs);
+                bounded.removeAll(refused);
+                long rangeStart = options.getTimeRange().get().startTime().toEpochMilli();
+                long rangeEnd = options.getTimeRange().get().endTime().toEpochMilli();
+                List<Map<String, RawPt>> bounds = new ArrayList<>();
+                bounds.add(boundingPoints(QueryTimeseriesRequest.newBuilder()
+                        .addAllMeasurementUUIDs(bounded).addGroupBy("status")
+                        .setStart(Timestamps.fromMillis(0)).setEnd(Timestamps.fromMillis(rangeStart))
+                        .setDesc(true).setLimit(1).build(), true, uuidToKeyMap, keyToNode));
+                // Nothing is stored after now, so a range that ends later has no value after it.
+                long nowMs = now.getAsLong();
+                if (rangeEnd < nowMs) {
+                    bounds.add(boundingPoints(QueryTimeseriesRequest.newBuilder()
+                            .addAllMeasurementUUIDs(bounded).addGroupBy("status")
+                            .setStart(Timestamps.fromMillis(rangeEnd)).setEnd(Timestamps.fromMillis(nowMs))
+                            .setLimit(1).build(), false, uuidToKeyMap, keyToNode));
+                }
+                for (Map<String, RawPt> byUuid : bounds) {
+                    byUuid.forEach((uuid, p) -> pointsByUuid.computeIfAbsent(uuid, k -> new ArrayList<>()).add(p));
+                    collected += byUuid.size();
+                }
+            }
+
             // Ignition's raw reader builds wide rows from one stream: each point closes the rows up
             // to its timestamp, so every pen must be handed over in one time order. Pen by pen,
             // the second pen's points go back in time and the dataset gets rows out of order, with
@@ -565,7 +595,9 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 it.remove();
             }
             merged.sort(Comparator.comparingLong(RawPt::ts));
-            // Like Ignition's own historians, returnSize counts points across all pens.
+            // Like Ignition's own historians, returnSize counts points across all pens. The value
+            // before the start comes first and the one after the end last, as in the Core
+            // Historian's limit over its seeded query.
             if (returnSize != null && merged.size() > returnSize) {
                 merged = merged.subList(0, returnSize);
             }
@@ -593,6 +625,45 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             processor.onError(e);
             throw readFailed(e);
         }
+    }
+
+    /** One raw point of a pen, with its series' quality. */
+    private record RawPt(RawQueryKey key, long ts, Object value, QualityCode quality) {}
+
+    /**
+     * Per pen UUID, the latest ({@code latest}) or earliest sample in a request with limit 1 grouped by
+     * status: Factry applies the limit to each series, so it answers one sample per pen and
+     * status. None when Factry refuses the request: the range itself was read, and a missing
+     * bound is better than a failed read.
+     */
+    private Map<String, RawPt> boundingPoints(QueryTimeseriesRequest request, boolean latest,
+                                       Map<String, RawQueryKey> uuidToKeyMap,
+                                       Map<RawQueryKey, ? extends HistoricalNode> keyToNode) {
+        if (request.getMeasurementUUIDsCount() == 0) {
+            return Map.of();
+        }
+        QueryTimeseriesResponse reply;
+        try {
+            reply = grpcClient.queryTimeseries(request);
+        } catch (StatusRuntimeException e) {
+            logger.warn("Could not read the values around the range, returning the range without them: "
+                    + e.getMessage());
+            return Map.of();
+        }
+        Map<String, RawPt> byUuid = new LinkedHashMap<>();
+        for (Series series : reply.getSeriesList()) {
+            RawQueryKey key = uuidToKeyMap.get(series.getMeasurementUUID());
+            if (key == null || series.getDataPointsCount() == 0) {
+                continue;
+            }
+            SeriesPoint pt = series.getDataPoints(0);
+            Object value = protoValueToJava(pt.getValue());
+            RawPt p = new RawPt(key, pt.getTimestamp(), isDateTime(keyToNode.get(key)) ? toDate(value) : value,
+                    statusToQuality(seriesStatus(series)));
+            byUuid.merge(series.getMeasurementUUID(), p,
+                    (a, b) -> (latest ? b.ts() > a.ts() : b.ts() < a.ts()) ? b : a);
+        }
+        return byUuid;
     }
 
     /**

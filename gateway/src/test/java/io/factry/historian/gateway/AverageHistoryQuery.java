@@ -12,6 +12,7 @@ import com.inductiveautomation.ignition.common.model.values.QualityCode;
 import com.inductiveautomation.ignition.common.sqltags.history.AggregationMode;
 import com.inductiveautomation.ignition.common.sqltags.history.BasicTagHistoryQueryParams;
 import com.inductiveautomation.ignition.common.sqltags.history.ReturnFormat;
+import com.inductiveautomation.ignition.common.util.Flags;
 import com.inductiveautomation.ignition.gateway.sqltags.history.query.ColumnQueryDefinition;
 import com.inductiveautomation.ignition.gateway.sqltags.history.query.HistoryQueryExecutor;
 
@@ -99,6 +100,22 @@ final class AverageHistoryQuery {
     /** The same query, written into {@code sink} (e.g. the JSON writer the Power Chart uses). */
     static void wide(StreamingDatasetWriter sink, QueryEngine engine, long start, long end, int returnSize,
                      AggregationMode aggregate, FillMode fill, String... tags) throws Exception {
+        wide(sink, engine, start, end, returnSize, aggregate, fill, 0, tags);
+    }
+
+    /**
+     * A raw read with Ignition's legacy query flags, as queryTagHistory sets them: 16 for
+     * includeBoundingValues=True, 32 for False, 1 for no seed values.
+     */
+    static Dataset raw(QueryEngine engine, long start, long end, int returnSize, int flags, String... tags)
+            throws Exception {
+        Dataset ds = new Dataset();
+        wide(ds, engine, start, end, returnSize, null, FillMode.NONE, flags, tags);
+        return ds;
+    }
+
+    private static void wide(StreamingDatasetWriter sink, QueryEngine engine, long start, long end, int returnSize,
+                             AggregationMode aggregate, FillMode fill, int flags, String... tags) throws Exception {
         List<QualifiedPath> paths = new ArrayList<>();
         List<ColumnQueryDefinition> defs = new ArrayList<>();
         for (String tag : tags) {
@@ -110,6 +127,7 @@ final class AverageHistoryQuery {
         }
         BasicTagHistoryQueryParams params = new BasicTagHistoryQueryParams(paths, new Date(start), new Date(end),
                 returnSize, aggregate, ReturnFormat.Wide, List.of(tags), List.of());
+        params.setQueryFlags(new Flags(flags));
         HistoryWriter writer = new HistoryWriter("test", sink, params);
         HistoryQueryExecutor executor = new HistorianQueryInterface(historian(engine)).createQuery(defs, writer);
         writer.setQueryExecutor(executor);
