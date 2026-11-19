@@ -49,7 +49,7 @@ public final class ModuleProperties {
     }
 
     public static long getRawQueryMaxPoints() {
-        return getLong("query.raw.max.points", 1_000_000);
+        return getLong("query.raw.max.points", 500_000);
     }
 
     private static long getLong(String key, long defaultValue) {

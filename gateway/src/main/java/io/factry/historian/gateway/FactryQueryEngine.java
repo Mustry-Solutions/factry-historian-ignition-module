@@ -89,8 +89,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     private final HistorianMetrics metrics;
 
     /**
-     * Most raw points one query collects over all pens before it stops paging. Paging lifts the
-     * gRPC message limit, so without this a long range over many pens could fill the heap.
+     * Most raw points one query reads over all pens; a range that holds more fails the read. Paging
+     * lifts the gRPC message limit, so without this a long range over many pens could fill the heap.
      */
     long maxRawPoints = ModuleProperties.getRawQueryMaxPoints();
 
@@ -402,29 +402,16 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             long collected = 0;
             // Last timestamp read per series (measurement and status), to see that a page moved on.
             Map<String, Long> lastTsBySeries = new HashMap<>();
-            // Per pen still paging: the time up to which all its series are read. Set when the
-            // read stops early, so those pens end there instead of at a sparse series' last point.
-            Map<String, Long> readUntil = new HashMap<>();
-            Map<String, Long> cutAt = Map.of();
             while (!pending.isEmpty()) {
                 long limit = returnSize != null ? Math.min(pageSize, returnSize - offset) : pageSize;
                 if (limit <= 0) {
                     break;
                 }
-                // Stop at maxRawPoints and return what we have. The processor API has no way to
-                // mark a result as partial, so the warning in the log is the only signal.
-                long room = maxRawPoints - collected;
-                if (room <= 0) {
-                    logger.warn("Raw query stopped at " + collected + " points (query.raw.max.points="
-                            + maxRawPoints + "); " + pending.size() + " pen(s) have more data in "
-                            + options.getTimeRange().map(Object::toString).orElse("the range")
-                            + " that is not returned");
-                    cutAt = readUntil;
-                    break;
-                }
-                // Share what is left over the pens still paging so the last page fills up to the
-                // cap instead of passing it by a full page per pen.
-                limit = Math.min(limit, Math.max(1, room / pending.size()));
+                // Ask each pen still paging for its share of what is left under maxRawPoints, plus
+                // one. If every series comes back full, the range holds more than the cap and the
+                // read fails below; if not, the pens that came back short are done.
+                long room = Math.max(0, maxRawPoints - collected);
+                limit = Math.min(limit, room / pending.size() + 1);
                 QueryTimeseriesResponse reply;
                 try {
                     reply = grpcClient.queryTimeseries(reqBuilder
@@ -448,7 +435,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 // answers the first page again, and paging on would loop and duplicate points.
                 // Equal timestamps are allowed: series merged under one status can share one. A
                 // Factry that repeats a page of equal timestamps slips past this, but the
-                // maxRawPoints cap still ends the read.
+                // maxRawPoints cap still fails the read.
                 String stuck = null;
                 for (Series series : reply.getSeriesList()) {
                     Long lastTs = series.getDataPointsCount() > 0
@@ -460,15 +447,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     }
                 }
                 if (stuck != null) {
-                    logger.warn("Raw query stopped at " + collected + " points: Factry answered offset "
-                            + offset + " for measurement " + stuck + " with points from before the "
-                            + "previous page. It may not support offset; returning the points read so far");
-                    cutAt = readUntil;
-                    break;
+                    throw new IllegalStateException("Raw query failed: Factry answered offset " + offset
+                            + " for measurement " + stuck + " with points from before the previous page, so it"
+                            + " cannot be read in pages. Use a shorter time range or an aggregated query");
                 }
 
                 Set<String> more = new LinkedHashSet<>();
-                Map<String, Long> pageReadUntil = new HashMap<>();
                 for (Series series : reply.getSeriesList()) {
                     String uuid = series.hasMeasurementUUID() ? series.getMeasurementUUID() : "";
                     if (!uuidToKeyMap.containsKey(uuid)) {
@@ -476,8 +460,6 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     }
                     if (series.getDataPointsCount() >= limit) {
                         more.add(uuid);
-                        pageReadUntil.merge(uuid,
-                                series.getDataPoints(series.getDataPointsCount() - 1).getTimestamp(), Math::min);
                     }
                     QualityCode quality = statusToQuality(seriesStatus(series));
                     List<RawPt> pts = pointsByUuid.computeIfAbsent(uuid, k -> new ArrayList<>());
@@ -490,8 +472,16 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                                 series.getDataPoints(series.getDataPointsCount() - 1).getTimestamp());
                     }
                 }
+                // Returning only part of the range would be worse than failing: Ignition repeats a
+                // pen's last value, with Good quality, into every row after its data stops, so a
+                // cut-short pen looks like a flat line. Fail like Ignition's own HistoryWriter does
+                // at its row limit.
+                if (collected > maxRawPoints) {
+                    throw new IllegalStateException("Raw query failed: the range holds more than "
+                            + maxRawPoints + " points (query.raw.max.points). Use a shorter time range"
+                            + " or an aggregated query");
+                }
                 pending = new ArrayList<>(more);
-                readUntil = pageReadUntil;
                 offset += limit;
             }
 
@@ -503,11 +493,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             List<KeyedPt> merged = new ArrayList<>();
             for (Map.Entry<String, List<RawPt>> entry : pointsByUuid.entrySet()) {
                 RawQueryKey key = uuidToKeyMap.get(entry.getKey());
-                Long cut = cutAt.get(entry.getKey());
                 for (RawPt p : entry.getValue()) {
-                    if (cut == null || p.ts() <= cut) {
-                        merged.add(new KeyedPt(key, p));
-                    }
+                    merged.add(new KeyedPt(key, p));
                 }
             }
             merged.sort(Comparator.comparingLong(k -> k.pt().ts()));
