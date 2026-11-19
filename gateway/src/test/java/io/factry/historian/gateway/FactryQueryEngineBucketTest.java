@@ -230,6 +230,42 @@ class FactryQueryEngineBucketTest {
     }
 
     @Test
+    void count_isZeroForABucketWithoutGoodSamples() throws Exception {
+        String u = factry.addMeasurement("default/out", "number");
+        for (int s = 0; s < 13; s++) {
+            factry.add(u, T0 + s * 1000L, s, "Good");
+        }
+        factry.add(u, T0 + 25_000, 99, "Bad");
+        for (int s = 40; s < 60; s++) {
+            factry.add(u, T0 + s * 1000L, s, "Good");
+        }
+
+        // Before the fix Ignition copied a neighbour's count into the empty buckets: 10, 3, 10, 10, 10, 10.
+        assertColumn(read(AggregationMode.Count), 10.0, 3.0, 0.0, 0.0, 10.0, 10.0);
+        assertColumn(read(AggregationMode.Count, FillMode.DERIVED, T0 + 3_600_000), 10.0, 3.0, 0.0, 0.0, 10.0, 10.0);
+    }
+
+    @Test
+    void count_withoutAnySamples_isZero_andBadFromNowOn() throws Exception {
+        factry.addMeasurement("default/out", "number");
+
+        assertColumn(read(AggregationMode.Count, FillMode.NONE, T0 + 30_000), 0.0, 0.0, 0.0, BAD, BAD, BAD);
+    }
+
+    @Test
+    void count_addsUpSeveralGoodStatusesInOneBucket() {
+        String u = factry.addMeasurement("default/out", "number");
+        factry.add(u, T0 + 1_000, 3, "Good");
+        factry.add(u, T0 + 2_000, 5, "GoodLocalOverride");
+        factry.add(u, T0 + 3_000, 4, "Good");
+        factry.add(u, T0 + 4_000, 4, "Bad");
+
+        FactryQueryEngineAverageTest.Recorder rec = aggregated(AggregationMode.Count, T0 + 3_600_000);
+
+        assertEquals(Arrays.asList(3.0, 0.0, 0.0, 0.0, 0.0, 0.0), values(rec));
+    }
+
+    @Test
     void severalGoodStatusesInOneBucket_giveOnePoint() {
         String u = factry.addMeasurement("default/out", "number");
         factry.add(u, T0 + 1_000, 3, "Good");
@@ -333,5 +369,21 @@ class FactryQueryEngineBucketTest {
         FactryQueryEngineAverageTest.Recorder rec = aggregated(AggregationMode.LastValue, T0 + 5_000);
 
         assertEquals(Arrays.asList(5.0, BAD, BAD, BAD, BAD, BAD), values(rec));
+    }
+
+    @Test
+    void aBucketWithOneSample_hasNoStandardDeviation_andTheOtherBucketsStillDo() throws Exception {
+        // Factry answers such a bucket without a value; it must not fail the whole pen.
+        String u = factry.addMeasurement("default/out", "number");
+        factry.add(u, T0 + 1_000, 5, "Good");
+        factry.add(u, T0 + 11_000, 1, "Good");
+        factry.add(u, T0 + 12_000, 2, "Good");
+        factry.add(u, T0 + 13_000, 3, "Good");
+
+        AverageHistoryQuery.Dataset ds = read(AggregationMode.StdDev);
+
+        assertTrue(ds.qualities.get(0)[1].isBad(), ds::toString);
+        assertEquals(1.0, ((Number) ds.rows.get(1)[1]).doubleValue(), 1e-9, ds::toString);
+        assertTrue(ds.qualities.get(1)[1].isGood(), ds::toString);
     }
 }
