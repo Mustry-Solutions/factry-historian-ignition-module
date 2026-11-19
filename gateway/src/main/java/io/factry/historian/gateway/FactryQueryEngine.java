@@ -570,10 +570,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 long rangeStart = options.getTimeRange().get().startTime().toEpochMilli();
                 long rangeEnd = options.getTimeRange().get().endTime().toEpochMilli();
                 List<Map<String, RawPt>> bounds = new ArrayList<>();
-                bounds.add(boundingPoints(QueryTimeseriesRequest.newBuilder()
-                        .addAllMeasurementUUIDs(bounded).addGroupBy("status")
-                        .setStart(Timestamps.fromMillis(0)).setEnd(Timestamps.fromMillis(rangeStart))
-                        .setDesc(true).setLimit(1).build(), true, uuidToKeyMap, keyToNode));
+                bounds.add(boundingPoints(sampleBeforeRequest(bounded, rangeStart), true, uuidToKeyMap, keyToNode));
                 // Nothing is stored after now, so a range that ends later has no value after it.
                 long nowMs = now.getAsLong();
                 if (rangeEnd < nowMs) {
@@ -583,8 +580,15 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                             .setLimit(1).build(), false, uuidToKeyMap, keyToNode));
                 }
                 for (Map<String, RawPt> byUuid : bounds) {
-                    byUuid.forEach((uuid, p) -> pointsByUuid.computeIfAbsent(uuid, k -> new ArrayList<>()).add(p));
-                    collected += byUuid.size();
+                    for (Map.Entry<String, RawPt> e : byUuid.entrySet()) {
+                        List<RawPt> pts = pointsByUuid.computeIfAbsent(e.getKey(), k -> new ArrayList<>());
+                        // The range end is exclusive, so the value after it is a new sample; a
+                        // Factry that included the end would otherwise give that sample twice.
+                        if (pts.stream().noneMatch(p -> p.ts() == e.getValue().ts())) {
+                            pts.add(e.getValue());
+                            collected++;
+                        }
+                    }
                 }
             }
 
@@ -651,6 +655,11 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         try {
             reply = grpcClient.queryTimeseries(request);
         } catch (StatusRuntimeException e) {
+            // Factry itself cannot be read: fail like the main read does, not with a range that
+            // silently lost its bounds.
+            if (failsEveryPen(e)) {
+                throw e;
+            }
             logger.warn("Could not read the values around the range, returning the range without them: "
                     + e.getMessage());
             return Map.of();
@@ -1307,8 +1316,17 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
     /** The last sample before {@code startMs} (end is exclusive), one per status series. */
     static QueryTimeseriesRequest sampleBeforeRequest(String uuid, long startMs) {
+        return sampleBeforeRequest(List.of(uuid), startMs);
+    }
+
+    /**
+     * The same for several measurements in one request: Factry applies the limit per measurement
+     * and status. It scans from epoch 0, so on a large database it can be the slowest request of
+     * a read (the Average path sends the same one).
+     */
+    static QueryTimeseriesRequest sampleBeforeRequest(Collection<String> uuids, long startMs) {
         return QueryTimeseriesRequest.newBuilder()
-                .addMeasurementUUIDs(uuid)
+                .addAllMeasurementUUIDs(uuids)
                 .addGroupBy("status")
                 .setStart(Timestamps.fromMillis(0))
                 .setEnd(Timestamps.fromMillis(startMs))

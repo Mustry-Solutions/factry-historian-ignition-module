@@ -7,7 +7,9 @@ import com.inductiveautomation.historian.common.model.options.RawQueryKey;
 import com.inductiveautomation.historian.common.model.options.RawQueryOptions;
 import com.inductiveautomation.historian.gateway.api.query.processor.ProcessingContext;
 import com.inductiveautomation.historian.gateway.api.query.processor.RawPointProcessor;
+import com.inductiveautomation.historian.gateway.util.HistorianUtilities;
 import com.inductiveautomation.ignition.common.QualifiedPath;
+import com.inductiveautomation.ignition.common.util.Flags;
 import com.inductiveautomation.ignition.common.model.values.QualityCode;
 import org.junit.jupiter.api.Test;
 
@@ -33,15 +35,21 @@ class FactryQueryEngineBoundsTest {
     private static final int NO_BOUNDS = 32;
     private static final int NO_SEED = 1;
 
-    /** Refuses the reads of the values around the range when set. */
-    private boolean refuseBounds;
+    /** Refuses the reads of the values around the range with this status when set. */
+    private io.grpc.Status refuseBounds;
+    /** Answers the read of the range with its end included, unlike Factry. */
+    private boolean endInclusive;
 
     private final TwaFakeFactry factry = new TwaFakeFactry() {
         @Override
         public io.factry.historian.proto.QueryTimeseriesResponse queryTimeseries(
                 io.factry.historian.proto.QueryTimeseriesRequest request) {
-            if (refuseBounds && request.getLimit() == 1) {
-                throw io.grpc.Status.INTERNAL.withDescription("query failed").asRuntimeException();
+            if (refuseBounds != null && request.getLimit() == 1) {
+                throw refuseBounds.asRuntimeException();
+            }
+            if (endInclusive && request.getLimit() != 1 && request.hasEnd()) {
+                request = request.toBuilder().setEnd(com.google.protobuf.util.Timestamps.add(request.getEnd(),
+                        com.google.protobuf.util.Durations.fromMillis(1))).build();
             }
             return super.queryTimeseries(request);
         }
@@ -58,14 +66,14 @@ class FactryQueryEngineBoundsTest {
         return engine;
     }
 
-    private AverageHistoryQuery.Dataset raw(int returnSize, int flags, String... tags) throws Exception {
-        AverageHistoryQuery.Dataset ds = AverageHistoryQuery.raw(engine(), T0, END, returnSize, flags, tags);
+    private IgnitionHistoryQuery.Dataset raw(int returnSize, int flags, String... tags) throws Exception {
+        IgnitionHistoryQuery.Dataset ds = IgnitionHistoryQuery.raw(engine(), T0, END, returnSize, flags, tags);
         assertNull(ds.error, ds::toString);
         return ds;
     }
 
     /** "seconds from T0 = value" per row, for the first data column. */
-    private static List<String> rows(AverageHistoryQuery.Dataset ds) {
+    private static List<String> rows(IgnitionHistoryQuery.Dataset ds) {
         List<String> out = new ArrayList<>();
         for (int r = 0; r < ds.rows.size(); r++) {
             out.add((ds.time(r) - T0) / 1000 + "=" + ds.rows.get(r)[1]);
@@ -104,13 +112,13 @@ class FactryQueryEngineBoundsTest {
         // flags and runs the legacy path, which sets "no seed values". includeBounds=True only
         // makes the range inclusive, and that is dropped on the way. The Core Historian gives no
         // bounds there either.
-        assertEquals(List.of("30=6.0"), rows(AverageHistoryQuery.rawPoints(engine(),
+        assertEquals(List.of("30=6.0"), rows(IgnitionHistoryQuery.rawPoints(engine(),
                 RawQueryOptions.builder().startTime(T0).endTime(END).addQueryKey(new RawQueryKey(path)).build())));
-        assertEquals(List.of("30=6.0"), rows(AverageHistoryQuery.rawPoints(engine(),
+        assertEquals(List.of("30=6.0"), rows(IgnitionHistoryQuery.rawPoints(engine(),
                 RawQueryOptions.builder().startTime(T0).endTime(END).addQueryKey(new RawQueryKey(path))
                         .includeBounds().build())));
         // A RawQueryOptions passed as its first argument can ask for them (YES_BOUND_VALUES).
-        assertEquals(List.of("-600=5.0", "30=6.0", "120=7.0"), rows(AverageHistoryQuery.rawPoints(engine(),
+        assertEquals(List.of("-600=5.0", "30=6.0", "120=7.0"), rows(IgnitionHistoryQuery.rawPoints(engine(),
                 RawQueryOptions.builder().startTime(T0).endTime(END).addQueryKey(new RawQueryKey(path))
                         .addPropertyValue(HistorianProperties.YES_BOUND_VALUES, true).build())));
     }
@@ -144,7 +152,7 @@ class FactryQueryEngineBoundsTest {
         factry.add(u, T0 - 600_000, 5, "Bad");
         factry.add(u, T0 + 30_000, 6, "Good");
 
-        AverageHistoryQuery.Dataset ds = raw(-1, YES_BOUNDS, "out");
+        IgnitionHistoryQuery.Dataset ds = raw(-1, YES_BOUNDS, "out");
 
         assertEquals(List.of("-600=5.0", "30=6.0"), rows(ds));
         assertTrue(ds.qualities.get(0)[1].isBad(), ds::toString);
@@ -223,7 +231,7 @@ class FactryQueryEngineBoundsTest {
         String b = onChangeTag("b");
         factry.failingMeasurements.add(b);
 
-        AverageHistoryQuery.Dataset ds = raw(-1, YES_BOUNDS, "a", "b");
+        IgnitionHistoryQuery.Dataset ds = raw(-1, YES_BOUNDS, "a", "b");
 
         assertEquals(List.of("-600=5.0", "30=6.0", "120=7.0"), rows(ds));
         for (QualityCode[] q : ds.qualities) {
@@ -234,8 +242,50 @@ class FactryQueryEngineBoundsTest {
     @Test
     void whenFactryRefusesTheValuesAroundTheRange_theRangeIsStillReturned() throws Exception {
         onChangeTag("out");
-        refuseBounds = true;
+        refuseBounds = io.grpc.Status.INTERNAL.withDescription("query failed");
 
         assertEquals(List.of("30=6.0"), rows(raw(-1, YES_BOUNDS, "out")));
+    }
+
+    @Test
+    void whenFactryIsDownForTheValuesAroundTheRange_theReadFails() throws Exception {
+        onChangeTag("out");
+        refuseBounds = io.grpc.Status.UNAVAILABLE.withDescription("connection refused");
+
+        IgnitionHistoryQuery.Dataset ds = IgnitionHistoryQuery.raw(engine(), T0, END, -1, YES_BOUNDS, "out");
+
+        assertTrue(ds.error != null && ds.error.getMessage().contains("connection refused"), ds::toString);
+    }
+
+    @Test
+    void aSampleExactlyAtTheEnd_comesBackOnce() throws Exception {
+        String u = factry.addMeasurement("default/out", "number");
+        factry.add(u, T0 + 30_000, 6, "Good");
+        factry.add(u, END, 7, "Good");
+
+        // Factry's end is exclusive (checked live), so it is the value after the end.
+        assertEquals(List.of("30=6.0", "60=7.0"), rows(raw(-1, YES_BOUNDS, "out")));
+        // Also when the range read includes the end.
+        endInclusive = true;
+        assertEquals(List.of("30=6.0", "60=7.0"), rows(raw(-1, YES_BOUNDS, "out")));
+    }
+
+    @Test
+    void beforeIgnition836_aRawReadCarriesOnlyTheCallersFlags() {
+        // Historian 1.3.3 (Ignition 8.3.0 to 8.3.5) builds a plain raw read from the caller's
+        // flags only (HistorianUtilities.fromLegacyQueryFlags), without "no seed values": so
+        // queryTagHistory without includeBoundingValues, queryRawPoints and raw bindings get the
+        // bounds there, as from the Core Historian on those versions.
+        onChangeTag("out");
+
+        for (int flags : new int[]{0, YES_BOUNDS}) {
+            assertEquals(List.of("-600=5.0", "30=6.0", "120=7.0"), stream(RawQueryOptions.builder()
+                    .startTime(T0).endTime(END).addQueryKey(key("out"))
+                    .addPropertyValues(HistorianUtilities.fromLegacyQueryFlags(new Flags(flags))).build()),
+                    "flags " + flags);
+        }
+        assertEquals(List.of("30=6.0"), stream(RawQueryOptions.builder().startTime(T0).endTime(END)
+                .addQueryKey(key("out")).addPropertyValues(HistorianUtilities.fromLegacyQueryFlags(new Flags(NO_BOUNDS)))
+                .build()));
     }
 }
