@@ -280,7 +280,9 @@ Steps 2 to 7 live in `PointWriter`, which the engine calls; it uses no Ignition 
 
 **`isEngineUnavailable()`** — returns `true` when the gRPC connection is down. This is how S&F knows to buffer instead of attempting writes.
 
-**`doStoreMetadata()`** / **`doStoreSourceChange()`** — no-ops. Metadata is managed on the Factry platform, not pushed from Ignition.
+**`doStoreMetadata()`**: caches each tag's metadata in `MeasurementCache`; it sends nothing to Factry by itself. When the module creates a measurement for the tag, its data type, description, engineering units and limits (the `Config` attributes) and the `ignitionDataType` setting come from this cache. The cache keeps the metadata after the create, so a failed create or a measurement deleted in Factry is created again with it: Ignition may not send it again.
+
+**`applySourceChanges()`**: drops the cached metadata of retired and renamed tags. Measurements in Factry are left alone.
 
 ### `FactryQueryEngine.java`
 
@@ -476,7 +478,7 @@ FactryStorageEngine.doStoreAtomic(points)
 - **History renaming** — not supported by the Factry platform
 - **Extended scripting** (e.g. `system.factry.queryEvents`) — deferred until customer demand exists
 
-**Store metadata is a no-op:** `FactryStorageEngine.doStoreMetadata()` accepts the call and returns success, but does not forward metadata to Factry. Metadata (engineering units, limits, etc.) is managed on the Factry platform directly, not pushed from Ignition.
+**Metadata only seeds new measurements:** `FactryStorageEngine.doStoreMetadata()` caches the tag metadata, and it is applied only when the module creates a measurement (data type, description, engineering units and limits, `ignitionDataType` setting). Later changes to a tag's metadata in Ignition are not pushed to an existing measurement; edit those on the Factry platform.
 
 **Pagination:** The design document lists pagination as a provider requirement. In practice, there is no paginated use case — charts receive the full dataset and Jython scripts get a complete `DataSet` object. The gRPC proto does define `limit`/`offset` fields on `QueryTimeseriesRequest`, so pagination can be added if Factry ever imposes response size limits.
 
