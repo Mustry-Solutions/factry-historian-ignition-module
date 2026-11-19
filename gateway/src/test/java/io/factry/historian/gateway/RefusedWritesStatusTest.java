@@ -11,6 +11,8 @@ import com.inductiveautomation.ignition.gateway.model.ProfileStatus;
 import io.factry.historian.proto.Collector;
 import io.factry.historian.proto.CreatePointsReply;
 import io.factry.historian.proto.GetMeasurementsByFilterRequest;
+import io.factry.historian.proto.HealthUpdateReply;
+import io.factry.historian.proto.HealthUpdates;
 import io.factry.historian.proto.HistorianGrpc;
 import io.factry.historian.proto.Measurement;
 import io.factry.historian.proto.Measurements;
@@ -28,6 +30,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -47,6 +50,8 @@ class RefusedWritesStatusTest {
     private final AtomicLong now = new AtomicLong(1_000_000L);
     private final WriteHealth health = new WriteHealth(now::get);
     private FactryStorageEngine engine;
+    /** The health values Factry received, in order. */
+    private final List<String> healthSent = new CopyOnWriteArrayList<>();
 
     private class Factry extends HistorianGrpc.HistorianImplBase {
         @Override
@@ -62,6 +67,13 @@ class RefusedWritesStatusTest {
                     .addMeasurements(Measurement.newBuilder().setUuid("uuid-" + request.getKeyword())
                             .setName(request.getKeyword()).setStatus("Active"))
                     .setTotal(1).build());
+            observer.onCompleted();
+        }
+
+        @Override
+        public void updateHealth(HealthUpdates request, StreamObserver<HealthUpdateReply> observer) {
+            request.getHealthUpdatesList().forEach(u -> healthSent.add(u.getHealth()));
+            observer.onNext(HealthUpdateReply.getDefaultInstance());
             observer.onCompleted();
         }
 
@@ -133,6 +145,21 @@ class RefusedWritesStatusTest {
         createPointsStatus = Status.OK;
         assertEquals(StorageResult.Type.SUCCESS, flush().type());
         assertSame(ProfileStatus.RUNNING, health.status(), "back at the first accepted write");
+    }
+
+    /** #33: Factry showed the collector as Collecting whatever happened. */
+    @Test
+    void factrySeesTheCollectorUnstableWhileItRefusesWrites() throws Exception {
+        FactryHistoryProvider.sendHealthUpdate(client, health);
+        createPointsStatus = Status.INTERNAL.withDescription("influxdb: connection refused");
+        flush();
+        after(30);
+        FactryHistoryProvider.sendHealthUpdate(client, health);
+        createPointsStatus = Status.OK;
+        flush();
+        FactryHistoryProvider.sendHealthUpdate(client, health);
+
+        assertEquals(List.of("Collecting", "Unstable", "Collecting"), healthSent);
     }
 
     @Test

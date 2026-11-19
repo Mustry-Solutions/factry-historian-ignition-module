@@ -100,6 +100,11 @@ final class WriteHealth {
         return ProfileStatus.RUNNING;
     }
 
+    /** The collector health for Factry: Unstable while the status says Factry refuses writes. */
+    synchronized String health() {
+        return refusing() ? "Unstable" : "Collecting";
+    }
+
     private boolean refusing() {
         return refusedSince != null && clock.getAsLong() - refusedSince >= REFUSING_AFTER_MS;
     }
