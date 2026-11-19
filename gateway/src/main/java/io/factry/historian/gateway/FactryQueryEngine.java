@@ -89,8 +89,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     private final HistorianMetrics metrics;
 
     /**
-     * Most raw points one query collects over all pens before it stops paging. Paging lifts the
-     * gRPC message limit, so without this a long range over many pens could fill the heap.
+     * Most raw points one query reads over all pens; a range that holds more fails the read. Paging
+     * lifts the gRPC message limit, so without this a long range over many pens could fill the heap.
      */
     long maxRawPoints = ModuleProperties.getRawQueryMaxPoints();
 
@@ -389,7 +389,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
             // A measurement now spans multiple status-series. Collect all of a measurement's points
             // (each carrying its series' quality), then merge-sort by timestamp before emitting.
-            record RawPt(long ts, Object value, QualityCode quality) {}
+            record RawPt(RawQueryKey key, long ts, Object value, QualityCode quality) {}
             Map<String, List<RawPt>> pointsByUuid = new LinkedHashMap<>();
 
             // Read in pages: one answer for a long range does not fit in a gRPC message. Factry
@@ -406,29 +406,16 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             long collected = 0;
             // Last timestamp read per series (measurement and status), to see that a page moved on.
             Map<String, Long> lastTsBySeries = new HashMap<>();
-            // Per pen still paging: the time up to which all its series are read. Set when the
-            // read stops early, so those pens end there instead of at a sparse series' last point.
-            Map<String, Long> readUntil = new HashMap<>();
-            Map<String, Long> cutAt = Map.of();
             while (!pending.isEmpty()) {
                 long limit = returnSize != null ? Math.min(pageSize, returnSize - offset) : pageSize;
                 if (limit <= 0) {
                     break;
                 }
-                // Stop at maxRawPoints and return what we have. The processor API has no way to
-                // mark a result as partial, so the warning in the log is the only signal.
-                long room = maxRawPoints - collected;
-                if (room <= 0) {
-                    logger.warn("Raw query stopped at " + collected + " points (query.raw.max.points="
-                            + maxRawPoints + "); " + pending.size() + " pen(s) have more data in "
-                            + options.getTimeRange().map(Object::toString).orElse("the range")
-                            + " that is not returned");
-                    cutAt = readUntil;
-                    break;
-                }
-                // Share what is left over the pens still paging so the last page fills up to the
-                // cap instead of passing it by a full page per pen.
-                limit = Math.min(limit, Math.max(1, room / pending.size()));
+                // Ask each pen still paging for its share of what is left under maxRawPoints, plus
+                // one. If every series comes back full, the range holds more than the cap and the
+                // read fails below; if not, the pens that came back short are done.
+                long room = Math.max(0, maxRawPoints - collected);
+                limit = Math.min(limit, room / pending.size() + 1);
                 QueryTimeseriesResponse reply;
                 try {
                     reply = grpcClient.queryTimeseries(reqBuilder
@@ -458,7 +445,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 // answers the first page again, and paging on would loop and duplicate points.
                 // Equal timestamps are allowed: series merged under one status can share one. A
                 // Factry that repeats a page of equal timestamps slips past this, but the
-                // maxRawPoints cap still ends the read.
+                // maxRawPoints cap still fails the read.
                 String stuck = null;
                 for (Series series : reply.getSeriesList()) {
                     Long lastTs = series.getDataPointsCount() > 0
@@ -470,15 +457,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     }
                 }
                 if (stuck != null) {
-                    logger.warn("Raw query stopped at " + collected + " points: Factry answered offset "
-                            + offset + " for measurement " + stuck + " with points from before the "
-                            + "previous page. It may not support offset; returning the points read so far");
-                    cutAt = readUntil;
-                    break;
+                    throw new IllegalStateException("Factry answered offset " + offset
+                            + " for measurement " + stuck + " with points from before the previous page, so it"
+                            + " cannot be read in pages. Use a shorter time range or an aggregated query");
                 }
 
                 Set<String> more = new LinkedHashSet<>();
-                Map<String, Long> pageReadUntil = new HashMap<>();
                 for (Series series : reply.getSeriesList()) {
                     String uuid = series.hasMeasurementUUID() ? series.getMeasurementUUID() : "";
                     if (!uuidToKeyMap.containsKey(uuid)) {
@@ -486,13 +470,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     }
                     if (series.getDataPointsCount() >= limit) {
                         more.add(uuid);
-                        pageReadUntil.merge(uuid,
-                                series.getDataPoints(series.getDataPointsCount() - 1).getTimestamp(), Math::min);
                     }
                     QualityCode quality = statusToQuality(seriesStatus(series));
+                    RawQueryKey key = uuidToKeyMap.get(uuid);
                     List<RawPt> pts = pointsByUuid.computeIfAbsent(uuid, k -> new ArrayList<>());
                     for (SeriesPoint pt : series.getDataPointsList()) {
-                        pts.add(new RawPt(pt.getTimestamp(), protoValueToJava(pt.getValue()), quality));
+                        pts.add(new RawPt(key, pt.getTimestamp(), protoValueToJava(pt.getValue()), quality));
                     }
                     collected += series.getDataPointsCount();
                     if (series.getDataPointsCount() > 0) {
@@ -500,8 +483,16 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                                 series.getDataPoints(series.getDataPointsCount() - 1).getTimestamp());
                     }
                 }
+                // Returning only part of the range would be worse than failing: Ignition repeats a
+                // pen's last value, with Good quality, into every row after its data stops, so a
+                // cut-short pen looks like a flat line. Fail like Ignition's own HistoryWriter does
+                // at its row limit.
+                if (collected > maxRawPoints) {
+                    throw new IllegalStateException("the range holds more than "
+                            + maxRawPoints + " points (query.raw.max.points). Use a shorter time range"
+                            + " or an aggregated query");
+                }
                 pending = new ArrayList<>(more);
-                readUntil = pageReadUntil;
                 offset += limit;
             }
 
@@ -509,37 +500,31 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             // to its timestamp, so every pen must be handed over in one time order. Pen by pen,
             // the second pen's points go back in time and the dataset gets rows out of order, with
             // the first pen's last value carried into them.
-            record KeyedPt(RawQueryKey key, RawPt pt) {}
-            List<KeyedPt> merged = new ArrayList<>();
+            List<RawPt> merged = new ArrayList<>((int) collected + failedPens.size());
             // A failed pen gets one Bad_Failure point at the start, first in line, so every row
             // shows it failed. Points it returned on earlier pages are dropped.
             for (String uuid : failedPens) {
                 pointsByUuid.remove(uuid);
-                merged.add(new KeyedPt(uuidToKeyMap.get(uuid),
-                        new RawPt(failedAt.toEpochMilli(), null, QualityCode.Bad_Failure)));
+                merged.add(new RawPt(uuidToKeyMap.get(uuid), failedAt.toEpochMilli(), null, QualityCode.Bad_Failure));
             }
-            for (Map.Entry<String, List<RawPt>> entry : pointsByUuid.entrySet()) {
-                RawQueryKey key = uuidToKeyMap.get(entry.getKey());
-                Long cut = cutAt.get(entry.getKey());
-                for (RawPt p : entry.getValue()) {
-                    if (cut == null || p.ts() <= cut) {
-                        merged.add(new KeyedPt(key, p));
-                    }
-                }
+            // Each point carries its key, so merging adds no wrapper object per point, and each pen's
+            // list is dropped once copied. A large read is held about once in the module.
+            for (var it = pointsByUuid.values().iterator(); it.hasNext(); ) {
+                merged.addAll(it.next());
+                it.remove();
             }
-            merged.sort(Comparator.comparingLong(k -> k.pt().ts()));
+            merged.sort(Comparator.comparingLong(RawPt::ts));
             // Like Ignition's own historians, returnSize counts points across all pens.
             if (returnSize != null && merged.size() > returnSize) {
                 merged = merged.subList(0, returnSize);
             }
 
             int totalPoints = 0;
-            for (KeyedPt kp : merged) {
-                RawPt p = kp.pt();
+            for (RawPt p : merged) {
                 AtomicPoint<?> atomicPoint = DataPointFactory.createAtomicPoint(
-                        p.value(), p.quality(), Instant.ofEpochMilli(p.ts()), kp.key().source());
+                        p.value(), p.quality(), Instant.ofEpochMilli(p.ts()), p.key().source());
 
-                if (!processor.onPointAvailable(kp.key(), atomicPoint)) {
+                if (!processor.onPointAvailable(p.key(), atomicPoint)) {
                     processor.onComplete();
                     return Optional.of(totalPoints);
                 }
