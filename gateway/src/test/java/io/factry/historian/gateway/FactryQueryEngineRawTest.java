@@ -296,6 +296,34 @@ class FactryQueryEngineRawTest {
     }
 
     @Test
+    void penRefusedAfterTheReturnSizeCutDoesNotLosePointsOfOtherPens() {
+        // Pen a sets where the first returnSize points end, so b stops paging; then Factry refuses
+        // a on its second page. Without a's points the first 100 reach into b's.
+        String a = factry.addMeasurement("default/a", "number");
+        String b = factry.addMeasurement("default/b", "number");
+        String c = factry.addMeasurement("default/c", "number");
+        for (int s = 1; s <= 200; s++) {
+            factry.addPoint(a, START + s * 1000L, s);
+        }
+        for (int s = 0; s < 100; s++) {
+            factry.addPoint(b, START + (1000 + s) * 1000L, s);
+        }
+        for (int s = 100; s < 160; s++) {
+            factry.addPoint(c, START + s * 1000L, s);
+        }
+        factry.failingPastFirstPage.add(a);
+        startEngine();
+        engine.maxRawPoints = 150;
+
+        Recorder rec = query(100, key("a"), key("b"), key("c"));
+
+        assertNull(rec.error, () -> "read failed: " + rec.error);
+        assertEquals(0, rec.count(key("a")));
+        assertEquals(60, rec.count(key("c")));
+        assertEquals(40, rec.count(key("b")));
+    }
+
+    @Test
     void returnSizeKeepsTheFirstPointsInTime() {
         for (String tag : List.of("a", "b")) {
             String uuid = factry.addMeasurement("default/" + tag, "number");

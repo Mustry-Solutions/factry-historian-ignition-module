@@ -407,6 +407,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             // fewer points than the limit is done; only measurements with a full series go on.
             //
             // A pen Factry refuses on its own is marked Bad_Failure and the other pens still draw.
+            Set<String> refused = new HashSet<>();
             int pageSize = RAW_QUERY_PAGE_SIZE;
             List<String> pending = measurementUUIDs;
             long offset = 0;
@@ -442,21 +443,26 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                         continue;
                     }
                     Map<String, StatusRuntimeException> failed = penFailures(reqBuilder.build(), pending, e);
-                    // A refused pen never fails the read, even when every pen is refused: Ignition
-                    // runs one query per historian in a loop that the first error ends, so an
-                    // error here would also drop other historians' pens from the chart.
+                    // Pens Factry refuses do not fail the read, even when every pen is refused:
+                    // Ignition runs one query per historian in a loop that the first error ends,
+                    // so an error here would also drop other historians' pens from the chart. The
+                    // read fails when Factry itself cannot be read, or when no pen can be blamed
+                    // (the request for all pens failed, but each pen alone reads fine).
                     if (failed.isEmpty()) {
                         throw e;
                     }
                     failed.forEach((uuid, why) -> failures.put(uuidToKeyMap.get(uuid), penFailed(why)));
-                    // Its column reads Bad_Failure from the context; points it returned on earlier
-                    // pages would only make it look partly good.
-                    for (String uuid : failed.keySet()) {
-                        List<RawPt> dropped = pointsByUuid.remove(uuid);
-                        collected -= dropped == null ? 0 : dropped.size();
-                    }
-                    pending = new ArrayList<>(pending);
-                    pending.removeAll(failed.keySet());
+                    refused.addAll(failed.keySet());
+                    // Start over without the refused pens. Their points must go (the column reads
+                    // Bad_Failure from the context; old points would make it look partly good),
+                    // and with returnSize they may have decided which other pens stopped paging.
+                    // Rare, so reading again is cheaper than undoing that.
+                    pointsByUuid.clear();
+                    lastTsBySeries.clear();
+                    collected = 0;
+                    offset = 0;
+                    pending = new ArrayList<>(measurementUUIDs);
+                    pending.removeAll(refused);
                     continue;
                 }
 
