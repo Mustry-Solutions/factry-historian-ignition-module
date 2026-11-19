@@ -243,6 +243,7 @@ Implements `HistoricalNode` — the Ignition SDK's representation of a browsable
 - `"number"` → `DataType.Float8`
 - `"string"` → `DataType.String`
 - a measurement whose `ignitionDataType` setting is `DateTime` → `DataType.DateTime`. Factry keeps the dates as epoch milliseconds; the query engine returns them as `java.util.Date`. Aggregates of such a tag: LastValue, Minimum, Maximum, MinMax, Average and SimpleAverage are Dates, Count is a number, and Sum, Range, Variance and StdDev fail the key with `Bad_Unsupported`. Measurements created before this setting existed read back as numbers.
+- Array tags get their Ignition type in the setting too (e.g. `DateTimeArray`), but the read side does not return array values yet. Only `DateTime` is checked, so when array read-back is added, the elements of a `DateTimeArray` measurement must be turned into Dates as well.
 
 ### `ModuleProperties.java`
 
