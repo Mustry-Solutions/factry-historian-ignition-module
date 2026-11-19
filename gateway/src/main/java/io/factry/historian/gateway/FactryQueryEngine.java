@@ -389,7 +389,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
             // A measurement now spans multiple status-series. Collect all of a measurement's points
             // (each carrying its series' quality), then merge-sort by timestamp before emitting.
-            record RawPt(long ts, Object value, QualityCode quality) {}
+            record RawPt(RawQueryKey key, long ts, Object value, QualityCode quality) {}
             Map<String, List<RawPt>> pointsByUuid = new LinkedHashMap<>();
 
             // Read in pages: one answer for a long range does not fit in a gRPC message. Factry
@@ -462,9 +462,10 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                         more.add(uuid);
                     }
                     QualityCode quality = statusToQuality(seriesStatus(series));
+                    RawQueryKey key = uuidToKeyMap.get(uuid);
                     List<RawPt> pts = pointsByUuid.computeIfAbsent(uuid, k -> new ArrayList<>());
                     for (SeriesPoint pt : series.getDataPointsList()) {
-                        pts.add(new RawPt(pt.getTimestamp(), protoValueToJava(pt.getValue()), quality));
+                        pts.add(new RawPt(key, pt.getTimestamp(), protoValueToJava(pt.getValue()), quality));
                     }
                     collected += series.getDataPointsCount();
                     if (series.getDataPointsCount() > 0) {
@@ -489,27 +490,25 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             // to its timestamp, so every pen must be handed over in one time order. Pen by pen,
             // the second pen's points go back in time and the dataset gets rows out of order, with
             // the first pen's last value carried into them.
-            record KeyedPt(RawQueryKey key, RawPt pt) {}
-            List<KeyedPt> merged = new ArrayList<>();
-            for (Map.Entry<String, List<RawPt>> entry : pointsByUuid.entrySet()) {
-                RawQueryKey key = uuidToKeyMap.get(entry.getKey());
-                for (RawPt p : entry.getValue()) {
-                    merged.add(new KeyedPt(key, p));
-                }
+            List<RawPt> merged = new ArrayList<>((int) collected);
+            // Each point carries its key, so merging adds no wrapper object per point, and each pen's
+            // list is dropped once copied. A large read is held about once in the module.
+            for (var it = pointsByUuid.values().iterator(); it.hasNext(); ) {
+                merged.addAll(it.next());
+                it.remove();
             }
-            merged.sort(Comparator.comparingLong(k -> k.pt().ts()));
+            merged.sort(Comparator.comparingLong(RawPt::ts));
             // Like Ignition's own historians, returnSize counts points across all pens.
             if (returnSize != null && merged.size() > returnSize) {
                 merged = merged.subList(0, returnSize);
             }
 
             int totalPoints = 0;
-            for (KeyedPt kp : merged) {
-                RawPt p = kp.pt();
+            for (RawPt p : merged) {
                 AtomicPoint<?> atomicPoint = DataPointFactory.createAtomicPoint(
-                        p.value(), p.quality(), Instant.ofEpochMilli(p.ts()), kp.key().source());
+                        p.value(), p.quality(), Instant.ofEpochMilli(p.ts()), p.key().source());
 
-                if (!processor.onPointAvailable(kp.key(), atomicPoint)) {
+                if (!processor.onPointAvailable(p.key(), atomicPoint)) {
                     processor.onComplete();
                     return Optional.of(totalPoints);
                 }
