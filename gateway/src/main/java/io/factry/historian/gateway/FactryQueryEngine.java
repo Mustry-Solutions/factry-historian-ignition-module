@@ -35,6 +35,7 @@ import com.inductiveautomation.ignition.common.config.PropertySet;
 import com.inductiveautomation.ignition.common.model.values.QualityCode;
 import com.inductiveautomation.ignition.common.sqltags.history.AggregationMode;
 import com.inductiveautomation.ignition.common.sqltags.model.types.DataType;
+import com.inductiveautomation.ignition.common.sqltags.model.types.DataTypeClass;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 
@@ -926,9 +927,10 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     }
 
     /**
-     * Gives a Count of a DateTime tag a number column. The framework types every aggregate column
-     * after the tag, then coerces each value to that type, so a count of 600 would come out as the
-     * Date 1970-01-01 00:00:00.600. Everything else passes through to the real processor.
+     * Gives a Count of a tag that is not numeric (String, DateTime, ...) a number column. The
+     * framework types a Count column after the tag (CountAggregate returns the tag's own type
+     * class), then coerces each value to that type, so a count of 600 would come out as the text
+     * "600" or the Date 1970-01-01 00:00:00.600. Everything else passes through to the real processor.
      */
     private static final class CountAsNumber implements AggregatedPointProcessor {
         private final AggregatedPointProcessor delegate;
@@ -951,9 +953,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 }
             });
             for (AggregatedQueryKey key : keys) {
-                boolean dateTime = context.getContextValue(key, HistorianProperties.DATA_TYPE)
-                        .filter(DataType.DateTime::equals).isPresent();
-                if (dateTime && "Count".equals(key.aggregationType().name())) {
+                // Boolean tags have the Integer class, so their Count is already a number.
+                boolean notNumeric = context.getContextValue(key, HistorianProperties.DATA_TYPE)
+                        .filter(t -> t.getTypeClass() != DataTypeClass.Integer
+                                && t.getTypeClass() != DataTypeClass.Float)
+                        .isPresent();
+                if (notNumeric && "Count".equals(key.aggregationType().name())) {
                     builder.addPropertyValue(key, HistorianProperties.DATA_TYPE, DataType.Float8);
                 }
             }

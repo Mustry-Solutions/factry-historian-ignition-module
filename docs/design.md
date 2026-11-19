@@ -310,6 +310,7 @@ Extends `AbstractQueryEngine`. Handles all data retrieval from Factry.
 | StdDev | `stddev` |
 | MinMax | queries `min` and `max` separately, emits pairs |
 
+- Count of a tag that is not numeric (String, DateTime) gets a number column: Ignition types a Count column after the tag, so it would otherwise return the text `"600"` or a Date in 1970
 - Time window → Go duration conversion (e.g., `TimeWindow(2h30m)` → `"2h30m0s"`)
 
 **`doBrowse(browseContext, publisher)`**:

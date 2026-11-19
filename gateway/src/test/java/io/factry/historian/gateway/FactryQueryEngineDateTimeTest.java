@@ -63,7 +63,7 @@ class FactryQueryEngineDateTimeTest {
     private FactryGrpcClient client;
     private FactryQueryEngine engine;
 
-    /** Measurements Factry knows: one DateTime tag and one plain number tag. */
+    /** Measurements Factry knows: one DateTime tag, one plain number tag and one String tag. */
     private static final List<Measurement> MEASUREMENTS = List.of(
             Measurement.newBuilder().setUuid("uuid-stamp").setName("default/Test/Stamp").setDatatype("number")
                     .setStatus("Active")
@@ -71,6 +71,8 @@ class FactryQueryEngineDateTimeTest {
                             Value.newBuilder().setStringValue("DateTime").build()))
                     .build(),
             Measurement.newBuilder().setUuid("uuid-sine").setName("default/Test/Sine").setDatatype("number")
+                    .setStatus("Active").build(),
+            Measurement.newBuilder().setUuid("uuid-name").setName("default/Test/Name").setDatatype("string")
                     .setStatus("Active").build());
 
     private static class FakeFactry extends HistorianGrpc.HistorianImplBase {
@@ -213,6 +215,15 @@ class FactryQueryEngineDateTimeTest {
         Recorder r = aggregated("Stamp", AggregationMode.Count);
 
         // Ignition coerces each value to the column type; a DateTime column would turn 3 into a Date.
+        assertEquals(Optional.of(DataType.Float8), columnType(r));
+        assertEquals(List.of(3.0), r.values);
+    }
+
+    @Test
+    void countOfAStringTagIsANumberInANumberColumn() {
+        Recorder r = aggregated("Name", AggregationMode.Count);
+
+        // Ignition types a Count column after the tag, so a String column would turn 3 into "3".
         assertEquals(Optional.of(DataType.Float8), columnType(r));
         assertEquals(List.of(3.0), r.values);
     }
