@@ -143,4 +143,11 @@ class FactryHistorianSettingsTest {
             assertThrows(IllegalArgumentException.class, () -> new FactryHistorianSettings().applyTokenDefaults(token));
         }
     }
+
+    @Test
+    void toString_leavesTheTokenOut() {
+        FactryHistorianSettings s = validSettings();
+        s.setToken("header.payload.signature");
+        assertFalse(s.toString().contains("signature"));
+    }
 }
