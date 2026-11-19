@@ -667,7 +667,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      * holds a Boolean until the next sample, so a run bit on for 1 minute of the hour averages
      * 0.017, where Factry's sample {@code mean} says 0.5. Factry's twa refuses Booleans, so every
      * bucket with samples is read raw; beyond the budget a bucket falls back to the sample
-     * {@code mean} of its Good samples, marked Uncertain.
+     * {@code mean} of its Good samples.
      */
     private int queryTimeWeightedAverage(
             String uuid, QualifiedPath source, AggregatedQueryKey key, String period, long periodMs,
@@ -764,8 +764,11 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             processor.onPointAvailable(key,
                     AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
                             .value(e.getValue().value())
-                            // A fallback value may include time that was not Good: say so.
-                            .quality(e.getValue().exact() ? QualityCode.Good : QualityCode.Uncertain)
+                            // Good also for a fallback value: the Power Chart drops points that
+                            // are not Good, so an Uncertain fallback would draw as a gap. The
+                            // fallback bridges Bad time inside the bucket, as Ignition's own
+                            // average does there.
+                            .quality(QualityCode.Good)
                             .timestamp(Instant.ofEpochMilli(e.getKey()))
                             .build());
         }

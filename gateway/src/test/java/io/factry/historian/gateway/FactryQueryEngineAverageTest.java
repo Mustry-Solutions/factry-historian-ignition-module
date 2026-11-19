@@ -194,32 +194,40 @@ class FactryQueryEngineAverageTest {
     void aBadBlipInEveryBucket_staysWithinTheRawBudget() {
         // A day of 4 Hz data (345,600 samples, about 8 MB raw) with one Bad sample in every
         // 10-minute bucket. Reading all of those buckets in one request breaks the 4 MiB
-        // message limit and the pen fails; the module must stay within its budget and give
-        // the buckets it cannot read the Good-only twa, marked Uncertain.
+        // message limit and the pen fails; the module must stay within its budget, read the
+        // most recent buckets exactly and give the older ones the Good-only twa, as Good
+        // values (the Power Chart drops values that are not Good).
         String u = factry.addMeasurement("default/a", "number");
         long start = t("00:00");
         long day = 24 * 60 * MIN;
         for (long ts = start; ts < start + day; ts += 250) {
-            boolean blip = (ts - start) % (10 * MIN) == 5 * MIN;
-            factry.add(u, ts, blip ? 1000 : 10, blip ? "Bad" : "Good");
+            long inBucket = (ts - start) % (10 * MIN);
+            boolean blip = inBucket == 5 * MIN;
+            factry.add(u, ts, blip ? 1000 : inBucket == 5 * MIN - 250 ? 40 : 10, blip ? "Bad" : "Good");
         }
         factry.maxAnswerBytes = 4 * 1024 * 1024;
 
         Recorder rec = average(engine(), "a", start, start + day, TimeWindow.ofMinutes(10));
 
-        assertEquals(144, rec.values().size());
-        rec.values().values().forEach(v -> assertEquals(10.0, v, 1e-9));
         GoodTimeAverage.Budget budget = FactryQueryEngine.RAW_BUDGET;
         assertTrue(factry.rawQueries().size() <= budget.requestsPerPen(), "raw requests");
         assertTrue(factry.rawAnswerPoints.stream().allMatch(n -> n <= budget.pointsPerRequest()),
                 () -> "points per raw request: " + factry.rawAnswerPoints);
-        assertTrue(factry.rawAnswerPoints.stream().mapToLong(Integer::longValue).sum() <= budget.pointsPerPen());
-        // The buckets read raw are exact (Good); the rest are the fallback (Uncertain).
-        long exact = rec.qualities().values().stream().filter(QualityCode::isGood).count();
-        long read = factry.rawAnswerPoints.stream().mapToLong(Integer::longValue).sum() / 2400; // samples per bucket
-        assertEquals(read, exact);
-        assertTrue(exact > 0 && exact < 144, "some buckets read raw, the rest fall back: " + exact);
-        assertTrue(rec.qualities().values().stream().allMatch(q -> q.isGood() || q.isUncertain()));
+        long rawPoints = factry.rawAnswerPoints.stream().mapToLong(Integer::longValue).sum();
+        assertTrue(rawPoints <= budget.pointsPerPen());
+
+        // Read raw: the 40 counts for 250 ms of 599.75 Good seconds. Fallback: the twa over
+        // Good samples holds the 40 through the Bad 250 ms as well.
+        double exact = (10 * 599.5 + 40 * 0.25) / 599.75;
+        double fallback = (10 * 599.5 + 40 * 0.5) / 600;
+        int read = (int) (rawPoints / 2400); // samples per bucket
+        assertTrue(read > 0 && read < 144, "some buckets read raw, the rest fall back: " + read);
+        List<Double> values = new ArrayList<>(rec.values().values());
+        assertEquals(144, values.size());
+        for (int k = 0; k < 144; k++) {
+            assertEquals(k >= 144 - read ? exact : fallback, values.get(k), 1e-9, "bucket " + k);
+        }
+        assertTrue(rec.qualities().values().stream().allMatch(QualityCode::isGood));
     }
 
     @Test

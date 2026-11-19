@@ -1,6 +1,7 @@
 package io.factry.historian.gateway;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,8 +26,9 @@ import java.util.Map;
  *
  * <p>Raw reads are bounded by a {@link Budget}. Neighbouring buckets that need raw samples share
  * one request, also across buckets in between that do not need them, as long as the request
- * stays within the budget. A bucket the budget does not cover gets the {@link Source#fallback()}
- * value instead, marked as not exact: a slow or partly wrong number for one bucket is better
+ * stays within the budget. The budget is spent from the range end backwards, so the most recent
+ * part of a trend is the exact part. A bucket the budget does not cover gets the
+ * {@link Source#fallback()} value instead: an approximate number for an old bucket is better
  * than a pen that fails because one request grew past the gRPC message limit.
  *
  * <p>Free of Ignition SDK and gRPC types so it can be unit-tested without Factry.
@@ -212,12 +214,14 @@ final class GoodTimeAverage {
         long penPoints = 0;
         int first = -1;
         int last = -1;
-        for (int i : wanted) {
-            if (first >= 0 && before[i + 1] - before[first] <= budget.pointsPerRequest()
-                    && penPoints + before[i + 1] - before[last + 1] <= budget.pointsPerPen()) {
+        // From the end backwards: what the budget leaves out is the oldest part of the range.
+        for (int w = wanted.size() - 1; w >= 0; w--) {
+            int i = wanted.get(w);
+            if (first >= 0 && before[last + 1] - before[i] <= budget.pointsPerRequest()
+                    && penPoints + before[first] - before[i] <= budget.pointsPerPen()) {
                 // Extend the open request; the buckets in between come along.
-                penPoints += before[i + 1] - before[last + 1];
-                last = i;
+                penPoints += before[first] - before[i];
+                first = i;
                 continue;
             }
             if (first >= 0) {
@@ -235,6 +239,7 @@ final class GoodTimeAverage {
         if (first >= 0) {
             spans.add(new Span(first, last));
         }
+        Collections.reverse(spans);
         return spans;
     }
 

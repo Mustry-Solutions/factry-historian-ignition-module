@@ -234,7 +234,8 @@ class GoodTimeAverageTest {
 
     @Test
     void requestsStayWithinThePointsPerRequest() {
-        // Two samples per bucket, at most four per request: two buckets per request.
+        // Two samples per bucket, at most four per request: two buckets per request, grouped
+        // from the range end.
         Raw raw = new Raw(good("08:01", 1), bad("08:02"), good("08:11", 2), bad("08:12"),
                 good("08:21", 3), bad("08:22"));
         Map<Long, BucketStatus> statuses = Map.of(
@@ -244,12 +245,12 @@ class GoodTimeAverageTest {
                 statuses, null, 10 * MIN, t("08:30"), new Budget(4, 100, 10, 10), raw));
 
         assertEquals(buckets("08:00=1", "08:10=2", "08:20=3"), out);
-        assertEquals(List.of("2026-11-10T08:00:00Z..2026-11-10T08:20:00Z",
-                "2026-11-10T08:20:00Z..2026-11-10T08:30:00Z"), raw.calls);
+        assertEquals(List.of("2026-11-10T08:00:00Z..2026-11-10T08:10:00Z",
+                "2026-11-10T08:10:00Z..2026-11-10T08:30:00Z"), raw.calls);
     }
 
     @Test
-    void bucketsBeyondThePenBudget_getTheFallbackMarkedNotExact() {
+    void bucketsBeyondThePenBudget_areTheOldestAndGetTheFallback() {
         Raw raw = new Raw(good("08:01", 1), bad("08:02"), good("08:11", 2), bad("08:12"),
                 good("08:21", 3), bad("08:22"));
         raw.fallback = buckets("08:00=7", "08:10=8", "08:20=9");
@@ -259,9 +260,11 @@ class GoodTimeAverageTest {
         Map<Long, Result> out = GoodTimeAverage.compute(buckets("08:00=0", "08:10=0", "08:20=0"),
                 statuses, null, 10 * MIN, t("08:30"), new Budget(100, 2, 10, 10), raw);
 
-        assertEquals(Map.of(t("08:00"), new Result(1, true), t("08:10"), new Result(8, false),
-                t("08:20"), new Result(9, false)), out);
-        assertEquals(List.of("2026-11-10T08:00:00Z..2026-11-10T08:10:00Z"), raw.calls);
+        // The budget goes to the most recent bucket, so a trend's newest part is exact.
+        assertEquals(Map.of(t("08:00"), new Result(7, false), t("08:10"), new Result(8, false),
+                t("08:20"), new Result(3, true)), out);
+        assertEquals(List.of("before 2026-11-10T08:20:00Z", "2026-11-10T08:20:00Z..2026-11-10T08:30:00Z"),
+                raw.calls);
         assertEquals(1, raw.fallbackCalls);
     }
 
