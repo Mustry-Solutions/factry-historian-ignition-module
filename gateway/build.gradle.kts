@@ -13,8 +13,8 @@ java {
     }
 }
 
-val grpcVersion = "1.62.2"
-val protobufVersion = "3.25.3"
+val grpcVersion = "1.85.1"
+val protobufVersion = "3.25.8"
 
 dependencies {
     compileOnly("com.inductiveautomation.ignitionsdk:ignition-common:${rootProject.extra["sdk_version"]}")
