@@ -111,6 +111,11 @@ class GrpcTimeLimitsTest {
         }
 
         @Override
+        public void getCollector(com.google.protobuf.Empty request, StreamObserver<Collector> observer) {
+            answer(observer, Collector.getDefaultInstance());
+        }
+
+        @Override
         public void getCollectors(GetCollectorsRequest request, StreamObserver<Collectors> observer) {
             answer(observer, Collectors.getDefaultInstance());
         }
