@@ -322,8 +322,13 @@ Extends `AbstractQueryEngine`. Handles all data retrieval from Factry.
 | Range | `spread` |
 | Variance | `variance` |
 | StdDev | `stddev` |
-| MinMax | queries `min` and `max` separately, emits pairs |
+| MinMax | queries `min` and `max` separately, a pair per bucket |
 
+**Other aggregates (`BucketFill`)**: every aggregate except Average and Count gives every bucket a point, like Average does. Ignition fills a bucket without a point with a neighbouring value marked Good, so a Bad stretch, the time before the first sample and the empty buckets of a tag stored on change read a value that was never there (Good 7 at 10:00:05 and 8 at 10:00:45, LastValue in 10 s buckets, read `7, 8, 8, 8, 8, 8` instead of `7, 7, 7, 7, 8, 8`).
+- Good samples in the bucket: Factry's aggregate over those samples, grouped by status with only the Good series kept. A bucket with Good and Bad samples gives the value of its Good samples (LastValue: the last Good value). Several Good statuses in one bucket (`Good`, `GoodLocalOverride`) give one point: the smallest minimum, the largest maximum, the summed sum; for the others the value of one of them.
+- No samples, and the status held from before is Good: the value held, as Ignition's own aggregates take the value at the block start. Range is 0 there; Sum, Variance and StdDev have no value (Bad), as in Ignition's own functions.
+- Otherwise (only Bad or Uncertain samples, a status held that is not Good, before the first sample, and from now on): a Bad point without a value. MinMax gives each bucket a minimum and a maximum point, Bad ones too.
+- Requests per pen: Factry's `last` per status (which is the LastValue itself) says which statuses each bucket holds and the value held after it, plus the aggregate per status (two for MinMax). The last sample before a bucket is read when the range starts with empty buckets, and after a bucket holding several statuses when an empty bucket follows, up to 10 times per pen; past that the last Good value of that bucket is held.
 - Count of a tag that is not numeric (String, DateTime) gets a number column: Ignition types a Count column after the tag, so it would otherwise return the text `"600"` or a Date in 1970
 - Time window → Go duration conversion (e.g., `TimeWindow(2h30m)` → `"2h30m"`, 600 ms → `"600ms"`). The bucket length in milliseconds and the period string come from the same number.
 

@@ -844,23 +844,23 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     // Count stays a number; every other aggregate of a date is itself a date.
                     boolean asDate = dateTime && !"Count".equals(aggName);
 
-                    if ("MinMax".equals(aggName)) {
-                        // MinMax: query min and max separately, emit pairs
-                        pointCount += queryMinMax(uuid, source, key, period, options, pts, asDate);
+                    String factryFunction = "MinMax".equals(aggName) ? null : toFactryAggregateFunction(aggName);
+                    DataType dataType = keyToNode.get(key).dataType().orElse(DataType.Float8);
+                    if (TIME_WEIGHTED_AVERAGE.equals(factryFunction) && dataType == DataType.String) {
+                        // Factry's twa only takes numbers, and a String has no average.
+                        factryFunction = "mean";
+                    }
+                    if (TIME_WEIGHTED_AVERAGE.equals(factryFunction) && options.getTimeRange().isPresent()) {
+                        pointCount += queryTimeWeightedAverage(uuid, source, key, period,
+                                periodMs, dataType == DataType.Boolean, asDate, options, pts);
+                    } else if ("count".equals(factryFunction) || TIME_WEIGHTED_AVERAGE.equals(factryFunction)) {
+                        pointCount += querySingleAggregate(uuid, source, key, factryFunction, period, options,
+                                pts, asDate);
                     } else {
-                        String factryFunction = toFactryAggregateFunction(aggName);
-                        DataType dataType = keyToNode.get(key).dataType().orElse(DataType.Float8);
-                        if (TIME_WEIGHTED_AVERAGE.equals(factryFunction) && dataType == DataType.String) {
-                            // Factry's twa only takes numbers, and a String has no average.
-                            factryFunction = "mean";
-                        }
-                        if (TIME_WEIGHTED_AVERAGE.equals(factryFunction) && options.getTimeRange().isPresent()) {
-                            pointCount += queryTimeWeightedAverage(uuid, source, key, period,
-                                    periodMs, dataType == DataType.Boolean, asDate, options, pts);
-                        } else {
-                            pointCount += querySingleAggregate(uuid, source, key, factryFunction, period, options,
-                                    pts, asDate);
-                        }
+                        // MinMax asks Factry for min and max, and gives each bucket both.
+                        List<String> functions = factryFunction == null ? List.of("min", "max") : List.of(factryFunction);
+                        pointCount += queryEveryBucket(uuid, source, key, functions, period, periodMs, options,
+                                pts, asDate);
                     }
                     pointsByKey.put(key, pts);
                 } catch (Exception e) {
@@ -1301,77 +1301,149 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                         .build());
     }
 
-    private int queryMinMax(
-            String uuid, QualifiedPath source, AggregatedQueryKey key,
-            String period, AggregatedQueryOptions options,
+    /**
+     * An aggregate other than Average and Count, with a point for every bucket (see
+     * {@link BucketFill}). Factry gives the aggregate per bucket and status; only its Good series
+     * count. A {@code last} per status says which statuses each bucket holds and the value held
+     * after it, and the sample before a bucket fills the empty buckets at the start.
+     *
+     * @param functions the Factry functions; each bucket gets one point per function, in order
+     */
+    private int queryEveryBucket(
+            String uuid, QualifiedPath source, AggregatedQueryKey key, List<String> functions,
+            String period, long periodMs, AggregatedQueryOptions options,
             List<AggregatedPoint<?, ?>> out, boolean asDate) {
+        TimeRange range = options.getTimeRange()
+                .orElseThrow(() -> new IllegalArgumentException("an aggregated read needs a time range"));
+        long startMs = range.startTime().toEpochMilli();
+        long rangeEndMs = range.endTime().toEpochMilli();
+        long nowMs = now.getAsLong();
+        // Stop at now, as Average does: buckets after now are Bad, and Factry's buckets start at
+        // the query start, so a shorter end does not move them.
+        long endMs = Math.min(rangeEndMs, nowMs);
 
-        // Query min and max separately, grouped by status and keeping only the Good series so
-        // bad/uncertain samples don't skew the min/max (see querySingleAggregate).
-        QueryTimeseriesRequest.Builder minReqBuilder = QueryTimeseriesRequest.newBuilder()
-                .addMeasurementUUIDs(uuid)
-                .addGroupBy("status")
-                .setAggregation(Aggregation.newBuilder().setName("min").setPeriod(period).setFillType("none").build());
-        QueryTimeseriesRequest.Builder maxReqBuilder = QueryTimeseriesRequest.newBuilder()
-                .addMeasurementUUIDs(uuid)
-                .addGroupBy("status")
-                .setAggregation(Aggregation.newBuilder().setName("max").setPeriod(period).setFillType("none").build());
-
-        options.getTimeRange().ifPresent(tr -> {
-            long startMs = tr.startTime().toEpochMilli();
-            long endMs = tr.endTime().toEpochMilli();
-            minReqBuilder.setStart(Timestamps.fromMillis(startMs)).setEnd(Timestamps.fromMillis(endMs));
-            maxReqBuilder.setStart(Timestamps.fromMillis(startMs)).setEnd(Timestamps.fromMillis(endMs));
-        });
-
-        QueryTimeseriesResponse minReply = grpcClient.queryTimeseries(minReqBuilder.build());
-        QueryTimeseriesResponse maxReply = grpcClient.queryTimeseries(maxReqBuilder.build());
-
-        // Collect min values by timestamp (Good series only)
-        Map<Long, Object> minValues = new HashMap<>();
-        for (Series series : minReply.getSeriesList()) {
-            if (!isGoodStatus(seriesStatus(series))) {
-                continue;
+        Map<Long, BucketFill.Status> statuses = new HashMap<>();
+        List<Map<Long, Object>> good = new ArrayList<>();
+        if (endMs > startMs) {
+            for (Series series : grpcClient.queryTimeseries(withRange(
+                    bucketStatusRequest(uuid, period), startMs, endMs).build()).getSeriesList()) {
+                boolean isGood = isGoodStatus(seriesStatus(series));
+                for (SeriesPoint pt : series.getDataPointsList()) {
+                    statuses.computeIfAbsent(pt.getTimestamp(), t -> new BucketFill.Status())
+                            .add(isGood, protoValueToJava(pt.getValue()));
+                }
             }
-            for (SeriesPoint pt : series.getDataPointsList()) {
-                Object minVal = protoValueToJava(pt.getValue());
-                minValues.put(pt.getTimestamp(), asDate ? toDate(minVal) : minVal);
+            for (String function : functions) {
+                good.add("last".equals(function) ? lastGood(statuses)
+                        : goodAggregate(function, grpcClient.queryTimeseries(withRange(
+                                perStatusRequest(uuid, function, period), startMs, endMs).build())));
             }
         }
 
-        // Emit min/max pairs for each bucket (Good series only)
+        List<BucketFill.Bucket> buckets = BucketFill.fill(startMs, rangeEndMs, periodMs, nowMs, statuses,
+                ts -> lastSampleBefore(uuid, ts), RAW_BUDGET.seedReadsPerPen());
         int count = 0;
-        for (Series series : maxReply.getSeriesList()) {
-            if (!isGoodStatus(seriesStatus(series))) {
-                continue;
-            }
-            for (SeriesPoint pt : series.getDataPointsList()) {
-                long ts = pt.getTimestamp();
-                Instant timestamp = Instant.ofEpochMilli(ts);
-                Object minVal = minValues.get(ts);
-                Object maxVal = protoValueToJava(pt.getValue());
-                if (asDate) {
-                    maxVal = toDate(maxVal);
+        for (BucketFill.Bucket bucket : buckets) {
+            for (int f = 0; f < functions.size(); f++) {
+                Object value = switch (bucket.kind()) {
+                    case GOOD_SAMPLES -> good.get(f).get(bucket.start());
+                    case HELD -> heldValue(functions.get(f), bucket.held());
+                    case BAD -> null;
+                };
+                // No value is a Bad point. Not NaN: the Power Chart streams history as strict
+                // JSON, which throws at a NaN (a variance of one sample can be one). A null
+                // reads as 0.0 in a Float column, but its quality stays Bad.
+                if (value instanceof Double d && !Double.isFinite(d)) {
+                    value = null;
                 }
-
-                // Emit min point
-                if (minVal != null) {
-                    out.add(
-                            AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
-                                    .value(minVal).quality(QualityCode.Good).timestamp(timestamp).build());
-                    count++;
-                }
-
-                // Emit max point
-                if (maxVal != null) {
-                    out.add(
-                            AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
-                                    .value(maxVal).quality(QualityCode.Good).timestamp(timestamp).build());
-                    count++;
-                }
+                out.add(AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
+                        .value(value == null ? null : asDate ? toDate(value) : value)
+                        .quality(value == null ? QualityCode.Bad : QualityCode.Good)
+                        .timestamp(Instant.ofEpochMilli(bucket.start()))
+                        .build());
+                count++;
             }
         }
         return count;
+    }
+
+    /**
+     * What an empty bucket of a tag holding a Good value gets, as Ignition's own aggregates
+     * answer for a block without samples: the value itself, a spread of 0, and no sum, variance
+     * or standard deviation (null, so a Bad point).
+     */
+    private static Object heldValue(String function, Object held) {
+        return switch (function) {
+            case "spread" -> 0.0;
+            case "sum", "variance", "stddev" -> null;
+            // Factry's mean of a Boolean is a number (the fraction true), so hold it as one.
+            case "mean" -> held instanceof Boolean b ? (b ? 1.0 : 0.0) : held;
+            default -> held;
+        };
+    }
+
+    /** The last Good value per bucket, from the {@code last} per status. */
+    private static Map<Long, Object> lastGood(Map<Long, BucketFill.Status> statuses) {
+        Map<Long, Object> out = new HashMap<>();
+        statuses.forEach((ts, st) -> {
+            if (st.hasGood) {
+                out.put(ts, st.lastGood);
+            }
+        });
+        return out;
+    }
+
+    /**
+     * The aggregate over the Good samples per bucket, from a reply grouped by status. Bad and
+     * Uncertain series are left out so they don't blend into the value. A bucket with several
+     * Good statuses ("Good", "GoodLocalOverride", ...) gets one value: the smallest minimum, the
+     * largest maximum, the summed sum or count, else the value of one of them.
+     */
+    private static Map<Long, Object> goodAggregate(String function, QueryTimeseriesResponse reply) {
+        Map<Long, Object> out = new HashMap<>();
+        for (Series series : reply.getSeriesList()) {
+            if (!isGoodStatus(seriesStatus(series))) {
+                continue;
+            }
+            for (SeriesPoint pt : series.getDataPointsList()) {
+                out.merge(pt.getTimestamp(), protoValueToJava(pt.getValue()), (a, b) -> combine(function, a, b));
+            }
+        }
+        return out;
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static Object combine(String function, Object a, Object b) {
+        if (a instanceof Number x && b instanceof Number y) {
+            return switch (function) {
+                case "min" -> Math.min(x.doubleValue(), y.doubleValue());
+                case "max" -> Math.max(x.doubleValue(), y.doubleValue());
+                case "sum", "count" -> x.doubleValue() + y.doubleValue();
+                default -> a;
+            };
+        }
+        if (a instanceof Comparable x && b != null && a.getClass() == b.getClass()) {
+            return switch (function) {
+                case "min" -> x.compareTo(b) <= 0 ? a : b;
+                case "max" -> x.compareTo(b) >= 0 ? a : b;
+                default -> a;
+            };
+        }
+        return a;
+    }
+
+    /** The last sample before {@code ts}, of any status, or null when there is none. */
+    private BucketFill.Sample lastSampleBefore(String uuid, long ts) {
+        BucketFill.Sample last = null;
+        for (Series series : grpcClient.queryTimeseries(sampleBeforeRequest(uuid, ts)).getSeriesList()) {
+            boolean isGood = isGoodStatus(seriesStatus(series));
+            for (SeriesPoint pt : series.getDataPointsList()) {
+                if (last == null || pt.getTimestamp() > last.ts()) {
+                    last = new BucketFill.Sample(pt.getTimestamp(), protoValueToJava(pt.getValue()), isGood);
+                }
+            }
+        }
+        return last;
     }
 
     static String toFactryAggregateFunction(String name) {
