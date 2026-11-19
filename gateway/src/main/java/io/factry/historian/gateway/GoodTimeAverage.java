@@ -68,6 +68,12 @@ final class GoodTimeAverage {
         int goodSeries;
         /** The last Good value; only meaningful when exactly one Good series is present. */
         double lastGood = Double.NaN;
+        /**
+         * The value every Good sample in the bucket holds, or NaN when not known. Set for
+         * Booleans, where a Good mean of exactly 0 or 1 says so; it spares the raw read of a
+         * bucket that cannot change value.
+         */
+        double sameGood = Double.NaN;
 
         void add(boolean good, double last) {
             if (good) {
@@ -86,6 +92,11 @@ final class GoodTimeAverage {
         /** Holds more than one status, so the order of its samples is unknown without raw. */
         boolean isMixed() {
             return (hasGood && hasNotGood) || goodSeries > 1;
+        }
+
+        /** Whether this bucket holds only Good samples that all equal {@code value}. */
+        boolean onlyGood(double value) {
+            return !isMixed() && hasGood && sameGood == value;
         }
     }
 
@@ -151,8 +162,13 @@ final class GoodTimeAverage {
             boolean heldNotGood = !unknown && held != null && !held.good();
             boolean consistent = !unknown && !st.isMixed()
                     && !(heldGood && st.hasNotGood) && !(heldNotGood && st.hasGood);
-            // Without a twa a Good bucket is known only when nothing changes inside it.
-            Double good = twa.get(start) != null ? twa.get(start) : st.isEmpty() && heldGood ? held.value() : null;
+            // Without a twa a Good bucket is known only when nothing changes inside it: no
+            // samples, or only samples equal to the value held (or the first ever).
+            Double good = twa.get(start) != null ? twa.get(start)
+                    : st.isEmpty() && heldGood ? held.value()
+                    : heldGood && st.onlyGood(held.value()) ? held.value()
+                    : held == null && !unknown && st.onlyGood(st.sameGood) ? st.sameGood
+                    : null;
             if (consistent && !heldGood && !st.hasGood) {
                 // Not Good the whole bucket: a gap.
             } else if (consistent && good != null) {
@@ -192,15 +208,17 @@ final class GoodTimeAverage {
                                    Map<Long, BucketStatus> statuses, Sample seed, Budget budget, Source source) {
         List<Integer> wanted = new ArrayList<>();
         Held held = seed == null ? Held.NONE : seed.good() ? Held.GOOD : Held.NOT_GOOD;
+        double heldValue = seed == null ? Double.NaN : seed.value();
         for (int i = 0; i < buckets.size(); i++) {
             BucketStatus st = statuses.getOrDefault(buckets.get(i), EMPTY);
-            if (needsRaw(held, st, twa.get(buckets.get(i)) != null)) {
+            if (needsRaw(held, heldValue, st, twa.get(buckets.get(i)) != null)) {
                 wanted.add(i);
             }
             if (st.isMixed()) {
                 held = Held.UNKNOWN;
             } else if (st.hasGood) {
                 held = Held.GOOD;
+                heldValue = st.lastGood;
             } else if (st.hasNotGood) {
                 held = Held.NOT_GOOD;
             }
@@ -243,15 +261,21 @@ final class GoodTimeAverage {
         return spans;
     }
 
-    /** Whether the bucket's status may change inside it, or it has samples but no twa. */
-    private static boolean needsRaw(Held held, BucketStatus st, boolean hasTwa) {
+    /** Whether the bucket's status may change inside it, or its value may and it has no twa. */
+    private static boolean needsRaw(Held held, double heldValue, BucketStatus st, boolean hasTwa) {
         if (st.isEmpty()) {
             return false;
         }
-        if (st.isMixed() || held == Held.UNKNOWN || (!hasTwa && st.hasGood)) {
+        if (st.isMixed() || held == Held.UNKNOWN) {
             return true;
         }
-        return held == Held.GOOD ? st.hasNotGood : held == Held.NOT_GOOD && st.hasGood;
+        if (st.hasNotGood) {
+            return held == Held.GOOD;
+        }
+        if (held == Held.NOT_GOOD) {
+            return true;
+        }
+        return !hasTwa && !(held == Held.GOOD ? st.onlyGood(heldValue) : st.onlyGood(st.sameGood));
     }
 
     private static long[] prefixCounts(List<Long> buckets, Map<Long, Long> counts) {

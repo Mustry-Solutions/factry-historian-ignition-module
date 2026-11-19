@@ -285,4 +285,25 @@ class FactryQueryEngineAverageTest {
         assertValues(Map.of(t("08:00"), 1.0, t("08:10"), 1.0, t("08:20"), 1.0), rec.values());
         assertEquals(0, factry.rawQueries().size());
     }
+
+    @Test
+    void healthyBoolean_onlyTheBucketWhereItChangesIsReadRaw() {
+        // A day of a Boolean stored every 10 s that never changes, then turns false at 23:55.
+        // Only the bucket where it changes needs raw samples.
+        String u = factry.addMeasurement("default/run", "boolean");
+        long start = t("00:00");
+        for (long ts = start - MIN; ts < start + 24 * 60 * MIN; ts += 10_000) {
+            factry.add(u, ts, ts < start + (23 * 60 + 55) * MIN, "Good");
+        }
+
+        Recorder rec = average(engine(), "run", start, start + 24 * 60 * MIN, TimeWindow.ofMinutes(10));
+
+        Map<Long, Double> expected = new LinkedHashMap<>();
+        for (int k = 0; k < 144; k++) {
+            expected.put(start + k * 10 * MIN, k < 143 ? 1.0 : 0.5);
+        }
+        assertValues(expected, rec.values());
+        assertEquals(1, factry.rawQueries().size());
+        assertEquals(60, factry.rawAnswerPoints.get(0)); // only the last bucket, at 10 s
+    }
 }

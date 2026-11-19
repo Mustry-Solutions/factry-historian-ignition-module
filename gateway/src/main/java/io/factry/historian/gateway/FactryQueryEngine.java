@@ -665,9 +665,10 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      *
      * <p>A Boolean is averaged the same way, as the fraction of Good time it was true: Ignition
      * holds a Boolean until the next sample, so a run bit on for 1 minute of the hour averages
-     * 0.017, where Factry's sample {@code mean} says 0.5. Factry's twa refuses Booleans, so every
-     * bucket with samples is read raw; beyond the budget a bucket falls back to the sample
-     * {@code mean} of its Good samples.
+     * 0.017, where Factry's sample {@code mean} says 0.5. Factry's twa refuses Booleans, so a
+     * per-status {@code mean} stands in: a Good mean of exactly 0 or 1 means the bucket never
+     * changes value, and the bucket needs no raw read when that value is the one held. Other
+     * buckets with samples are read raw; beyond the budget a bucket falls back to that mean.
      */
     private int queryTimeWeightedAverage(
             String uuid, QualifiedPath source, AggregatedQueryKey key, String period, long periodMs,
@@ -712,6 +713,24 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             }
         }
 
+        Map<Long, Double> goodMean = new HashMap<>();
+        if (isBoolean) {
+            for (Series series : grpcClient.queryTimeseries(withRange(
+                    perStatusRequest(uuid, "mean", period), startMs, endMs).build()).getSeriesList()) {
+                if (isGoodStatus(seriesStatus(series))) {
+                    for (SeriesPoint pt : series.getDataPointsList()) {
+                        goodMean.put(pt.getTimestamp(), toDouble(pt.getValue()));
+                    }
+                }
+            }
+            goodMean.forEach((ts, mean) -> {
+                GoodTimeAverage.BucketStatus st = statuses.get(ts);
+                if (st != null && st.goodSeries == 1 && (mean == 0 || mean == 1)) {
+                    st.sameGood = mean;
+                }
+            });
+        }
+
         GoodTimeAverage.Sample seed = sampleBefore(uuid, startMs);
 
         GoodTimeAverage.Source factry = new GoodTimeAverage.Source() {
@@ -741,14 +760,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
             @Override
             public Map<Long, Double> fallback() {
+                if (isBoolean) {
+                    return goodMean;
+                }
                 Map<Long, Double> values = new HashMap<>();
-                QueryTimeseriesRequest.Builder req = isBoolean
-                        ? aggregateRequest(uuid, "mean", period)
-                        : goodOnlyTwaRequest(uuid, period);
-                for (Series series : grpcClient.queryTimeseries(withRange(req, startMs, endMs).build()).getSeriesList()) {
-                    if (!isGoodStatus(seriesStatus(series))) {
-                        continue; // the Boolean mean is grouped by status
-                    }
+                for (Series series : grpcClient.queryTimeseries(withRange(
+                        goodOnlyTwaRequest(uuid, period), startMs, endMs).build()).getSeriesList()) {
                     for (SeriesPoint pt : series.getDataPointsList()) {
                         values.put(pt.getTimestamp(), toDouble(pt.getValue()));
                     }
