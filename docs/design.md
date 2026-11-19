@@ -283,7 +283,7 @@ Extends `AbstractStorageEngine`. Receives data points from Ignition's tag system
 4. Converts value to protobuf `Value` (Boolean, Number, String)
 5. Maps Ignition `QualityCode` to status string ("Good", "Uncertain", "Bad")
 6. Sends `CreatePoints` gRPC call, in parts of at most `grpc.write.max.message.bytes`. Factry refuses a message over 64 MiB (`RESOURCE_EXHAUSTED`, checked after decompression) every time, so a part it still finds too large is sent in halves. A single point too large on its own can never be stored; it is sent as a Bad point without a value, with a WARN naming the tag and time. Factry v8.2.3 also answers OK to string values over about 1 MiB but does not store them.
-7. On failure: distinguishes connection errors (UNAVAILABLE, DEADLINE_EXCEEDED) from server rejections. On rejection, evicts the measurement UUID and retries once (handles deleted measurements)
+7. On failure: distinguishes connection errors (UNAVAILABLE, DEADLINE_EXCEEDED) from server rejections. On NOT_FOUND or INVALID_ARGUMENT, evicts the measurement UUIDs and retries once (handles deleted measurements), except for NOT_FOUND "collector is deleted", which Factry answers to every call once the collector is gone
 
 Steps 2 to 7 live in `PointWriter`, which the engine calls; it uses no Ignition gateway classes, so unit tests can run it against a fake Factry client.
 
@@ -403,7 +403,7 @@ Extends `AbstractHistorian<FactryHistorianSettings>`. The orchestrator that ties
 
 **`getStorageEngine()`** — returns S&F bridge if configured, otherwise the direct storage engine
 
-**`getStatus()`** — from `WriteHealth`, fed by the scheduled connection check and by Factry's answer to every write: Errored when the last check failed; also Errored ("Factry refuses writes") when Factry refused every write for 30 s while the check passes (for example `INTERNAL` while its InfluxDB is down), until it accepts one again. Not reaching Factry (`UNAVAILABLE`, `DEADLINE_EXCEEDED`) is not a refusal; the check covers it. Data handling does not change: store and forward keeps refused data and the quarantine retry sends it again. The gateway's Historians page shows an Errored profile as a red "Error" badge with the status details as its tooltip. One WARN when the refusals start counting, one INFO when Factry accepts a write again.
+**`getStatus()`** — from `WriteHealth`, fed by the scheduled connection check and by Factry's answer to every write: Errored when the last check failed, with the reason (`UNAVAILABLE`/`DEADLINE_EXCEEDED`: "Factry Historian unreachable"; `UNAUTHENTICATED`/`PERMISSION_DENIED`: "Factry refused the collector token"; `NOT_FOUND` "collector is deleted": "Collector deleted in Factry") and Factry's own text in the details; one WARN when the reason changes, one INFO when the check passes again. Also Errored ("Factry refuses writes") when Factry refused every write for 30 s while the check passes (for example `INTERNAL` while its InfluxDB is down), until it accepts one again. Not reaching Factry (`UNAVAILABLE`, `DEADLINE_EXCEEDED`) is not a refusal; the check covers it. Data handling does not change: store and forward keeps refused data and the quarantine retry sends it again. The gateway's Historians page shows an Errored profile as a red "Error" badge with the status details as its tooltip. One WARN when the refusals start counting, one INFO when Factry accepts a write again.
 
 **`handleSettingsChange()`** — reconfigures gRPC client, refreshes cache, updates engines. No restart needed.
 

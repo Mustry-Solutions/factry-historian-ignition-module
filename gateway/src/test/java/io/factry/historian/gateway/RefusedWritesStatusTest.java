@@ -94,7 +94,7 @@ class RefusedWritesStatusTest {
         engine = new FactryStorageEngine(context, "factry", new FactryHistorianSettings(), client,
                 new MeasurementCache(), new HistorianMetrics(), health);
         // What the provider's scheduled connection check does
-        health.connectionChecked(client.testConnection());
+        health.connectionChecked(client.checkConnection());
     }
 
     @AfterEach
@@ -124,7 +124,7 @@ class RefusedWritesStatusTest {
         assertEquals(ProfileStatus.State.Good, health.status().getState());
 
         after(1);
-        health.connectionChecked(client.testConnection());
+        health.connectionChecked(client.checkConnection());
         ProfileStatus status = health.status();
         assertEquals(ProfileStatus.State.Errored, status.getState(), "the connection check passes, writes don't");
         assertEquals("Factry has refused every write for 30 s (last answer: INTERNAL: influxdb: connection"
@@ -176,7 +176,7 @@ class RefusedWritesStatusTest {
 
     @Test
     void aFailedConnectionCheckIsErrored() {
-        health.connectionChecked(false);
+        health.connectionChecked(Status.UNAVAILABLE.withDescription("io exception"));
 
         assertEquals(ProfileStatus.State.Errored, health.status().getState());
     }

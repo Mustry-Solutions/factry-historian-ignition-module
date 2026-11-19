@@ -15,6 +15,7 @@ import com.inductiveautomation.ignition.gateway.storeforward.engine.EngineInform
 import com.inductiveautomation.ignition.gateway.storeforward.quarantine.QuarantineInterface;
 import com.inductiveautomation.ignition.gateway.storeforward.quarantine.QuarantinedDataInfo;
 import com.inductiveautomation.ignition.gateway.storeforward.resource.StoreAndForwardEngineSettings;
+import io.grpc.Status;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -275,7 +276,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         } catch (Exception e) {
             logger.error("Failed to apply settings change", e);
             // Reflect the failure immediately rather than waiting for the next check.
-            writeHealth.connectionChecked(false);
+            writeHealth.connectionChecked(Status.fromThrowable(e));
             return false;
         }
     }
@@ -302,14 +303,15 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
      * settings changes so the gateway UI reflects the new state on its next poll.
      */
     private void refreshConnectionStatus() {
-        boolean connected = grpcClient.testConnection();
-        writeHealth.connectionChecked(connected);
+        Status check = grpcClient.checkConnection();
+        writeHealth.connectionChecked(check);
+        boolean connected = check.isOk();
 
         // Toggle S&F sink: when Factry is down, stop accepting so points stay in pending.
         // When Factry is back, re-initialize so forwarding resumes.
         if (dataSinkBridge != null) {
             if (connected && !dataSinkBridge.isAccepting()) {
-                logger.info("Factry connection restored, re-enabling S&F sink");
+                logger.info("Factry check passes, re-enabling S&F sink");
                 try {
                     java.lang.reflect.Method initMethod = dataSinkBridge.getClass().getSuperclass()
                             .getDeclaredMethod("initialize");
@@ -319,7 +321,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
                     logger.error("Failed to re-initialize S&F sink", e);
                 }
             } else if (!connected && dataSinkBridge.isAccepting()) {
-                logger.info("Factry connection lost, pausing S&F sink to buffer points");
+                logger.info("Factry check fails, pausing S&F sink to buffer points");
                 try {
                     java.lang.reflect.Method uninitMethod = dataSinkBridge.getClass().getSuperclass()
                             .getDeclaredMethod("uninitialize");

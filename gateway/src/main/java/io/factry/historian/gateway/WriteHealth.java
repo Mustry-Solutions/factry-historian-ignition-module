@@ -10,6 +10,7 @@ import java.util.function.LongSupplier;
 
 /**
  * What the profile status says, from the connection check and from Factry's answers to writes.
+ * A failed check says why: unreachable, a refused token or a deleted collector.
  * The connection check (GetCollector) passes while Factry refuses every CreatePoints, for
  * example INTERNAL while its InfluxDB is down; store and forward keeps that data and retries it,
  * but the profile would show Running. So writes that are refused, and only refused, for
@@ -23,8 +24,8 @@ final class WriteHealth {
 
     private final LongSupplier clock;
 
-    /** Null until the first connection check. */
-    private Boolean connected;
+    /** Factry's answer to the last connection check; null until the first one. */
+    private Status check;
     /** When Factry refused the first write after the last accepted one; null while it accepts. */
     private Long refusedSince;
     private Status lastRefusal;
@@ -39,8 +40,19 @@ final class WriteHealth {
         this.clock = clock;
     }
 
-    synchronized void connectionChecked(boolean ok) {
-        connected = ok;
+    /**
+     * Record the connection check. Logs one WARN when the reason it fails changes, rather than
+     * a line per check, and one INFO when it passes again.
+     */
+    synchronized void connectionChecked(Status status) {
+        Status previous = check;
+        check = status;
+        if (!status.isOk() && (previous == null || previous.isOk()
+                || checkFailure(previous) != checkFailure(status) || previous.getCode() != status.getCode())) {
+            logger.warn(checkFailure(status).details(status));
+        } else if (status.isOk() && previous != null && !previous.isOk()) {
+            logger.info("Factry Historian answers the connection check again");
+        }
         logIfRefusing();
     }
 
@@ -71,11 +83,13 @@ final class WriteHealth {
     }
 
     synchronized ProfileStatus status() {
-        if (connected == null) {
+        if (check == null) {
             return ProfileStatus.UNKNOWN;
         }
-        if (!connected) {
-            return ProfileStatus.ERRORED;
+        if (!check.isOk()) {
+            CheckFailure failure = checkFailure(check);
+            return new ProfileStatus(ProfileStatus.State.Errored, LocalizedString.createRaw(failure.message),
+                    failure.details(check));
         }
         if (refusing()) {
             // The gateway's historian page shows an Errored profile as "Error" with the details as
@@ -103,10 +117,56 @@ final class WriteHealth {
         }
     }
 
+    /** Why the connection check fails, in words an operator can act on. */
+    enum CheckFailure {
+        UNREACHABLE("Factry Historian unreachable", "Cannot reach Factry Historian (%s)."),
+        TOKEN_REFUSED("Factry refused the collector token",
+                "Factry refused the collector token (%s). Replace the token in the profile settings."),
+        COLLECTOR_DELETED("Collector deleted in Factry",
+                "The collector of this token was deleted in Factry (%s). Create a collector in Factry"
+                        + " and paste its token in the profile settings."),
+        OTHER("Factry Historian check failed", "The connection check to Factry Historian failed (%s).");
+
+        final String message;
+        private final String details;
+
+        CheckFailure(String message, String details) {
+            this.message = message;
+            this.details = details;
+        }
+
+        String details(Status status) {
+            return String.format(details, describe(status)) + " Store and forward keeps the data until it can"
+                    + " be stored.";
+        }
+    }
+
+    static CheckFailure checkFailure(Status status) {
+        switch (status.getCode()) {
+            case UNAVAILABLE:
+            case DEADLINE_EXCEEDED:
+                return CheckFailure.UNREACHABLE;
+            case UNAUTHENTICATED:
+            case PERMISSION_DENIED:
+                return CheckFailure.TOKEN_REFUSED;
+            default:
+                return FactryGrpcClient.isCollectorDeleted(status) ? CheckFailure.COLLECTOR_DELETED : CheckFailure.OTHER;
+        }
+    }
+
+    /** Code, Factry's text and the underlying cause (an SSL or socket error says most). */
     static String describe(Status status) {
+        StringBuilder sb = new StringBuilder(status.getCode().toString());
         String description = status.getDescription();
-        return description == null || description.isEmpty()
-                ? status.getCode().toString() : status.getCode() + ": " + description;
+        if (description != null && !description.isEmpty()) {
+            sb.append(": ").append(description);
+        }
+        Throwable cause = status.getCause();
+        if (cause != null && cause.getMessage() != null
+                && (description == null || !description.contains(cause.getMessage()))) {
+            sb.append(": ").append(cause.getMessage());
+        }
+        return sb.toString();
     }
 
     private static String duration(long millis) {
