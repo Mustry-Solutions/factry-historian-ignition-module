@@ -221,4 +221,31 @@ class FactryQueryEngineAverageTest {
         assertTrue(exact > 0 && exact < 144, "some buckets read raw, the rest fall back: " + exact);
         assertTrue(rec.qualities().values().stream().allMatch(q -> q.isGood() || q.isUncertain()));
     }
+
+    @Test
+    void rangeEndingInTheFuture_stopsAtNow() {
+        String u = factry.addMeasurement("default/a", "number");
+        factry.add(u, t("07:00"), 100, "Good");
+        factry.add(u, t("08:22"), 0, "Good");
+        FactryQueryEngine engine = engine();
+        engine.now = () -> t("08:25");
+
+        Recorder rec = average(engine, "a", t("08:00"), t("09:00"), TimeWindow.ofMinutes(10));
+
+        // 08:20 holds 100 for 2 minutes and 0 for 3 until now (not 8 until the bucket end).
+        // No buckets after now, like Ignition's own Average.
+        assertValues(Map.of(t("08:00"), 100.0, t("08:10"), 100.0, t("08:20"), 40.0), rec.values());
+    }
+
+    @Test
+    void rangeStartingAfterNow_hasNoValues() {
+        String u = factry.addMeasurement("default/a", "number");
+        factry.add(u, t("07:00"), 100, "Good");
+        FactryQueryEngine engine = engine();
+        engine.now = () -> t("07:30");
+
+        Recorder rec = average(engine, "a", t("08:00"), t("09:00"), TimeWindow.ofMinutes(10));
+
+        assertEquals(Map.of(), rec.values());
+    }
 }

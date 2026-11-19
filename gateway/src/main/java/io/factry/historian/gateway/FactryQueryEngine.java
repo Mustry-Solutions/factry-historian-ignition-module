@@ -59,6 +59,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.LongSupplier;
 
 public class FactryQueryEngine extends AbstractQueryEngine {
 
@@ -80,6 +81,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     private final FactryGrpcClient grpcClient;
     private final MeasurementCache measurementCache;
     private final HistorianMetrics metrics;
+    /** The current time; tests replace it. */
+    LongSupplier now = System::currentTimeMillis;
 
     public FactryQueryEngine(
         GatewayContext context,
@@ -663,7 +666,14 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             AggregatedQueryOptions options, AggregatedPointProcessor processor) {
 
         long startMs = options.getTimeRange().get().startTime().toEpochMilli();
-        long endMs = options.getTimeRange().get().endTime().toEpochMilli();
+        // Stop at now. Fill "previous" would carry the last value into future buckets and weight
+        // it up to the bucket end, while Ignition's own Average has no value after now (its
+        // interpolator returns nothing past the current time). Factry weights the last bucket
+        // up to the query end, so clamping the end is enough.
+        long endMs = Math.min(options.getTimeRange().get().endTime().toEpochMilli(), now.getAsLong());
+        if (endMs <= startMs) {
+            return 0;
+        }
 
         Map<Long, Double> twa = new LinkedHashMap<>();
         for (Series series : grpcClient.queryTimeseries(withRange(
