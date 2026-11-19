@@ -250,4 +250,75 @@ class FactryQueryEngineBucketTest {
         assertEquals(List.of(5.0, 3.0), rec.points.stream().map(p -> ((Number) p.value()).doubleValue()).toList());
         assertTrue(rec.points.stream().allMatch(p -> p.quality() == QualityCode.Good));
     }
+
+    @Test
+    void lastValue_withSeveralGoodStatusesInOneBucket_isTheLatestGoodSample() {
+        String u = factry.addMeasurement("default/out", "number");
+        factry.add(u, T0 + 1_000, 3, "Good");
+        factry.add(u, T0 + 2_000, 5, "GoodLocalOverride");
+        factry.add(u, T0 + 3_000, 4, "Good");
+
+        FactryQueryEngineAverageTest.Recorder rec = aggregated(AggregationMode.LastValue, T0 + 3_600_000);
+
+        // Factry's last per status says 4 (Good) and 5 (GoodLocalOverride), not which came last.
+        assertEquals(Arrays.asList(4.0, 4.0, 4.0, 4.0, 4.0, 4.0), values(rec));
+    }
+
+    @Test
+    void anAggregateThatCannotBeCombinedOverSeveralGoodStatuses_isUncertain() {
+        String u = factry.addMeasurement("default/out", "number");
+        factry.add(u, T0 + 1_000, 3, "Good");
+        factry.add(u, T0 + 2_000, 5, "GoodLocalOverride");
+        factry.add(u, T0 + 3_000, 4, "Good");
+        factry.add(u, T0 + 11_000, 6, "Good");
+
+        for (AggregationMode mode : List.of(AggregationMode.SimpleAverage, AggregationMode.Range)) {
+            FactryQueryEngineAverageTest.Recorder rec = aggregated(mode, T0 + 3_600_000);
+
+            // The mean of the means (3.5) and the largest spread (1) look right but are not.
+            assertEquals(QualityCode.Uncertain, rec.points.get(0).quality(), mode.name());
+            assertEquals(QualityCode.Good, rec.points.get(1).quality(), mode.name());
+        }
+    }
+
+    @Test
+    void pastTheReadCap_anEmptyBucketAfterABucketEndingBad_isBad() {
+        String u = factry.addMeasurement("default/out", "number");
+        // 12 buckets with Good then Bad, each followed by an empty one: 12 reads, cap 10.
+        for (int i = 0; i < 12; i++) {
+            factry.add(u, T0 + i * 20_000L + 1_000, i, "Good");
+            factry.add(u, T0 + i * 20_000L + 5_000, 99, "Bad");
+        }
+
+        FactryQueryEngineAverageTest.Recorder rec = new FactryQueryEngineAverageTest.Recorder();
+        engine(T0 + 3_600_000).query(AggregatedQueryOptions.builder()
+                .startTime(T0).endTime(T0 + 240_000)
+                .withTimeWindow(TimeWindow.ofMillis(10_000))
+                .addQueryKey(AggregatedQueryKey.of(QualifiedPath.parseSafe("sys:gw:/prov:default:/tag:out"),
+                        LegacyAggregateAdapter.of(AggregationMode.LastValue)))
+                .build(), rec);
+
+        List<Object> expected = new ArrayList<>();
+        for (int i = 0; i < 12; i++) {
+            expected.add((double) i);
+            expected.add(BAD);
+        }
+        assertEquals(expected, values(rec));
+    }
+
+    @Test
+    void aStringTag_hasOnlyLastValueAndCount() throws Exception {
+        // Factry 8.2.3 refuses every other aggregate on a string measurement (checked live).
+        String u = factry.addMeasurement("default/out", "string");
+        factry.add(u, T0 + 5_000, "run", "Good");
+
+        for (AggregationMode mode : List.of(AggregationMode.Average, AggregationMode.SimpleAverage,
+                AggregationMode.Sum, AggregationMode.Minimum, AggregationMode.MinMax, AggregationMode.Range)) {
+            AverageHistoryQuery.Dataset ds = read(mode);
+            for (QualityCode[] q : ds.qualities) {
+                assertEquals(QualityCode.Bad_Unsupported.getCode(), q[1].getCode(), () -> mode + "\n" + ds);
+            }
+        }
+        assertColumn(read(AggregationMode.LastValue), "run", "run", "run", "run", "run", "run");
+    }
 }

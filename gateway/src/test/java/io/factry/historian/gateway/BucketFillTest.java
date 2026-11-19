@@ -22,9 +22,9 @@ class BucketFillTest {
         List<String> out = new ArrayList<>();
         for (BucketFill.Bucket b : BucketFill.fill(0, buckets * 10, 10, now, statuses, ts -> {
             reads.add(ts);
-            return before;
-        }, maxReads)) {
-            out.add(b.kind() == BucketFill.Kind.HELD ? "held " + b.held() : b.kind().toString());
+            return before == null ? List.of() : List.of(before);
+        }, maxReads, false)) {
+            out.add(b.kind() == BucketFill.Kind.HELD ? "held " + b.value() : b.kind().toString());
         }
         return out;
     }
@@ -45,15 +45,16 @@ class BucketFillTest {
     }
 
     @Test
-    void readsAfterMixedBuckets_areCapped_thenTheLastGoodValueIsHeld() {
-        // Mixed, empty, mixed, empty: the second empty bucket is past the cap of one read.
+    void readsAfterMixedBuckets_areCapped_thenAnEmptyBucketIsBad() {
+        // Mixed, empty, mixed, empty: the second empty bucket is past the cap of one read. The
+        // sample read says Good, so the first empty bucket holds it; the second is a gap.
         bucket(0, true, 1.0);
         bucket(0, false, null);
         bucket(20, true, 2.0);
         bucket(20, false, null);
 
-        assertEquals(List.of("GOOD_SAMPLES", "BAD", "GOOD_SAMPLES", "held 2.0"),
-                fill(4, 100, 1, new BucketFill.Sample(5, null, false)));
+        assertEquals(List.of("GOOD_SAMPLES", "held 1.0", "GOOD_SAMPLES", "BAD"),
+                fill(4, 100, 1, new BucketFill.Sample(5, 1.0, true)));
         assertEquals(List.of(10L), reads);
     }
 
