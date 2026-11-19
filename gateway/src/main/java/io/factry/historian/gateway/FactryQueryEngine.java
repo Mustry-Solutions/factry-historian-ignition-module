@@ -411,6 +411,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             int pageSize = RAW_QUERY_PAGE_SIZE;
             List<String> pending = measurementUUIDs;
             long offset = 0;
+            // Points held: all that were read, or with returnSize only those that can still be
+            // among the first returnSize. The cap is checked against this.
             long collected = 0;
             // Last timestamp read per series (measurement and status), to see that a page moved on.
             Map<String, Long> lastTsBySeries = new HashMap<>();
@@ -477,6 +479,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 }
 
                 Set<String> more = new LinkedHashSet<>();
+                // Per pen with a full series: the earliest point it would read next.
+                Map<String, Long> nextFrom = new HashMap<>();
                 for (Series series : reply.getSeriesList()) {
                     String uuid = series.hasMeasurementUUID() ? series.getMeasurementUUID() : "";
                     if (!uuidToKeyMap.containsKey(uuid)) {
@@ -484,6 +488,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     }
                     if (series.getDataPointsCount() >= limit) {
                         more.add(uuid);
+                        nextFrom.merge(uuid,
+                                series.getDataPoints(series.getDataPointsCount() - 1).getTimestamp(), Math::min);
                     }
                     QualityCode quality = statusToQuality(seriesStatus(series));
                     RawQueryKey key = uuidToKeyMap.get(uuid);
@@ -496,6 +502,21 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                         lastTsBySeries.put(uuid + "|" + seriesStatus(series),
                                 series.getDataPoints(series.getDataPointsCount() - 1).getTimestamp());
                     }
+                }
+                // With returnSize, only the first returnSize points over all pens are returned, so
+                // drop the rest now and stop paging pens whose next points all come after them.
+                // Otherwise every pen would hold up to returnSize points and many pens would hit
+                // the cap although few points are wanted.
+                if (returnSize != null && collected > returnSize) {
+                    long[] times = pointsByUuid.values().stream().flatMap(List::stream)
+                            .mapToLong(RawPt::ts).sorted().toArray();
+                    long last = times[returnSize - 1];
+                    collected = 0;
+                    for (List<RawPt> pts : pointsByUuid.values()) {
+                        pts.removeIf(p -> p.ts() > last);
+                        collected += pts.size();
+                    }
+                    more.removeIf(uuid -> nextFrom.get(uuid) > last);
                 }
                 // Returning only part of the range would be worse than failing: Ignition repeats a
                 // pen's last value, with Good quality, into every row after its data stops, so a

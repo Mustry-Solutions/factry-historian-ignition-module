@@ -22,6 +22,8 @@ import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
 import io.grpc.stub.StreamObserver;
 
 import java.lang.reflect.Proxy;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -56,7 +58,10 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
     private final Server server;
 
     FakeFactryServer() throws Exception {
-        server = NettyServerBuilder.forPort(0).addService(this).build().start();
+        // Loopback only: forPort(0) binds the wildcard address, and macOS can hand out a port that
+        // another process already holds on 127.0.0.1, so the client would talk to that process.
+        server = NettyServerBuilder.forAddress(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0))
+                .addService(this).build().start();
     }
 
     int port() {
@@ -64,7 +69,7 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
     }
 
     FactryGrpcClient client() {
-        return new FactryGrpcClient("127.0.0.1", port(), "collector", "token", false, false, null);
+        return new FactryGrpcClient(InetAddress.getLoopbackAddress().getHostAddress(), port(), "collector", "token", false, false, null);
     }
 
     /** Adds a numeric measurement and returns its UUID. */
