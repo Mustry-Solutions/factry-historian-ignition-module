@@ -254,7 +254,7 @@ Loads tuning values from `factry-historian.properties` (bundled in the .modl). T
 | `grpc.write.deadline.seconds` | 3 | Timeout on `createPoints()` calls |
 | `status.cache.ms` | 30000 | How long to cache historian status (avoids gRPC poll on every UI refresh) |
 | `measurement.cache.refresh.seconds` | 30 | How often to reload measurements from Factry |
-| `query.raw.max.points` | 1000000 | Most raw points one query reads over all its pens; a range that holds more fails the read with an error |
+| `query.raw.max.points` | 500000 | Most raw points one query reads over all its pens; a range that holds more fails the read with an error. About 200 bytes of heap per point while the query runs, so about 100 MB per query |
 
 ---
 
