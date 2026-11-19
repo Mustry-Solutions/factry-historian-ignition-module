@@ -170,6 +170,27 @@ class PointWriterValueTypesTest {
     }
 
     @Test
+    void tagKeepsItsDescriptionAndUnitsWhenTheFirstCreateFails() {
+        cache.storeMetadata("default/Motor/Speed", Map.of(
+                WellKnownTagProps.DataType.getName(), DataType.Float8.toString(),
+                "engUnit", "rpm",
+                "description", "Motor speed"));
+        factry.createFailure = io.grpc.Status.UNAVAILABLE;
+        StorageResult<AtomicPoint<?>> failed = store(point("Motor/Speed", 1450.0, 1_000L));
+        assertFalse(failed.failedData().isEmpty(), "the flush is left for store and forward to retry");
+
+        factry.createFailure = null;
+        store(point("Motor/Speed", 1450.0, 1_000L));
+
+        CreateMeasurement created = createdFor("default/Motor/Speed");
+        assertEquals("Motor speed", created.getDescription());
+        assertEquals("rpm", created.getAttributes().getFieldsMap().get("Config")
+                .getStructValue().getFieldsMap().get("UoM").getStringValue());
+        assertEquals("Float8", created.getSettings().getFieldsMap()
+                .get(MeasurementCache.IGNITION_DATA_TYPE_SETTING).getStringValue());
+    }
+
+    @Test
     void booleanTagKeepsItsTypeWhenItsMeasurementIsCreatedAgain() {
         factry.add("default/Test/Flag", "flag-uuid");
         tagDataType("default/Test/Flag", DataType.Boolean);

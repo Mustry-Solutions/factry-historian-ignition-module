@@ -62,14 +62,12 @@ public class MeasurementCache {
     /** Measurement UUID → collector name, for grouping in the browse tree. */
     private volatile ConcurrentHashMap<String, String> measurementToCollectorName = new ConcurrentHashMap<>();
 
-    /** Metadata properties cached from doStoreMetadata, applied when creating measurements. */
-    private final ConcurrentHashMap<String, Map<String, String>> pendingMetadata = new ConcurrentHashMap<>();
     /**
-     * Each tag's Ignition data type, from its metadata. Kept after the metadata is taken: a failed
-     * create or a measurement deleted in Factry creates it again, and Store and Forward hands Boolean
-     * values over as Long, so without it the measurement would come back as number.
+     * Metadata properties cached from doStoreMetadata, applied when creating measurements. Creating a
+     * measurement does not remove them: a failed create or a measurement deleted in Factry creates it
+     * again, and Ignition may not send the metadata again.
      */
-    private final ConcurrentHashMap<String, String> ignitionDataTypes = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Map<String, String>> tagMetadata = new ConcurrentHashMap<>();
 
     private final int pageSize = ModuleProperties.getMeasurementCachePageSize();
 
@@ -347,7 +345,6 @@ public class MeasurementCache {
                     if (!uuid.isEmpty()) {
                         result.put(path, uuid);
                     }
-                    pendingMetadata.remove(path);
                     toCreate.remove(path);
                     pendingCreations.remove(path);
                 }
@@ -358,7 +355,7 @@ public class MeasurementCache {
                 CreateMeasurementsRequest.Builder req = CreateMeasurementsRequest.newBuilder();
                 for (String path : toCreate) {
                     req.addMeasurements(buildCreateMeasurement(
-                            path, pathToDataType.get(path), takeMetadata(path, pathToValue.get(path))));
+                            path, pathToDataType.get(path), metadataFor(path, pathToValue.get(path))));
                 }
                 try {
                     grpcClient.createMeasurements(req.build());
@@ -737,34 +734,31 @@ public class MeasurementCache {
         if (properties == null || properties.isEmpty()) {
             return;
         }
-        pendingMetadata.merge(tagPath, new HashMap<>(properties), (existing, incoming) -> {
-            existing.putAll(incoming);
-            return existing;
-        });
-        String ignitionType = properties.get(IGNITION_DATA_TYPE);
-        if (ignitionType != null) {
-            ignitionDataTypes.put(tagPath, ignitionType);
-        }
+        // Copy on write, so a create reading the map never sees it change underneath.
+        tagMetadata.merge(tagPath, Collections.unmodifiableMap(new HashMap<>(properties)),
+                (existing, incoming) -> {
+                    Map<String, String> merged = new HashMap<>(existing);
+                    merged.putAll(incoming);
+                    return Collections.unmodifiableMap(merged);
+                });
         logger.debug("Cached metadata for '{}': {}", tagPath, properties);
     }
 
+    /** Drop the cached metadata of a tag that Ignition retired or renamed. */
+    public void forgetMetadata(String tagPath) {
+        tagMetadata.remove(tagPath);
+    }
+
     /**
-     * Take the cached metadata for a tag that is about to get a measurement. A Date value without a
+     * The cached metadata for a tag that is about to get a measurement. A Date value without a
      * known Ignition data type (for example one stored by a script) still marks the tag as DateTime,
      * so the read side can return Dates.
      */
-    private Map<String, String> takeMetadata(String tagPath, Object value) {
-        Map<String, String> metadata = pendingMetadata.remove(tagPath);
-        if (metadata != null && metadata.containsKey(IGNITION_DATA_TYPE)) {
-            return metadata;
-        }
-        String ignitionType = ignitionDataTypes.get(tagPath);
-        if (ignitionType == null && value instanceof java.util.Date) {
-            ignitionType = "DateTime";
-        }
-        if (ignitionType != null) {
+    private Map<String, String> metadataFor(String tagPath, Object value) {
+        Map<String, String> metadata = tagMetadata.get(tagPath);
+        if (value instanceof java.util.Date && (metadata == null || !metadata.containsKey(IGNITION_DATA_TYPE))) {
             metadata = metadata != null ? new HashMap<>(metadata) : new HashMap<>();
-            metadata.put(IGNITION_DATA_TYPE, ignitionType);
+            metadata.put(IGNITION_DATA_TYPE, "DateTime");
         }
         return metadata;
     }
@@ -888,7 +882,8 @@ public class MeasurementCache {
      * turn a Boolean tag into a number measurement.
      */
     String dataTypeFor(String tagPath, Object value) {
-        String fromTag = fromIgnitionDataType(ignitionDataTypes.get(tagPath));
+        Map<String, String> metadata = tagMetadata.get(tagPath);
+        String fromTag = fromIgnitionDataType(metadata != null ? metadata.get(IGNITION_DATA_TYPE) : null);
         return fromTag != null ? fromTag : toFactryDataType(value);
     }
 
