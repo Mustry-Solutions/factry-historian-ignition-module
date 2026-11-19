@@ -10,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -140,6 +141,28 @@ class ReadErrorTest {
         assertEquals(6, ds.rows.size(), ds::toString);
         assertEquals(START, ds.time(0), ds::toString);
         assertEquals(5.0, ((Number) ds.rows.get(ds.rows.size() - 1)[1]).doubleValue(), ds::toString);
+    }
+
+    @Test
+    void averageWithOnePenRejectedKeepsTheTimeWeightedPathForTheOther() throws Exception {
+        // Average has its own path (Good-time twa, a point for every bucket). A pen Factry refuses
+        // there must still be a null Bad_Failure column, and no cell may be NaN: the Power Chart
+        // writes history as strict JSON, which throws at a NaN.
+        startEngine(true);
+        factry.failingMeasurements.add("uuid-2");
+
+        Dataset ds = average("a", "b");
+
+        assertTrue(factry.queries.stream().anyMatch(q -> q.hasAggregation()
+                        && FactryQueryEngine.TIME_WEIGHTED_AVERAGE.equals(q.getAggregation().getName())),
+                "Average should read Factry's twa");
+        assertOnlySecondPenFailed(ds);
+        assertEquals(5, ds.rows.size(), ds::toString);
+        for (Object[] row : ds.rows) {
+            for (Object cell : row) {
+                assertFalse(cell instanceof Double d && d.isNaN(), ds::toString);
+            }
+        }
     }
 
     @Test

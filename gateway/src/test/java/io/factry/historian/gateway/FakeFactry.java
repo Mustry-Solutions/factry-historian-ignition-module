@@ -1,11 +1,13 @@
 package io.factry.historian.gateway;
 
+import io.factry.historian.proto.AssetProperties;
 import io.factry.historian.proto.Assets;
 import io.factry.historian.proto.Collectors;
 import io.factry.historian.proto.CreateMeasurement;
 import io.factry.historian.proto.CreateMeasurementsReply;
 import io.factry.historian.proto.CreateMeasurementsRequest;
 import io.factry.historian.proto.CreatePointsReply;
+import io.factry.historian.proto.GetAssetPropertiesRequest;
 import io.factry.historian.proto.GetMeasurementsByFilterRequest;
 import io.factry.historian.proto.Measurement;
 import io.factry.historian.proto.Measurements;
@@ -32,6 +34,8 @@ class FakeFactry extends FactryGrpcClient {
 
     final List<Measurement> measurements = new ArrayList<>();
     final List<String> createdNames = new ArrayList<>();
+    /** Every measurement Factry was asked to create, with its data type and settings. */
+    final List<CreateMeasurement> created = new ArrayList<>();
     final List<Points> sent = new ArrayList<>();
     /** Number of single-name lookup calls (pages) made. */
     int lookups = 0;
@@ -47,6 +51,15 @@ class FakeFactry extends FactryGrpcClient {
     String createdStatus = "Active";
     /** When set, creates fail with this gRPC status. */
     Status createFailure = null;
+    Assets assets = Assets.getDefaultInstance();
+    AssetProperties assetProperties = AssetProperties.getDefaultInstance();
+    /** When set, asset property fetches fail with this gRPC status. */
+    Status assetPropertiesFailure = null;
+    /** The answer to every history query. */
+    QueryTimeseriesResponse queryResponse = QueryTimeseriesResponse.getDefaultInstance();
+    /** How many of the next history queries fail with {@link #queryFailure}. */
+    int queryFailures = 0;
+    Status queryFailure = Status.UNAVAILABLE;
 
     FakeFactry() {
         super("localhost", 1, OWN, "token", false, false, null);
@@ -104,6 +117,7 @@ class FakeFactry extends FactryGrpcClient {
         }
         for (CreateMeasurement m : request.getMeasurementsList()) {
             createdNames.add(m.getName());
+            created.add(m);
             if (measurements.stream().noneMatch(e -> e.getName().equals(m.getName()))) {
                 add(m.getName(), "new-" + m.getName(), createdCollector, createdStatus);
             } else if (existingInOtherDatabase) {
@@ -124,7 +138,11 @@ class FakeFactry extends FactryGrpcClient {
 
     @Override
     public QueryTimeseriesResponse queryTimeseries(QueryTimeseriesRequest request) {
-        return QueryTimeseriesResponse.getDefaultInstance();
+        if (queryFailures > 0) {
+            queryFailures--;
+            throw new StatusRuntimeException(queryFailure);
+        }
+        return queryResponse;
     }
 
     @Override
@@ -134,6 +152,14 @@ class FakeFactry extends FactryGrpcClient {
 
     @Override
     public Assets getAssets() {
-        return Assets.getDefaultInstance();
+        return assets;
+    }
+
+    @Override
+    public AssetProperties getAssetProperties(GetAssetPropertiesRequest request) {
+        if (assetPropertiesFailure != null) {
+            throw new StatusRuntimeException(assetPropertiesFailure);
+        }
+        return assetProperties;
     }
 }
