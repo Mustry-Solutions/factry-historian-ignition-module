@@ -45,8 +45,8 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
     private ScheduledExecutorService scheduledExecutor;
     private volatile String sfEngineName;
 
-    /** Last connection check result; refreshed on the scheduler, not by status polls. */
-    private volatile ProfileStatus cachedStatus = ProfileStatus.UNKNOWN;
+    /** The profile status, from the connection check (on the scheduler) and the writes. */
+    private final WriteHealth writeHealth = new WriteHealth();
     private static final long STATUS_CHECK_MS = ModuleProperties.getStatusCacheMs();
 
     public FactryHistoryProvider(GatewayContext context, String historianName, FactryHistorianSettings settings) {
@@ -69,7 +69,8 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         this.measurementCache = new MeasurementCache();
 
         this.queryEngine = new FactryQueryEngine(context, historianName, settings, grpcClient, measurementCache, metrics);
-        this.storageEngine = new FactryStorageEngine(context, historianName, settings, grpcClient, measurementCache, metrics);
+        this.storageEngine = new FactryStorageEngine(context, historianName, settings, grpcClient, measurementCache, metrics,
+                writeHealth);
 
         logger.info("Factry Historian created: name={}, grpcTarget={}:{}, collectorUUID={}",
                 historianName, settings.getGrpcHost(), settings.getGrpcPort(), settings.getCollectorUUID());
@@ -255,6 +256,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
             );
             // Judge and log refusals of writes afresh; before the refresh, which can throw.
             storageEngine.clearRefusals();
+            writeHealth.clearWrites();
 
             // Refresh measurement cache from the new endpoint
             measurementCache.refresh(grpcClient);
@@ -272,15 +274,15 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
             return true;
         } catch (Exception e) {
             logger.error("Failed to apply settings change", e);
-            // Reflect the failure immediately rather than serving a stale cached status.
-            cachedStatus = ProfileStatus.ERRORED;
+            // Reflect the failure immediately rather than waiting for the next check.
+            writeHealth.connectionChecked(false);
             return false;
         }
     }
 
     @Override
     public ProfileStatus getStatus() {
-        return started ? cachedStatus : ProfileStatus.UNKNOWN;
+        return started ? writeHealth.status() : ProfileStatus.UNKNOWN;
     }
 
     private void checkConnection() {
@@ -293,15 +295,15 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
     }
 
     /**
-     * Actively test the Factry connection, update the cached status, and toggle the S&F
+     * Actively test the Factry connection, record it for the status, and toggle the S&F
      * sink to match the connection state.
      * <p>
      * Runs every {@link #STATUS_CHECK_MS} on the scheduler, and right after startup and
      * settings changes so the gateway UI reflects the new state on its next poll.
      */
-    private ProfileStatus refreshConnectionStatus() {
+    private void refreshConnectionStatus() {
         boolean connected = grpcClient.testConnection();
-        cachedStatus = connected ? ProfileStatus.RUNNING : ProfileStatus.ERRORED;
+        writeHealth.connectionChecked(connected);
 
         // Toggle S&F sink: when Factry is down, stop accepting so points stay in pending.
         // When Factry is back, re-initialize so forwarding resumes.
@@ -328,8 +330,6 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
                 }
             }
         }
-
-        return cachedStatus;
     }
 
     /**

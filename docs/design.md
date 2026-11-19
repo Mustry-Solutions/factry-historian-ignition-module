@@ -403,7 +403,7 @@ Extends `AbstractHistorian<FactryHistorianSettings>`. The orchestrator that ties
 
 **`getStorageEngine()`** — returns S&F bridge if configured, otherwise the direct storage engine
 
-**`getStatus()`** — returns the result of the last scheduled connection check
+**`getStatus()`** — from `WriteHealth`, fed by the scheduled connection check and by Factry's answer to every write: Errored when the last check failed; also Errored ("Factry refuses writes") when Factry refused every write for 30 s while the check passes (for example `INTERNAL` while its InfluxDB is down), until it accepts one again. Not reaching Factry (`UNAVAILABLE`, `DEADLINE_EXCEEDED`) is not a refusal; the check covers it. Data handling does not change: store and forward keeps refused data and the quarantine retry sends it again. The gateway's Historians page shows an Errored profile as a red "Error" badge with the status details as its tooltip. One WARN when the refusals start counting, one INFO when Factry accepts a write again.
 
 **`handleSettingsChange()`** — reconfigures gRPC client, refreshes cache, updates engines. No restart needed.
 

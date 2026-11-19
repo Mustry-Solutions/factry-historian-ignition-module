@@ -44,10 +44,18 @@ class PointWriter {
     /** For tests. */
     long maxMessageBytes = ModuleProperties.getWriteMaxMessageBytes();
 
+    private final WriteHealth writeHealth;
+
     PointWriter(FactryGrpcClient grpcClient, MeasurementCache measurementCache, HistorianMetrics metrics) {
+        this(grpcClient, measurementCache, metrics, new WriteHealth());
+    }
+
+    PointWriter(FactryGrpcClient grpcClient, MeasurementCache measurementCache, HistorianMetrics metrics,
+                WriteHealth writeHealth) {
         this.grpcClient = grpcClient;
         this.measurementCache = measurementCache;
         this.metrics = metrics;
+        this.writeHealth = writeHealth;
     }
 
     /**
@@ -55,7 +63,15 @@ class PointWriter {
      * rejections that remain after the retry are thrown, for the engine to report.
      */
     StorageResult<AtomicPoint<?>> write(List<AtomicPoint<?>> points) {
-        return sendPoints(points, true);
+        try {
+            return sendPoints(points, true);
+        } catch (StatusRuntimeException e) {
+            // Not reaching Factry is the connection check's business, not a refusal.
+            if (!FactryGrpcClient.isConnectionError(e)) {
+                writeHealth.writeRefused(e.getStatus());
+            }
+            throw e;
+        }
     }
 
     /**
@@ -210,6 +226,7 @@ class PointWriter {
     private void sendPart(List<Point> part) {
         try {
             grpcClient.createPoints(Points.newBuilder().addAllPoints(part).build());
+            writeHealth.writeAccepted();
         } catch (StatusRuntimeException e) {
             if (!isTooLarge(e)) {
                 throw e;
@@ -228,6 +245,7 @@ class PointWriter {
                     e.getStatus().getDescription());
             grpcClient.createPoints(Points.newBuilder()
                     .addPoints(point.toBuilder().clearValue().setStatus("Bad")).build());
+            writeHealth.writeAccepted();
         }
     }
 

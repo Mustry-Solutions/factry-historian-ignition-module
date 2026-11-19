@@ -31,12 +31,24 @@ public class FactryStorageEngine extends AbstractStorageEngine {
         MeasurementCache measurementCache,
         HistorianMetrics metrics
     ) {
+        this(context, historianName, settings, grpcClient, measurementCache, metrics, new WriteHealth());
+    }
+
+    public FactryStorageEngine(
+        GatewayContext context,
+        String historianName,
+        FactryHistorianSettings settings,
+        FactryGrpcClient grpcClient,
+        MeasurementCache measurementCache,
+        HistorianMetrics metrics,
+        WriteHealth writeHealth
+    ) {
         super(context, historianName, LoggerEx.newBuilder().build(FactryStorageEngine.class),
                 QualifiedPathAdapter.DEFAULT, ImmediateStorageStrategy.create(historianName));
         this.settings = settings;
         this.measurementCache = measurementCache;
         this.metrics = metrics;
-        this.pointWriter = new PointWriter(grpcClient, measurementCache, metrics);
+        this.pointWriter = new PointWriter(grpcClient, measurementCache, metrics, writeHealth);
         logger.debug("Factry Storage Engine initialized with gRPC target: " +
                 settings.getGrpcHost() + ":" + settings.getGrpcPort());
     }
