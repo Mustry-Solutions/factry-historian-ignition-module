@@ -1,5 +1,6 @@
 package io.factry.historian.gateway;
 
+import com.inductiveautomation.ignition.common.FillMode;
 import com.inductiveautomation.ignition.common.model.values.QualityCode;
 import com.inductiveautomation.ignition.common.sqltags.history.AggregationMode;
 import io.factry.historian.gateway.IgnitionHistoryQuery.Dataset;
@@ -141,13 +142,58 @@ class ReadErrorTest {
     }
 
     @Test
-    void readThatFactryRejectsForEveryPenIsAnError() throws Exception {
+    void derivedFillWithOnePenRejectedMarksOnlyThatPen() throws Exception {
+        // FillMode.DERIVED gives each pen its own query, so the failing pen is alone in its query.
+        startEngine(true);
+        factry.failingMeasurements.add("uuid-2");
+
+        Dataset ds = IgnitionHistoryQuery.wide(engine, START, START + FIVE_MINUTES, 5, AggregationMode.Average,
+                FillMode.DERIVED, "a", "b");
+
+        assertOnlySecondPenFailed(ds);
+        assertEquals(29.5, ((Number) ds.rows.get(0)[1]).doubleValue(), ds::toString);
+    }
+
+    /** Every pen reads null with Bad_Failure on every interval; no error for the read. */
+    private static void assertEveryPenFailed(Dataset ds) {
+        assertNull(ds.error, ds::toString);
+        assertEquals(5, ds.rows.size(), ds::toString);
+        for (int i = 0; i < ds.rows.size(); i++) {
+            for (int c = 1; c < ds.columns.length; c++) {
+                assertTrue(ds.qualities.get(i)[c].is(QualityCode.Bad_Failure), ds::toString);
+                assertNull(ds.rows.get(i)[c], ds::toString);
+            }
+        }
+    }
+
+    @Test
+    void aggregatedReadWithItsOnlyPenRejectedIsBadFailureNotAnError() throws Exception {
+        // A chart with FillMode.DERIVED runs a query like this for each of its pens. An error here
+        // would end the whole chart, not just this pen.
+        startEngine(true);
+        factry.failingMeasurements.add("uuid-1");
+
+        assertEveryPenFailed(average("a"));
+    }
+
+    @Test
+    void aggregatedReadThatFactryRejectsForEveryPenMarksEveryPen() throws Exception {
+        startEngine(true);
+        factry.failingMeasurements.add("uuid-1");
+        factry.failingMeasurements.add("uuid-2");
+
+        assertEveryPenFailed(average("a", "b"));
+    }
+
+    @Test
+    void rawReadThatFactryRejectsForEveryPenIsAnError() throws Exception {
+        // Raw rows come only from points, so Bad_Failure columns alone would be an empty dataset.
         startEngine(true);
         factry.failingMeasurements.add("uuid-1");
         factry.failingMeasurements.add("uuid-2");
 
         assertReadFailed(raw("a", "b"), "INTERNAL");
-        assertReadFailed(average("a", "b"), "INTERNAL");
+        assertReadFailed(raw("a"), "INTERNAL");
     }
 
     @Test

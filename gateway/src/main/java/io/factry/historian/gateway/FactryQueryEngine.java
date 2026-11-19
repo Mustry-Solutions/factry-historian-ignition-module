@@ -730,7 +730,6 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             Map<AggregatedQueryKey, QualityCode> failures = new HashMap<>();
             // Every pen is read before the processor is initialized, so hold the points until then.
             Map<AggregatedQueryKey, List<AggregatedPoint<?, ?>>> pointsByKey = new LinkedHashMap<>();
-            Exception firstFailure = null;
 
             for (AggregatedQueryKey key : queryKeys) {
                 QualifiedPath source = key.source();
@@ -760,18 +759,11 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     if (failsEveryPen(e)) {
                         throw e;
                     }
-                    // Mark only this pen, so the other pens still draw.
+                    // Mark only this pen, so the other pens still draw. This holds when it is the
+                    // only pen too: with FillMode.DERIVED each pen is its own query.
                     logger.error("Error querying aggregated data for: " + tagPath, e);
                     failures.put(key, penFailed(e));
-                    if (firstFailure == null) {
-                        firstFailure = e;
-                    }
                 }
-            }
-
-            // Every pen failed: one error says more than a chart of empty pens.
-            if (firstFailure != null && pointsByKey.isEmpty()) {
-                throw firstFailure;
             }
 
             held.initialize(failures);
