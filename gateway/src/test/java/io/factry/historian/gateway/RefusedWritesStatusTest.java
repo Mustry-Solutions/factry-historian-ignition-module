@@ -23,6 +23,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.lang.reflect.Proxy;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -44,8 +46,9 @@ class RefusedWritesStatusTest {
     private Server server;
     private FactryGrpcClient client;
     private volatile Status createPointsStatus = Status.OK;
+    private volatile long createPointsDelayMs = 0;
     private final AtomicLong now = new AtomicLong(1_000_000L);
-    private final WriteHealth health = new WriteHealth(now::get);
+    private final WriteHealth health = new WriteHealth("factry-a", now::get);
     private FactryStorageEngine engine;
 
     private class Factry extends HistorianGrpc.HistorianImplBase {
@@ -67,6 +70,13 @@ class RefusedWritesStatusTest {
 
         @Override
         public void createPoints(Points request, StreamObserver<CreatePointsReply> observer) {
+            if (createPointsDelayMs > 0) {
+                try {
+                    Thread.sleep(createPointsDelayMs);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
             if (createPointsStatus.isOk()) {
                 observer.onNext(CreatePointsReply.getDefaultInstance());
                 observer.onCompleted();
@@ -113,6 +123,23 @@ class RefusedWritesStatusTest {
         now.addAndGet(seconds * 1000);
     }
 
+    /** Runs {@code action} and returns what it logged. */
+    private static String logOf(ThrowingRunnable action) throws Exception {
+        PrintStream original = System.err;
+        ByteArrayOutputStream captured = new ByteArrayOutputStream();
+        System.setErr(new PrintStream(captured, true));
+        try {
+            action.run();
+        } finally {
+            System.setErr(original);
+        }
+        return captured.toString();
+    }
+
+    private interface ThrowingRunnable {
+        void run() throws Exception;
+    }
+
     @Test
     void everyWriteRefusedFor30SecondsTurnsTheProfileErroredUntilOneIsAccepted() throws Exception {
         createPointsStatus = Status.INTERNAL.withDescription("influxdb: connection refused");
@@ -124,10 +151,12 @@ class RefusedWritesStatusTest {
         assertEquals(ProfileStatus.State.Good, health.status().getState());
 
         after(1);
+        flush();
         health.connectionChecked(client.testConnection());
         ProfileStatus status = health.status();
         assertEquals(ProfileStatus.State.Errored, status.getState(), "the connection check passes, writes don't");
-        assertEquals("Factry has refused every write for 30 s (last answer: INTERNAL: influxdb: connection"
+        assertEquals("Factry does not store writes", status.getMessage().toString());
+        assertEquals("No write to Factry has succeeded for 30 s (last answer: INTERNAL: influxdb: connection"
                 + " refused). Store and forward keeps the data and retries it.", status.getErrorDetails());
 
         createPointsStatus = Status.OK;
@@ -147,19 +176,55 @@ class RefusedWritesStatusTest {
         flush();
 
         after(20);
+        flush();
         assertEquals(ProfileStatus.State.Good, health.status().getState(), "refused for 20 s only");
         after(10);
+        flush();
         assertEquals(ProfileStatus.State.Errored, health.status().getState());
     }
 
+    /**
+     * InfluxDB hanging instead of refusing: Factry answers GetCollector, but every CreatePoints
+     * times out. Nothing is stored, so the status must say so.
+     */
     @Test
-    void notReachingFactryIsLeftToTheConnectionCheck() throws Exception {
-        createPointsStatus = Status.UNAVAILABLE.withDescription("io exception");
-        flush();
+    void writesThatAlwaysTimeOutTurnErrored() throws Exception {
+        createPointsDelayMs = 1_500; // over the test write deadline of 1 s plus 1 ms per point
+        assertTrue(flush().error().isPresent());
         after(60);
+        assertTrue(flush().error().isPresent());
+        health.connectionChecked(client.testConnection());
+
+        ProfileStatus status = health.status();
+        assertEquals(ProfileStatus.State.Errored, status.getState(), "nothing stored for 60 s, check passes");
+        assertTrue(status.getErrorDetails().contains("DEADLINE_EXCEEDED"), status.getErrorDetails());
+    }
+
+    /** One refused flush, then a quiet profile (no writes) for 30 s: one refusal is no alarm. */
+    @Test
+    void oneRefusalThenQuietStaysGood() throws Exception {
+        createPointsStatus = Status.INTERNAL.withDescription("transient");
+        flush();
+        createPointsStatus = Status.OK;
+        after(31);
+        health.connectionChecked(client.testConnection());
+
+        assertEquals(ProfileStatus.State.Good, health.status().getState(), "only one write was refused");
+    }
+
+    /** Refusals, then Factry restarted (check fails for 2 min), back and healthy before any write. */
+    @Test
+    void refusalsBeforeAnOutageAreForgottenAfterIt() throws Exception {
+        createPointsStatus = Status.INTERNAL.withDescription("influx down");
+        flush();
+        after(10);
+        health.connectionChecked(false);
+        after(120);
+        createPointsStatus = Status.OK;
+        health.connectionChecked(client.testConnection());
         flush();
 
-        assertEquals(ProfileStatus.State.Good, health.status().getState());
+        assertEquals(ProfileStatus.State.Good, health.status().getState(), "no write refused since it came back");
     }
 
     @Test
@@ -167,6 +232,7 @@ class RefusedWritesStatusTest {
         createPointsStatus = Status.INTERNAL.withDescription("refused");
         flush();
         after(30);
+        flush();
         assertEquals(ProfileStatus.State.Errored, health.status().getState());
 
         health.clearWrites();
@@ -179,5 +245,48 @@ class RefusedWritesStatusTest {
         health.connectionChecked(false);
 
         assertEquals(ProfileStatus.State.Errored, health.status().getState());
+    }
+
+    /**
+     * Live, a refusing Factry gave 216 identical ERROR lines in 3 minutes. One WARN per new answer,
+     * a summary about every 5 minutes, and the totals when Factry stores again; each line names
+     * the profile.
+     */
+    @Test
+    void refusalsAreLoggedOncePerAnswerWithASummary() throws Exception {
+        createPointsStatus = Status.INTERNAL.withDescription("influx down");
+        String first = logOf(this::flush);
+        String repeats = logOf(() -> {
+            for (int i = 0; i < 5; i++) {
+                after(10);
+                flush();
+                health.connectionChecked(client.testConnection());
+            }
+        });
+        createPointsStatus = Status.INTERNAL.withDescription("influx timeout");
+        String changed = logOf(this::flush);
+        createPointsStatus = Status.INTERNAL.withDescription("influx timeout");
+        String summary = logOf(() -> {
+            after(300);
+            flush();
+            health.connectionChecked(client.testConnection());
+        });
+        createPointsStatus = Status.OK;
+        String back = logOf(this::flush);
+
+        assertTrue(first.contains("WARN") && first.contains("Historian 'factry-a': Factry did not store 1 points"
+                + " (INTERNAL: influx down)"), first);
+        assertFalse(first.contains("ERROR"), "nothing is lost: " + first);
+        assertEquals(1, count(repeats, "WARN"), "only the switch to Errored: " + repeats);
+        assertTrue(repeats.contains("Historian 'factry-a': No write to Factry has succeeded for 30 s"), repeats);
+        assertTrue(changed.contains("WARN") && changed.contains("influx timeout"), changed);
+        assertTrue(summary.contains("Historian 'factry-a': Factry still does not store writes: 4 flushes / 4 points"
+                + " in the last 5 min (last answer: INTERNAL: influx timeout)"), summary);
+        assertTrue(back.contains("INFO") && back.contains("Historian 'factry-a': Factry stores writes again,"
+                + " after 8 failed flushes / 8 points"), back);
+    }
+
+    private static int count(String text, String word) {
+        return text.split(word, -1).length - 1;
     }
 }

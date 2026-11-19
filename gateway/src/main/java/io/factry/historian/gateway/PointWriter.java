@@ -68,16 +68,16 @@ class PointWriter {
 
     /**
      * Write a flush of points. Connection errors (UNAVAILABLE, DEADLINE_EXCEEDED) and server
-     * rejections that remain after the retry are thrown, for the engine to report.
+     * rejections that remain after the retry are recorded in {@link WriteHealth}, which logs
+     * them, and thrown for the engine to report to store and forward.
      */
     StorageResult<AtomicPoint<?>> write(List<AtomicPoint<?>> points) {
         try {
             return sendPoints(points, true);
         } catch (StatusRuntimeException e) {
-            // Not reaching Factry is the connection check's business, not a refusal.
-            if (!FactryGrpcClient.isConnectionError(e)) {
-                writeHealth.writeRefused(e.getStatus());
-            }
+            // Timeouts too: an InfluxDB that hangs lets every write time out while the
+            // connection check passes.
+            writeHealth.writeFailed(e.getStatus(), points.size());
             throw e;
         }
     }
