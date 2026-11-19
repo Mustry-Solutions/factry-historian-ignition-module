@@ -277,7 +277,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         } catch (Exception e) {
             logger.error("Failed to apply settings change", e);
             // Reflect the failure immediately rather than waiting for the next check.
-            writeHealth.connectionChecked(Status.fromThrowable(e));
+            writeHealth.settingsRejected(e);
             return false;
         }
     }

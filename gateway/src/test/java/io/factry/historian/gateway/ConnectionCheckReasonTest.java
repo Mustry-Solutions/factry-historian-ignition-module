@@ -132,4 +132,31 @@ class ConnectionCheckReasonTest {
         assertTrue(fourth.contains("INFO") && fourth.contains("answers the connection check again"), fourth);
         assertSame(ProfileStatus.RUNNING, health.status());
     }
+
+    /**
+     * A settings save that cannot be applied showed "Factry Historian check failed (UNKNOWN: ...)",
+     * and logged a second WARN next to the provider's own error.
+     */
+    @Test
+    void aRejectedSettingsSaveSaysSoWithoutAnotherLogLine() {
+        check();
+        PrintStream original = System.err;
+        ByteArrayOutputStream captured = new ByteArrayOutputStream();
+        System.setErr(new PrintStream(captured, true));
+        try {
+            health.settingsRejected(new RuntimeException("Failed to refresh measurement cache",
+                    new IllegalStateException("UNAUTHENTICATED: invalid auth token")));
+        } finally {
+            System.setErr(original);
+        }
+
+        ProfileStatus status = health.status();
+        assertEquals("Settings rejected", status.getMessage().toString());
+        assertEquals("Settings rejected: Failed to refresh measurement cache: UNAUTHENTICATED: invalid auth token",
+                status.getErrorDetails());
+        assertEquals("", captured.toString());
+
+        check();
+        assertSame(ProfileStatus.RUNNING, health.status(), "the next check replaces it");
+    }
 }

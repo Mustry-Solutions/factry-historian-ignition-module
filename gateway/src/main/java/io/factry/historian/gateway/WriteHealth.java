@@ -32,6 +32,8 @@ final class WriteHealth {
 
     /** Factry's answer to the last connection check; null until the first one. */
     private Status check;
+    /** Why the last settings save was not applied; null once the check runs again. */
+    private String settingsRejection;
     /** When the first write failed after the last stored one; null while writes are stored. */
     private Long failingSince;
     private long lastFailedAt;
@@ -64,6 +66,7 @@ final class WriteHealth {
     synchronized void connectionChecked(Status status) {
         Status previous = check;
         check = status;
+        settingsRejection = null;
         if (!status.isOk()) {
             if (previous == null || previous.isOk()
                     || checkFailure(previous) != checkFailure(status) || previous.getCode() != status.getCode()) {
@@ -125,6 +128,20 @@ final class WriteHealth {
         }
     }
 
+    /**
+     * New settings could not be applied (Ignition then restarts the profile). The caller logs the
+     * error; the status says it until the next connection check.
+     */
+    synchronized void settingsRejected(Throwable e) {
+        StringBuilder reason = new StringBuilder();
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t.getMessage() != null && reason.indexOf(t.getMessage()) < 0) {
+                reason.append(reason.length() == 0 ? "" : ": ").append(t.getMessage());
+            }
+        }
+        settingsRejection = reason.length() == 0 ? e.getClass().getSimpleName() : reason.toString();
+    }
+
     /** Forget the writes, for new settings or after an outage: they are judged afresh. */
     synchronized void clearWrites() {
         failingSince = null;
@@ -138,6 +155,10 @@ final class WriteHealth {
     }
 
     synchronized ProfileStatus status() {
+        if (settingsRejection != null) {
+            return new ProfileStatus(ProfileStatus.State.Errored, LocalizedString.createRaw("Settings rejected"),
+                    "Settings rejected: " + settingsRejection);
+        }
         if (check == null) {
             return ProfileStatus.UNKNOWN;
         }
