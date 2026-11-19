@@ -740,7 +740,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     }
 
     /**
-     * Convert a TimeWindow to a Go-style duration string (e.g. "2h30m", "45s").
+     * Convert a TimeWindow to a Go-style duration string (e.g. "2h30m", "45s", "600ms").
      * Factry uses Go's time.ParseDuration() which does not accept ISO 8601.
      */
     static String timeWindowToPeriod(TimeWindow tw) {
@@ -751,8 +751,10 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         long totalMillis = tw.unit().isTimeBased()
                 ? tw.toDuration().toMillis()
                 : tw.toSeconds() * 1000;
+        // TimeWindow refuses sizes below 1, so this can't happen today. Fail rather than send a
+        // made-up period: a silent 1 minute was the original bug, and "0s" crashes Factry.
         if (totalMillis <= 0) {
-            return "1m";
+            throw new IllegalArgumentException("Time window shorter than 1 ms: " + tw);
         }
 
         StringBuilder sb = new StringBuilder();
