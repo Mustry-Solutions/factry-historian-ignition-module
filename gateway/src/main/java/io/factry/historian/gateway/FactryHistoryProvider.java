@@ -47,7 +47,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
     private volatile String sfEngineName;
 
     /** The profile status, from the connection check (on the scheduler) and the writes. */
-    private final WriteHealth writeHealth = new WriteHealth();
+    private final WriteHealth writeHealth;
     private static final long STATUS_CHECK_MS = ModuleProperties.getStatusCacheMs();
 
     public FactryHistoryProvider(GatewayContext context, String historianName, FactryHistorianSettings settings) {
@@ -57,6 +57,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         settings.applyTokenDefaults(settings.getToken());
         settings.validate();
         this.metrics = new HistorianMetrics();
+        this.writeHealth = new WriteHealth(historianName);
 
         this.grpcClient = new FactryGrpcClient(
                 settings.getGrpcHost(),
@@ -276,7 +277,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         } catch (Exception e) {
             logger.error("Failed to apply settings change", e);
             // Reflect the failure immediately rather than waiting for the next check.
-            writeHealth.connectionChecked(Status.fromThrowable(e));
+            writeHealth.settingsRejected(e);
             return false;
         }
     }
@@ -411,7 +412,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
 
     /**
      * Tell Factry how collecting goes, in its own words so its collector list colours it:
-     * Collecting (green), or Unstable (orange) while Factry refuses our writes. Factry already
+     * Collecting (green), or Unstable (orange) while Factry does not store our writes. Factry already
      * sees an outage or a refused token, since this update cannot arrive then.
      */
     static void sendHealthUpdate(FactryGrpcClient grpcClient, WriteHealth writeHealth) {
