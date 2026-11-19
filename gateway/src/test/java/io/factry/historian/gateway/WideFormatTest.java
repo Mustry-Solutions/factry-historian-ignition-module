@@ -14,13 +14,13 @@ class WideFormatTest {
 
     private static final long START = 1_794_268_800_000L; // 2026-11-10T00:00:00Z
 
-    private FakeFactry factry;
+    private FakeFactryServer factry;
     private FactryGrpcClient client;
     private FactryQueryEngine engine;
 
     @BeforeEach
     void setUp() throws Exception {
-        factry = new FakeFactry();
+        factry = new FakeFactryServer();
         client = factry.client();
     }
 
@@ -35,7 +35,7 @@ class WideFormatTest {
         settings.setDelimiter("/");
         MeasurementCache cache = new MeasurementCache();
         cache.refresh(client);
-        engine = new FactryQueryEngine(FakeFactry.gatewayContext(), "Factry", settings, client, cache,
+        engine = new FactryQueryEngine(FakeFactryServer.gatewayContext(), "Factry", settings, client, cache,
                 new HistorianMetrics());
     }
 
