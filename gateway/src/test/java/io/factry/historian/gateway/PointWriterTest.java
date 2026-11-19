@@ -139,18 +139,14 @@ class PointWriterTest {
         factry.queryFailures = Integer.MAX_VALUE;
         List<AtomicPoint<?>> flush = List.of(point("Tank/Level", 2.0), point("Tank/Profile[1]", 9));
 
-        for (int attempt = 1; attempt <= 2; attempt++) {
+        for (int attempt = 1; attempt <= 5; attempt++) {
             StorageResult<AtomicPoint<?>> result = writer.write(flush);
             assertTrue(result.error().isPresent(), "attempt " + attempt + " is retried");
             assertEquals(attempt, factry.sent.size(), "the scalar goes out on every attempt");
             assertEquals("level-uuid", factry.sent.get(attempt - 1).getPoints(0).getMeasurementUUID());
-            assertEquals(1, factry.sent.get(attempt - 1).getPointsCount(), "the array waits");
+            assertEquals(1, factry.sent.get(attempt - 1).getPointsCount(),
+                    "the array waits rather than being stored without its unchanged elements");
         }
-
-        StorageResult<AtomicPoint<?>> third = writer.write(flush);
-
-        assertFalse(third.error().isPresent(), "after 3 failed reads the array is stored anyway");
-        assertEquals(2, factry.sent.get(2).getPointsCount());
     }
 
     static com.google.protobuf.Value number(double v) {
