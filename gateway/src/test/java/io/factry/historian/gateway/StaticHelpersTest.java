@@ -168,6 +168,20 @@ class StaticHelpersTest {
         }
 
         @Test
+        void millisAgreeWithThePeriod() {
+            // GoodTimeAverage cuts raw samples into buckets of timeWindowToMillis; Factry makes
+            // them from the period string. A 600 ms window must be 600 ms on both sides.
+            assertEquals(600, FactryQueryEngine.timeWindowToMillis(TimeWindow.ofMillis(600)));
+            assertEquals(1_500, FactryQueryEngine.timeWindowToMillis(TimeWindow.ofMillis(1500)));
+            assertEquals(86_400_000, FactryQueryEngine.timeWindowToMillis(TimeWindow.ofDays(1)));
+            for (TimeWindow tw : List.of(TimeWindow.ofMillis(600), TimeWindow.ofMillis(1500),
+                    TimeWindow.ofSeconds(90), TimeWindow.ofHours(1), TimeWindow.ofDays(1))) {
+                assertEquals(FactryQueryEngine.timeWindowToPeriod(tw),
+                        FactryQueryEngine.toPeriod(FactryQueryEngine.timeWindowToMillis(tw)));
+            }
+        }
+
+        @Test
         void zero_cannotReachTheEngine() {
             // A zero period makes Factry's InfluxDB query panic (divide by zero). Ignition's
             // TimeWindow rejects a zero size, so the engine never has to convert one.

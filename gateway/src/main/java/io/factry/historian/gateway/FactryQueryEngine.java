@@ -451,8 +451,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 return Optional.of(0);
             }
 
-            TimeWindow timeWindow = options.getTimeWindow();
-            String period = timeWindowToPeriod(timeWindow);
+            long periodMs = timeWindowToMillis(options.getTimeWindow());
+            String period = toPeriod(periodMs);
 
             var queryKeys = options.getQueryKeys();
             int pointCount = 0;
@@ -484,7 +484,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                         }
                         if (TIME_WEIGHTED_AVERAGE.equals(factryFunction) && options.getTimeRange().isPresent()) {
                             pointCount += queryTimeWeightedAverage(uuid, source, key, period,
-                                    timeWindowToMillis(timeWindow), options, processor);
+                                    periodMs, options, processor);
                         } else {
                             pointCount += querySingleAggregate(uuid, source, key, factryFunction, period, options, processor);
                         }
@@ -867,16 +867,11 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     }
 
     /**
-     * Convert a TimeWindow to a Go-style duration string (e.g. "2h30m", "45s").
-     * Factry uses Go's time.ParseDuration() which does not accept ISO 8601.
+     * The bucket length in milliseconds. The Factry period is built from this same number
+     * ({@link #toPeriod}), so the buckets Factry returns and the ones the module computes itself
+     * (GoodTimeAverage) have the same length.
      */
-    /** The bucket length in milliseconds of the period {@link #timeWindowToPeriod} gives. */
     static long timeWindowToMillis(TimeWindow tw) {
-        long totalSeconds = tw.toSeconds();
-        return totalSeconds <= 0 ? 60_000 : totalSeconds * 1000;
-    }
-
-    static String timeWindowToPeriod(TimeWindow tw) {
         // Work in milliseconds: Ignition asks for sub-second windows (e.g. 600 ms) when a
         // trend is zoomed in, and rounding them to whole seconds widens every bucket.
         // TimeWindow.toMillis() throws for any unit but MILLIS, and toDuration() throws for
@@ -884,10 +879,19 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         long totalMillis = tw.unit().isTimeBased()
                 ? tw.toDuration().toMillis()
                 : tw.toSeconds() * 1000;
-        if (totalMillis <= 0) {
-            return "1m";
-        }
+        // A zero period crashes Factry; one minute is the old fallback.
+        return totalMillis <= 0 ? 60_000 : totalMillis;
+    }
 
+    static String timeWindowToPeriod(TimeWindow tw) {
+        return toPeriod(timeWindowToMillis(tw));
+    }
+
+    /**
+     * A bucket length as a Go-style duration string (e.g. "2h30m", "45s", "600ms").
+     * Factry uses Go's time.ParseDuration(), which does not accept ISO 8601.
+     */
+    static String toPeriod(long totalMillis) {
         StringBuilder sb = new StringBuilder();
         long hours = totalMillis / 3_600_000;
         long minutes = (totalMillis % 3_600_000) / 60_000;
