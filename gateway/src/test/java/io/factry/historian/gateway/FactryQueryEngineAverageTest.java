@@ -166,4 +166,59 @@ class FactryQueryEngineAverageTest {
         assertValues(Map.of(t("08:00"), 100.0, t("08:10"), 100.0, t("08:20"), (100 + 2 * 50) / 3.0),
                 rec.values());
     }
+
+    @Test
+    void bucketsAlternatingBetweenGoodAndBad_areReadInOneRequest() {
+        // 1000 one-minute buckets, each holding one sample half way: Good (value k) in even
+        // buckets, Bad in odd ones. Every bucket starts in the other status, so each needs raw
+        // samples; one request per bucket would be 1000 sequential calls.
+        String u = factry.addMeasurement("default/a", "number");
+        long start = t("00:00");
+        for (int k = 0; k < 1000; k++) {
+            factry.add(u, start + k * MIN + 30_000, k, k % 2 == 0 ? "Good" : "Bad");
+        }
+
+        Recorder rec = average(engine(), "a", start, start + 1000 * MIN, TimeWindow.ofMinutes(1));
+
+        assertEquals(1, factry.rawQueries().size());
+        Map<Long, Double> expected = new LinkedHashMap<>();
+        for (int k = 0; k < 1000; k++) {
+            // Even: Good k for its second half. Odd: Good k-1 for its first half.
+            expected.put(start + k * MIN, (double) (k % 2 == 0 ? k : k - 1));
+        }
+        assertValues(expected, rec.values());
+        assertTrue(rec.qualities().values().stream().allMatch(QualityCode::isGood));
+    }
+
+    @Test
+    void aBadBlipInEveryBucket_staysWithinTheRawBudget() {
+        // A day of 4 Hz data (345,600 samples, about 8 MB raw) with one Bad sample in every
+        // 10-minute bucket. Reading all of those buckets in one request breaks the 4 MiB
+        // message limit and the pen fails; the module must stay within its budget and give
+        // the buckets it cannot read the Good-only twa, marked Uncertain.
+        String u = factry.addMeasurement("default/a", "number");
+        long start = t("00:00");
+        long day = 24 * 60 * MIN;
+        for (long ts = start; ts < start + day; ts += 250) {
+            boolean blip = (ts - start) % (10 * MIN) == 5 * MIN;
+            factry.add(u, ts, blip ? 1000 : 10, blip ? "Bad" : "Good");
+        }
+        factry.maxAnswerBytes = 4 * 1024 * 1024;
+
+        Recorder rec = average(engine(), "a", start, start + day, TimeWindow.ofMinutes(10));
+
+        assertEquals(144, rec.values().size());
+        rec.values().values().forEach(v -> assertEquals(10.0, v, 1e-9));
+        GoodTimeAverage.Budget budget = FactryQueryEngine.RAW_BUDGET;
+        assertTrue(factry.rawQueries().size() <= budget.requestsPerPen(), "raw requests");
+        assertTrue(factry.rawAnswerPoints.stream().allMatch(n -> n <= budget.pointsPerRequest()),
+                () -> "points per raw request: " + factry.rawAnswerPoints);
+        assertTrue(factry.rawAnswerPoints.stream().mapToLong(Integer::longValue).sum() <= budget.pointsPerPen());
+        // The buckets read raw are exact (Good); the rest are the fallback (Uncertain).
+        long exact = rec.qualities().values().stream().filter(QualityCode::isGood).count();
+        long read = factry.rawAnswerPoints.stream().mapToLong(Integer::longValue).sum() / 2400; // samples per bucket
+        assertEquals(read, exact);
+        assertTrue(exact > 0 && exact < 144, "some buckets read raw, the rest fall back: " + exact);
+        assertTrue(rec.qualities().values().stream().allMatch(q -> q.isGood() || q.isUncertain()));
+    }
 }

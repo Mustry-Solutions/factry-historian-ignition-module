@@ -644,10 +644,19 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     }
 
     /**
+     * Limits on the raw samples one Average pen may read (see {@link GoodTimeAverage}). A sample
+     * is about 25 bytes on the wire, so 50,000 per request stays far below the 4 MiB gRPC
+     * message limit, and 200,000 per pen (about 5 MB over at most 10 requests) keeps a trend
+     * refresh quick. Buckets beyond this get Factry's twa over the Good samples instead.
+     */
+    static final GoodTimeAverage.Budget RAW_BUDGET = new GoodTimeAverage.Budget(50_000, 200_000, 10);
+
+    /**
      * Ignition's "Average" over Good time only (see {@link GoodTimeAverage}). Factry's twa gives
      * the buckets that are Good throughout; a per-status {@code last} aggregate and the sample
      * before the range tell which buckets that is. Only buckets where the status changes are
-     * fetched raw. Buckets that are not Good throughout get no point, so they show as a gap.
+     * fetched raw, within {@link #RAW_BUDGET}. Buckets that are not Good throughout get no point,
+     * so they show as a gap.
      */
     private int queryTimeWeightedAverage(
             String uuid, QualifiedPath source, AggregatedQueryKey key, String period, long periodMs,
@@ -680,16 +689,48 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         List<GoodTimeAverage.Sample> before = samples(grpcClient.queryTimeseries(sampleBeforeRequest(uuid, startMs)));
         GoodTimeAverage.Sample seed = before.isEmpty() ? null : before.get(before.size() - 1);
 
-        Map<Long, Double> values = GoodTimeAverage.compute(twa, statuses, seed, periodMs, endMs,
-                (from, to) -> samples(grpcClient.queryTimeseries(withRange(
-                        QueryTimeseriesRequest.newBuilder().addMeasurementUUIDs(uuid).addGroupBy("status"),
-                        from, to).build())));
+        GoodTimeAverage.Source factry = new GoodTimeAverage.Source() {
+            @Override
+            public Map<Long, Long> counts() {
+                Map<Long, Long> counts = new HashMap<>();
+                for (Series series : grpcClient.queryTimeseries(withRange(
+                        perStatusRequest(uuid, "count", period), startMs, endMs).build()).getSeriesList()) {
+                    for (SeriesPoint pt : series.getDataPointsList()) {
+                        counts.merge(pt.getTimestamp(), (long) pt.getValue().getNumberValue(), Long::sum);
+                    }
+                }
+                return counts;
+            }
 
-        for (Map.Entry<Long, Double> e : values.entrySet()) {
+            @Override
+            public List<GoodTimeAverage.Sample> raw(long from, long to) {
+                return samples(grpcClient.queryTimeseries(withRange(
+                        QueryTimeseriesRequest.newBuilder().addMeasurementUUIDs(uuid).addGroupBy("status"),
+                        from, to).build()));
+            }
+
+            @Override
+            public Map<Long, Double> fallback() {
+                Map<Long, Double> values = new HashMap<>();
+                for (Series series : grpcClient.queryTimeseries(withRange(
+                        goodOnlyTwaRequest(uuid, period), startMs, endMs).build()).getSeriesList()) {
+                    for (SeriesPoint pt : series.getDataPointsList()) {
+                        values.put(pt.getTimestamp(), toDouble(pt.getValue()));
+                    }
+                }
+                return values;
+            }
+        };
+
+        Map<Long, GoodTimeAverage.Result> values = GoodTimeAverage.compute(
+                twa, statuses, seed, periodMs, endMs, RAW_BUDGET, factry);
+
+        for (Map.Entry<Long, GoodTimeAverage.Result> e : values.entrySet()) {
             processor.onPointAvailable(key,
                     AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
-                            .value(e.getValue())
-                            .quality(QualityCode.Good)
+                            .value(e.getValue().value())
+                            // A fallback value may include time that was not Good: say so.
+                            .quality(e.getValue().exact() ? QualityCode.Good : QualityCode.Uncertain)
                             .timestamp(Instant.ofEpochMilli(e.getKey()))
                             .build());
         }
@@ -702,10 +743,27 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
     /** Per bucket and status, the last sample: says which statuses a bucket holds. */
     static QueryTimeseriesRequest.Builder bucketStatusRequest(String uuid, String period) {
+        return perStatusRequest(uuid, "last", period);
+    }
+
+    /** One aggregate per bucket and status, without fill. */
+    private static QueryTimeseriesRequest.Builder perStatusRequest(String uuid, String function, String period) {
         return QueryTimeseriesRequest.newBuilder()
                 .addMeasurementUUIDs(uuid)
                 .addGroupBy("status")
-                .setAggregation(Aggregation.newBuilder().setName("last").setPeriod(period).setFillType("none").build());
+                .setAggregation(Aggregation.newBuilder().setName(function).setPeriod(period).setFillType("none").build());
+    }
+
+    /**
+     * twa over the samples whose status is exactly "Good", for buckets the raw budget does not
+     * cover. It leaves Bad values out but holds the last Good value through Bad time, and the
+     * exact match misses Good sub-statuses. That is still closer than the unfiltered twa (which
+     * averages Bad values in) and costs one request for the whole range.
+     */
+    static QueryTimeseriesRequest.Builder goodOnlyTwaRequest(String uuid, String period) {
+        return aggregateRequest(uuid, TIME_WEIGHTED_AVERAGE, period)
+                .setTags(com.google.protobuf.Struct.newBuilder()
+                        .putFields("status", com.google.protobuf.Value.newBuilder().setStringValue("Good").build()));
     }
 
     /** The last sample before {@code startMs} (end is exclusive), one per status series. */

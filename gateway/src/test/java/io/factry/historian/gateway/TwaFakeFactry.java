@@ -41,6 +41,8 @@ class TwaFakeFactry extends FactryGrpcClient {
     private final Map<String, Measurement> measurements = new LinkedHashMap<>();
     private final Map<String, List<Pt>> points = new LinkedHashMap<>();
     final List<QueryTimeseriesRequest> queries = new ArrayList<>();
+    /** Points in each answer to a raw (not aggregated, unlimited) request, in order. */
+    final List<Integer> rawAnswerPoints = new ArrayList<>();
     /** Answers larger than this fail like a gRPC message over the client's limit. */
     int maxAnswerBytes = Integer.MAX_VALUE;
 
@@ -168,6 +170,9 @@ class TwaFakeFactry extends FactryGrpcClient {
             }
         }
         QueryTimeseriesResponse built = answer.build();
+        if (!request.hasAggregation() && !request.hasLimit()) {
+            rawAnswerPoints.add(built.getSeriesList().stream().mapToInt(Series::getDataPointsCount).sum());
+        }
         if (built.getSerializedSize() > maxAnswerBytes) {
             throw Status.RESOURCE_EXHAUSTED.withDescription("gRPC message exceeds maximum size")
                     .asRuntimeException();
