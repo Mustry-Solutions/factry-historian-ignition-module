@@ -19,7 +19,9 @@ import java.util.regex.Pattern;
 public final class JwtTokenParser {
     private static final Logger logger = LoggerFactory.getLogger(JwtTokenParser.class);
 
-    private static final Pattern WHITESPACE = Pattern.compile("(?U)\\s+");
+    // Zero-width space and byte-order mark are not whitespace, but often come along when a
+    // token is copied from a web page or an email.
+    private static final Pattern WHITESPACE = Pattern.compile("[\\s\\u200B\\uFEFF]+", Pattern.UNICODE_CHARACTER_CLASS);
     private static final Pattern JWT = Pattern.compile("[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+");
 
     private JwtTokenParser() {
