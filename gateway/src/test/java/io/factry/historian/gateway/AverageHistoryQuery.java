@@ -91,6 +91,14 @@ final class AverageHistoryQuery {
      */
     static Dataset wide(QueryEngine engine, long start, long end, int returnSize, AggregationMode aggregate,
                         FillMode fill, String... tags) throws Exception {
+        Dataset ds = new Dataset();
+        wide(ds, engine, start, end, returnSize, aggregate, fill, tags);
+        return ds;
+    }
+
+    /** The same query, written into {@code sink} (e.g. the JSON writer the Power Chart uses). */
+    static void wide(StreamingDatasetWriter sink, QueryEngine engine, long start, long end, int returnSize,
+                     AggregationMode aggregate, FillMode fill, String... tags) throws Exception {
         List<QualifiedPath> paths = new ArrayList<>();
         List<ColumnQueryDefinition> defs = new ArrayList<>();
         for (String tag : tags) {
@@ -102,12 +110,10 @@ final class AverageHistoryQuery {
         }
         BasicTagHistoryQueryParams params = new BasicTagHistoryQueryParams(paths, new Date(start), new Date(end),
                 returnSize, aggregate, ReturnFormat.Wide, List.of(tags), List.of());
-        Dataset ds = new Dataset();
-        HistoryWriter writer = new HistoryWriter("test", ds, params);
+        HistoryWriter writer = new HistoryWriter("test", sink, params);
         HistoryQueryExecutor executor = new HistorianQueryInterface(historian(engine)).createQuery(defs, writer);
         writer.setQueryExecutor(executor);
         writer.execute();
-        return ds;
     }
 
     @SuppressWarnings("unchecked")

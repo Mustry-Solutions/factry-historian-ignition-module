@@ -370,8 +370,6 @@ class FactryQueryEngineAverageTest {
         // 05-15 Good 100; 15-25 Bad from 20; 25-35 Bad throughout; 35-45 Bad until 40.
         assertEquals(100.0, ((Number) ds.rows.get(0)[1]).doubleValue(), 1e-9, ds::toString);
         assertEquals(100.0, ((Number) ds.rows.get(1)[1]).doubleValue(), 1e-9, ds::toString);
-        Object v = ds.rows.get(2)[1];
-        assertTrue(v == null || Double.isNaN(((Number) v).doubleValue()), ds::toString);
         assertTrue(ds.qualities.get(2)[1].isBad(), ds::toString);
         assertEquals(60.0, ((Number) ds.rows.get(3)[1]).doubleValue(), 1e-9, ds::toString);
         assertTrue(ds.qualities.get(3)[1].isGood(), ds::toString);
@@ -398,9 +396,32 @@ class FactryQueryEngineAverageTest {
             Object v = ds.rows.get(r)[1];
             if (good) {
                 assertEquals(100.0, ((Number) v).doubleValue(), 1e-9, ds::toString);
-            } else {
-                assertTrue(v == null || Double.isNaN(((Number) v).doubleValue()), ds::toString);
             }
         }
+    }
+
+    @Test
+    void badBuckets_streamToThePowerChartsJson() throws Exception {
+        // The Power Chart streams history through StreamingDatasetJsonWriter on a strict
+        // JsonWriter, which throws at a NaN and cuts the response off.
+        long t0 = t("10:38") + 5_911;
+        String u = factry.addMeasurement("default/out", "number");
+        factry.add(u, t0, 100, "Good");
+        factry.add(u, t0 + 15_000, 0, "Bad");
+        factry.add(u, t0 + 35_000, 60, "Good");
+        FactryQueryEngine engine = engine();
+        engine.now = () -> t0 + 40_000;
+        java.io.StringWriter json = new java.io.StringWriter();
+        List<Exception> errors = new ArrayList<>();
+        com.inductiveautomation.ignition.common.StreamingDatasetJsonWriter sink =
+                new com.inductiveautomation.ignition.common.StreamingDatasetJsonWriter(
+                        new com.inductiveautomation.ignition.common.gson.stream.JsonWriter(json), errors::add);
+
+        AverageHistoryQuery.wide(sink, engine, t0, t0 + 60_000, 6, AggregationMode.Average,
+                com.inductiveautomation.ignition.common.FillMode.NONE, "out");
+
+        assertEquals(List.of(), errors, json::toString);
+        assertTrue(json.toString().endsWith("}"), json::toString);
+        assertTrue(!json.toString().contains("NaN"), json::toString);
     }
 }

@@ -709,10 +709,10 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             processor.onPointAvailable(key,
                     AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
                             // A DateTime tag is stored as epoch ms; its average is a date too.
-                            // A Bad bucket carries NaN (a null would read back as 0.0 in a Float
-                            // column), or null for a date.
-                            .value(r.isBad() ? (asDate ? null : (Object) Double.NaN)
-                                    : asDate ? toDate(r.value()) : r.value())
+                            // A Bad bucket has no value. Not NaN: the Power Chart streams history
+                            // as strict JSON, which throws at a NaN and cuts the response off. A
+                            // null reads as 0.0 in a Float column, but its quality stays Bad.
+                            .value(r.isBad() ? null : asDate ? toDate(r.value()) : r.value())
                             // A numeric fallback is Good: the Power Chart drops points that are
                             // not Good, and the twa over Good samples bridges Bad time inside the
                             // bucket, as Ignition's own average does there. A Boolean fallback is

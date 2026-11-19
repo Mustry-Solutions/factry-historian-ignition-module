@@ -44,8 +44,9 @@ final class GoodTimeAverage {
         /** No Good time in the bucket: returned as a Bad point without a value. */
         static final Result BAD = new Result(Double.NaN, true);
 
+        /** Also true for an infinite value, which no client can show (strict JSON refuses it). */
         boolean isBad() {
-            return Double.isNaN(value);
+            return !Double.isFinite(value);
         }
     }
 
@@ -128,7 +129,9 @@ final class GoodTimeAverage {
      * @param seed       the last sample before the range, or null when there is none
      * @param periodMs   bucket length
      * @param rangeEndMs the query end; the last bucket stops here
-     * @return the value per bucket start, only for buckets with Good time
+     * @return the value per bucket start; {@link Result#BAD} for a bucket without Good time.
+     *         A bucket before the first sample ever may be absent; the caller treats a missing
+     *         bucket as Bad too
      */
     static Map<Long, Result> compute(
             Map<Long, Double> twa, Map<Long, BucketStatus> statuses, Sample seed,
@@ -182,8 +185,8 @@ final class GoodTimeAverage {
                     : held == null && !unknown && st.onlyGood(st.sameGood) ? Double.valueOf(st.sameGood)
                     : null;
             if (consistent && !heldGood && !st.hasGood) {
-                // Not Good the whole bucket. Before the first sample ever there is nothing to
-                // hold, so that bucket is simply left out.
+                // Not Good the whole bucket. Before the first sample ever it is not added here;
+                // the engine makes every missing bucket Bad.
                 if (held != null || !st.isEmpty()) {
                     out.put(start, Result.BAD);
                 }
