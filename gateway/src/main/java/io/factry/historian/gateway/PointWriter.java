@@ -346,8 +346,14 @@ class PointWriter {
                 continue;
             }
 
-            written(basePath);
             List<ArrayPointMerger.ArraySnapshot> snapshots = mergeArray(basePath, measurementUUID, byTimestamp);
+            if (snapshots == null) {
+                // The last stored value could not be read yet. Send the rest of the flush and
+                // let store and forward retry it, so one array doesn't hold back the other tags.
+                hasSkippedArrays = true;
+                continue;
+            }
+            written(basePath);
 
             for (ArrayPointMerger.ArraySnapshot snap : snapshots) {
                 // Build a ListValue from the full merged array, in index order.
@@ -378,18 +384,18 @@ class PointWriter {
     /**
      * Merge the incoming (possibly partial) element changes into the last-known full array so
      * unchanged elements are preserved, and return one row per timestamp (see
-     * {@link ArrayPointMerger#mergeUpdates}).
+     * {@link ArrayPointMerger#mergeUpdates}), or null when Factry's last value could not be
+     * read yet and the array should wait for the store and forward retry.
      */
     private List<ArrayPointMerger.ArraySnapshot> mergeArray(String basePath, String measurementUUID,
             java.util.TreeMap<Long, java.util.TreeMap<Integer, ArrayPointMerger.ArrayElement>> byTimestamp) {
         java.util.TreeMap<Integer, Object> state =
                 lastArrayValues.computeIfAbsent(basePath, k -> new java.util.TreeMap<>());
         synchronized (state) {
-            if (state.isEmpty()) {
-                // Cache miss (first store for this array, or first after a restart) —
-                // seed from Factry's last stored value so a partial update from Ignition
-                // doesn't truncate the array.
-                seedArrayStateFromFactry(basePath, measurementUUID, state);
+            // Cache miss (first store for this array, or first after a restart): seed from
+            // Factry's last stored value so a partial update from Ignition doesn't truncate it.
+            if (state.isEmpty() && !seedArrayStateFromFactry(basePath, measurementUUID, state)) {
+                return null;
             }
             return ArrayPointMerger.mergeUpdates(state, byTimestamp);
         }
@@ -454,17 +460,23 @@ class PointWriter {
         }
     }
 
+    /** Failed reads of an array's last stored value, per base path, before giving up on it. */
+    private final Map<String, Integer> arraySeedFailures = new ConcurrentHashMap<>();
+    private static final int ARRAY_SEED_ATTEMPTS = 3;
+
     /**
      * Seed {@code state} with the elements of the most recent array value stored in Factry
      * for the given measurement. Used on a cache miss so that a partial element update from
-     * Ignition is merged onto the full array rather than truncating it. When Factry has no
-     * prior value, or refuses the query, the state is left unchanged. A connection error
-     * (UNAVAILABLE, DEADLINE_EXCEEDED) is thrown instead: merging onto the empty state would
-     * keep an array with missing elements that is never seeded again, so the flush fails and
-     * store and forward retries it with a new seed.
+     * Ignition is merged onto the full array rather than truncating it.
+     *
+     * @return false when the read failed and the array should wait for a retry: merging onto
+     *     the empty state would keep an array with missing elements that is never seeded again.
+     *     After {@link #ARRAY_SEED_ATTEMPTS} failed reads it gives up and returns true, so an
+     *     array whose history can't be read (while writes still work) is stored anyway, with
+     *     only the elements Ignition sent.
      */
-    private void seedArrayStateFromFactry(String basePath, String measurementUUID,
-                                          java.util.TreeMap<Integer, Object> state) {
+    private boolean seedArrayStateFromFactry(String basePath, String measurementUUID,
+                                             java.util.TreeMap<Integer, Object> state) {
         try {
             QueryTimeseriesRequest req = QueryTimeseriesRequest.newBuilder()
                     .addMeasurementUUIDs(measurementUUID)
@@ -474,6 +486,7 @@ class PointWriter {
                     .setLimit(1)
                     .build();
             QueryTimeseriesResponse reply = grpcClient.queryTimeseries(req);
+            arraySeedFailures.remove(basePath);
             for (Series series : reply.getSeriesList()) {
                 for (SeriesPoint pt : series.getDataPointsList()) {
                     Value v = pt.getValue();
@@ -487,14 +500,19 @@ class PointWriter {
                     }
                 }
             }
-        } catch (StatusRuntimeException e) {
-            Status.Code code = e.getStatus().getCode();
-            if (code == Status.Code.UNAVAILABLE || code == Status.Code.DEADLINE_EXCEEDED) {
-                throw e;
-            }
-            logger.warn("Could not seed array state for '" + basePath + "' from Factry: " + e.getMessage());
+            return true;
         } catch (Exception e) {
-            logger.warn("Could not seed array state for '" + basePath + "' from Factry: " + e.getMessage());
+            int failures = arraySeedFailures.merge(basePath, 1, Integer::sum);
+            if (failures < ARRAY_SEED_ATTEMPTS) {
+                logger.debug("Could not read the last value of array '" + basePath + "' from Factry ("
+                        + e.getMessage() + "), store and forward retries it");
+                return false;
+            }
+            arraySeedFailures.remove(basePath);
+            logger.warn("Could not read the last value of array '" + basePath + "' from Factry after "
+                    + failures + " attempts (" + e.getMessage() + "); storing the elements Ignition sent,"
+                    + " elements that did not change may be missing");
+            return true;
         }
     }
 

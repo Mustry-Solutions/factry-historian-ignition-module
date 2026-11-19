@@ -118,9 +118,8 @@ class PointWriterTest {
         factry.queryFailures = 1;
         List<AtomicPoint<?>> flush = List.of(point("Tank/Profile[1]", 9));
 
-        StatusRuntimeException e = assertThrows(StatusRuntimeException.class, () -> writer.write(flush));
-        assertEquals(io.grpc.Status.Code.UNAVAILABLE, e.getStatus().getCode(),
-                "a connection error, so store and forward retries the flush");
+        StorageResult<AtomicPoint<?>> first = writer.write(flush);
+        assertTrue(first.error().isPresent(), "store and forward keeps the flush and retries it");
         assertTrue(factry.sent.isEmpty());
 
         writer.write(flush);
@@ -129,6 +128,29 @@ class PointWriterTest {
         assertEquals(List.of(1.0, 9.0, 3.0), last.getValue().getListValue().getValuesList().stream()
                 .map(com.google.protobuf.Value::getNumberValue).collect(Collectors.toList()),
                 "the retry reads the last value again and keeps the elements that did not change");
+    }
+
+    @Test
+    void anArrayWhoseLastValueStaysUnreadableDoesNotHoldBackTheOtherTags() {
+        factry.add("default/Tank/Level", "level-uuid");
+        factry.add("default/Tank/Profile", "profile-uuid");
+        cache.refresh(factry);
+        factry.queryFailure = io.grpc.Status.DEADLINE_EXCEEDED;
+        factry.queryFailures = Integer.MAX_VALUE;
+        List<AtomicPoint<?>> flush = List.of(point("Tank/Level", 2.0), point("Tank/Profile[1]", 9));
+
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            StorageResult<AtomicPoint<?>> result = writer.write(flush);
+            assertTrue(result.error().isPresent(), "attempt " + attempt + " is retried");
+            assertEquals(attempt, factry.sent.size(), "the scalar goes out on every attempt");
+            assertEquals("level-uuid", factry.sent.get(attempt - 1).getPoints(0).getMeasurementUUID());
+            assertEquals(1, factry.sent.get(attempt - 1).getPointsCount(), "the array waits");
+        }
+
+        StorageResult<AtomicPoint<?>> third = writer.write(flush);
+
+        assertFalse(third.error().isPresent(), "after 3 failed reads the array is stored anyway");
+        assertEquals(2, factry.sent.get(2).getPointsCount());
     }
 
     static com.google.protobuf.Value number(double v) {
