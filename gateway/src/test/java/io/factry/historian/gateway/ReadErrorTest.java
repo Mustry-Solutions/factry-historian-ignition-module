@@ -187,14 +187,18 @@ class ReadErrorTest {
     }
 
     @Test
-    void rawReadThatFactryRejectsForEveryPenIsAnError() throws Exception {
-        // Raw rows come only from points, so Bad_Failure columns alone would be an empty dataset.
+    void rawReadThatFactryRejectsForEveryPenIsNotAnError() throws Exception {
+        // An error would end the whole chart, including pens from other historians: Ignition runs
+        // one query per historian in a loop that the first error ends.
         startEngine(true);
         factry.failingMeasurements.add("uuid-1");
         factry.failingMeasurements.add("uuid-2");
 
-        assertReadFailed(raw("a", "b"), "INTERNAL");
-        assertReadFailed(raw("a"), "INTERNAL");
+        for (Dataset ds : new Dataset[]{raw("a", "b"), raw("a")}) {
+            assertNull(ds.error, ds::toString);
+            // Raw rows come only from points, so there is no row to carry Bad_Failure.
+            assertEquals(0, ds.rows.size(), ds::toString);
+        }
     }
 
     @Test

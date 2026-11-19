@@ -407,7 +407,6 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             // fewer points than the limit is done; only measurements with a full series go on.
             //
             // A pen Factry refuses on its own is marked Bad_Failure and the other pens still draw.
-            Set<String> failedPens = new LinkedHashSet<>();
             int pageSize = RAW_QUERY_PAGE_SIZE;
             List<String> pending = measurementUUIDs;
             long offset = 0;
@@ -443,15 +442,19 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                         continue;
                     }
                     Map<String, StatusRuntimeException> failed = penFailures(reqBuilder.build(), pending, e);
-                    // Ignition writes raw rows only where points are, so with every pen failed
-                    // there is no row to show Bad_Failure on and the read would look like no data.
-                    // Raw pens share one query (FillMode.DERIVED splits only aggregated ones), so
-                    // failing it takes no good pen down.
-                    if (failed.isEmpty() || failedPens.size() + failed.size() == measurementUUIDs.size()) {
+                    // A refused pen never fails the read, even when every pen is refused: Ignition
+                    // runs one query per historian in a loop that the first error ends, so an
+                    // error here would also drop other historians' pens from the chart.
+                    if (failed.isEmpty()) {
                         throw e;
                     }
                     failed.forEach((uuid, why) -> failures.put(uuidToKeyMap.get(uuid), penFailed(why)));
-                    failedPens.addAll(failed.keySet());
+                    // Its column reads Bad_Failure from the context; points it returned on earlier
+                    // pages would only make it look partly good.
+                    for (String uuid : failed.keySet()) {
+                        List<RawPt> dropped = pointsByUuid.remove(uuid);
+                        collected -= dropped == null ? 0 : dropped.size();
+                    }
                     pending = new ArrayList<>(pending);
                     pending.removeAll(failed.keySet());
                     continue;
@@ -536,11 +539,6 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             // the second pen's points go back in time and the dataset gets rows out of order, with
             // the first pen's last value carried into them.
             List<RawPt> merged = new ArrayList<>((int) collected);
-            // A failed pen's column reads Bad_Failure from the context; points it returned on
-            // earlier pages would only make it look partly good.
-            for (String uuid : failedPens) {
-                pointsByUuid.remove(uuid);
-            }
             // Each point carries its key, so merging adds no wrapper object per point, and each pen's
             // list is dropped once copied. A large read is held about once in the module.
             for (var it = pointsByUuid.values().iterator(); it.hasNext(); ) {
