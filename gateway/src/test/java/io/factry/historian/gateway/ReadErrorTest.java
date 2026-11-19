@@ -24,13 +24,13 @@ class ReadErrorTest {
     private static final long FIVE_SECONDS = 5_000L;
     private static final long FIVE_MINUTES = 300_000L;
 
-    private FakeFactry factry;
+    private FakeFactryServer factry;
     private FactryGrpcClient client;
     private FactryQueryEngine engine;
 
     @BeforeEach
     void setUp() throws Exception {
-        factry = new FakeFactry();
+        factry = new FakeFactryServer();
         client = factry.client();
         String a = factry.addMeasurement("default/a", "number");
         String b = factry.addMeasurement("default/b", "number");
@@ -53,7 +53,7 @@ class ReadErrorTest {
         if (measurementsKnown) {
             cache.refresh(client);
         }
-        engine = new FactryQueryEngine(FakeFactry.gatewayContext(), "Factry", settings, client, cache,
+        engine = new FactryQueryEngine(FakeFactryServer.gatewayContext(), "Factry", settings, client, cache,
                 new HistorianMetrics());
     }
 

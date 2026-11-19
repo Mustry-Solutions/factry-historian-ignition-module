@@ -32,13 +32,13 @@ class FactryQueryEngineRawTest {
     private static final long START = 1_794_268_800_000L; // 2026-11-10T00:00:00Z
     private static final long DAY = 86_400_000L;
 
-    private FakeFactry factry;
+    private FakeFactryServer factry;
     private FactryGrpcClient client;
     private FactryQueryEngine engine;
 
     @BeforeEach
     void setUp() throws Exception {
-        factry = new FakeFactry();
+        factry = new FakeFactryServer();
         client = factry.client();
     }
 
@@ -53,7 +53,7 @@ class FactryQueryEngineRawTest {
         settings.setDelimiter("/");
         MeasurementCache cache = new MeasurementCache();
         cache.refresh(client);
-        engine = new FactryQueryEngine(FakeFactry.gatewayContext(), "Factry", settings, client, cache,
+        engine = new FactryQueryEngine(FakeFactryServer.gatewayContext(), "Factry", settings, client, cache,
                 new HistorianMetrics());
     }
 
