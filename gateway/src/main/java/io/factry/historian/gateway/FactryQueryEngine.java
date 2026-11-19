@@ -4,13 +4,17 @@ import com.inductiveautomation.historian.common.model.TimeRange;
 import com.inductiveautomation.historian.common.model.AggregationType;
 import com.inductiveautomation.historian.common.model.LegacyAggregateAdapter;
 import com.inductiveautomation.historian.common.model.TimeWindow;
+import com.inductiveautomation.historian.common.model.HistorianProperties;
 import com.inductiveautomation.historian.common.model.data.AggregatedDataPoint;
+import com.inductiveautomation.historian.common.model.data.AggregatedPoint;
 import com.inductiveautomation.historian.common.model.data.AtomicPoint;
+import com.inductiveautomation.historian.common.model.data.DataPoint;
 import com.inductiveautomation.historian.common.model.data.DataPointFactory;
 import com.inductiveautomation.historian.common.model.data.DataPointType;
 import com.inductiveautomation.historian.common.model.data.MetadataPoint;
 import com.inductiveautomation.historian.common.model.options.AggregatedQueryKey;
 import com.inductiveautomation.historian.common.model.options.AggregatedQueryOptions;
+import com.inductiveautomation.historian.common.model.options.DataPointQueryKey;
 import com.inductiveautomation.historian.common.model.options.MetadataQueryKey;
 import com.inductiveautomation.historian.common.model.options.MetadataQueryOptions;
 import com.inductiveautomation.historian.common.model.options.RawQueryKey;
@@ -19,6 +23,7 @@ import com.inductiveautomation.historian.gateway.api.query.AbstractQueryEngine;
 import com.inductiveautomation.historian.gateway.api.query.HistoricalNode;
 import com.inductiveautomation.historian.gateway.api.query.browsing.BrowsePublisher;
 import com.inductiveautomation.historian.gateway.api.query.processor.AggregatedPointProcessor;
+import com.inductiveautomation.historian.gateway.api.query.processor.QueriedPointProcessor;
 import com.inductiveautomation.historian.gateway.api.query.processor.DefaultProcessingContext;
 import com.inductiveautomation.historian.gateway.api.query.processor.MetadataPointProcessor;
 import com.inductiveautomation.historian.gateway.api.query.processor.ProcessingContext;
@@ -28,6 +33,7 @@ import com.inductiveautomation.ignition.common.StringPath;
 import com.inductiveautomation.ignition.common.browsing.BrowseFilter;
 import com.inductiveautomation.ignition.common.config.BasicProperty;
 import com.inductiveautomation.ignition.common.config.BasicPropertySet;
+import com.inductiveautomation.ignition.common.config.Property;
 import com.inductiveautomation.ignition.common.config.PropertySet;
 import com.inductiveautomation.ignition.common.model.values.QualityCode;
 import com.inductiveautomation.ignition.common.sqltags.history.AggregationMode;
@@ -328,10 +334,11 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             // failed to coerce to a number, and because that coercion happens while the
             // framework commits the shared result set, it aborted the ENTIRE query —
             // taking any numeric tags in the same query down with it (0 rows for all).
-            // mapKeysToNodes() populates the context from queryForHistoricalNodes() and
-            // calls processor.onInitialize() for us.
+            // mapKeysToNodes() populates the context from queryForHistoricalNodes(); the
+            // processor is initialized with it once Factry has been read (see HeldInit).
+            HeldInit<AtomicPoint<?>, RawQueryKey> held = new HeldInit<>(processor);
             Map<RawQueryKey, ? extends HistoricalNode> keyToNode =
-                    mapKeysToNodes(options, processor, RawQueryKey::source);
+                    mapKeysToNodes(options, held, RawQueryKey::source);
 
             // mapKeysToNodes only initializes the processor when it resolves at least one
             // node. If NOTHING resolved (every tag is unknown), the processor is not
@@ -345,6 +352,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             // Map query keys to measurement UUIDs
             List<String> measurementUUIDs = new ArrayList<>();
             Map<String, RawQueryKey> uuidToKeyMap = new HashMap<>();
+            Map<RawQueryKey, QualityCode> failures = new HashMap<>();
 
             for (RawQueryKey key : options.getQueryKeys()) {
                 QualifiedPath source = key.source();
@@ -362,11 +370,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     // Node/measurement not found — fail only this key so the framework
                     // emits nulls for its column instead of aborting the whole query.
                     logger.warn("No measurement UUID found for tag path: " + tagPath);
-                    processor.onKeyFailure(key, QualityCode.Bad_NotFound);
+                    failures.put(key, QualityCode.Bad_NotFound);
                 }
             }
 
             if (measurementUUIDs.isEmpty()) {
+                held.initialize(failures);
                 processor.onComplete();
                 return Optional.of(0);
             }
@@ -399,7 +408,6 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             //
             // A pen Factry refuses on its own is marked Bad_Failure and the other pens still draw.
             Set<String> failedPens = new LinkedHashSet<>();
-            Instant failedAt = failureTime(options.getTimeRange());
             int pageSize = RAW_QUERY_PAGE_SIZE;
             List<String> pending = measurementUUIDs;
             long offset = 0;
@@ -432,13 +440,19 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                         logger.debug("Raw query page too large, retrying with page size " + pageSize);
                         continue;
                     }
-                    List<String> failed = penFailures(reqBuilder.build(), pending, e);
-                    pending = new ArrayList<>(pending);
-                    pending.removeAll(failed);
-                    if (failedPens.addAll(failed) && failedPens.size() < measurementUUIDs.size()) {
-                        continue;
+                    Map<String, StatusRuntimeException> failed = penFailures(reqBuilder.build(), pending, e);
+                    // Ignition writes raw rows only where points are, so with every pen failed
+                    // there is no row to show Bad_Failure on and the read would look like no data.
+                    // Raw pens share one query (FillMode.DERIVED splits only aggregated ones), so
+                    // failing it takes no good pen down.
+                    if (failed.isEmpty() || failedPens.size() + failed.size() == measurementUUIDs.size()) {
+                        throw e;
                     }
-                    throw e;
+                    failed.forEach((uuid, why) -> failures.put(uuidToKeyMap.get(uuid), penFailed(why)));
+                    failedPens.addAll(failed.keySet());
+                    pending = new ArrayList<>(pending);
+                    pending.removeAll(failed.keySet());
+                    continue;
                 }
 
                 // Each page should start where the previous one ended. A Factry that ignores offset
@@ -500,12 +514,11 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             // to its timestamp, so every pen must be handed over in one time order. Pen by pen,
             // the second pen's points go back in time and the dataset gets rows out of order, with
             // the first pen's last value carried into them.
-            List<RawPt> merged = new ArrayList<>((int) collected + failedPens.size());
-            // A failed pen gets one Bad_Failure point at the start, first in line, so every row
-            // shows it failed. Points it returned on earlier pages are dropped.
+            List<RawPt> merged = new ArrayList<>((int) collected);
+            // A failed pen's column reads Bad_Failure from the context; points it returned on
+            // earlier pages would only make it look partly good.
             for (String uuid : failedPens) {
                 pointsByUuid.remove(uuid);
-                merged.add(new RawPt(uuidToKeyMap.get(uuid), failedAt.toEpochMilli(), null, QualityCode.Bad_Failure));
             }
             // Each point carries its key, so merging adds no wrapper object per point, and each pen's
             // list is dropped once copied. A large read is held about once in the module.
@@ -519,6 +532,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 merged = merged.subList(0, returnSize);
             }
 
+            held.initialize(failures);
             int totalPoints = 0;
             for (RawPt p : merged) {
                 AtomicPoint<?> atomicPoint = DataPointFactory.createAtomicPoint(
@@ -559,31 +573,38 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     }
 
     /**
-     * The pens to blame for a raw page that failed as a whole: each pen asked for the same page on
-     * its own, and the ones that fail again. Factry answers one request for all pens, so one pen it
-     * cannot read would otherwise fail every pen. None when Factry itself cannot be read.
-     * A single pen is to blame without asking again.
+     * The pens to blame for a raw page that failed as a whole, with the error each one got: each
+     * pen asked for the same page on its own, and the ones that fail again. Factry answers one
+     * request for all pens, so one pen it cannot read would otherwise fail every pen. None when
+     * Factry itself cannot be read. A single pen is to blame without asking again.
      */
-    private List<String> penFailures(QueryTimeseriesRequest page, List<String> pens, StatusRuntimeException e) {
+    private Map<String, StatusRuntimeException> penFailures(
+            QueryTimeseriesRequest page, List<String> pens, StatusRuntimeException e) {
         if (failsEveryPen(e)) {
-            return List.of();
+            return Map.of();
         }
         if (pens.size() == 1) {
-            return List.copyOf(pens);
+            logger.error("Error querying raw data for measurement " + pens.get(0), e);
+            return Map.of(pens.get(0), e);
         }
-        List<String> failed = new ArrayList<>();
+        Map<String, StatusRuntimeException> failed = new LinkedHashMap<>();
         for (String uuid : pens) {
             try {
                 grpcClient.queryTimeseries(page.toBuilder().clearMeasurementUUIDs().addMeasurementUUIDs(uuid).build());
             } catch (StatusRuntimeException alone) {
                 if (failsEveryPen(alone)) {
-                    return List.of();
+                    return Map.of();
                 }
                 logger.error("Error querying raw data for measurement " + uuid, alone);
-                failed.add(uuid);
+                failed.put(uuid, alone);
             }
         }
         return failed;
+    }
+
+    /** The quality a pen's column gets when Factry refuses that pen, with Factry's reason. */
+    private static QualityCode penFailed(Exception e) {
+        return QualityCode.Bad_Failure.derive("Factry Historian read failed: " + e.getMessage());
     }
 
     /**
@@ -600,9 +621,73 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         };
     }
 
-    /** Where a failed pen's Bad_Failure point goes: the start of the range, so it covers every row. */
-    private static Instant failureTime(Optional<TimeRange> range) {
-        return range.map(TimeRange::startTime).orElseGet(Instant::now);
+    /**
+     * Stands in for the processor while mapKeysToNodes resolves the query keys, and keeps the
+     * context it would have initialized the processor with. The engine reads Factry first and then
+     * initializes the processor itself, with each pen Factry refused given a bad quality in that
+     * context. Ignition turns such a key into a column that reads null with that quality on every
+     * row (ErroredResultNode). Once the columns exist there is no clean way left: onKeyFailure
+     * shows as Bad_NotFound whatever the quality, and a point with no value shows as 0.0 in a
+     * number column, which a script or chart that ignores quality takes for real data.
+     * Initializing late is safe: HistorianPointQueryExecutor.startReading runs the whole query
+     * before it waits for the columns, in the same thread.
+     */
+    private static final class HeldInit<P extends DataPoint<?>, K extends DataPointQueryKey>
+            implements QueriedPointProcessor<P, K, DataPointType> {
+        private final QueriedPointProcessor<P, K, DataPointType> processor;
+        private ProcessingContext<K, DataPointType> context;
+
+        HeldInit(QueriedPointProcessor<P, K, DataPointType> processor) {
+            this.processor = processor;
+        }
+
+        @Override
+        public boolean onInitialize(ProcessingContext<K, DataPointType> context) {
+            this.context = context;
+            return true;
+        }
+
+        /** Initializes the real processor, with each key in {@code failures} given that quality. */
+        @SuppressWarnings("unchecked")
+        void initialize(Map<K, QualityCode> failures) {
+            ProcessingContext<K, DataPointType> resolved = context;
+            processor.onInitialize(new ProcessingContext<>() {
+                @Override
+                public <V> Optional<V> getContextValue(K key, Property<V> property) {
+                    QualityCode failure = failures.get(key);
+                    if (failure != null && HistorianProperties.QUALITY_CODE.equals(property)) {
+                        return Optional.of((V) failure);
+                    }
+                    return resolved.getContextValue(key, property);
+                }
+            });
+        }
+
+        @Override
+        public void onError(QualityCode quality) {
+            processor.onError(quality);
+        }
+
+        @Override
+        public void onError(Exception e) {
+            processor.onError(e);
+        }
+
+        // mapKeysToNodes only initializes or fails the processor; points go to the real one.
+        @Override
+        public boolean onPointAvailable(K key, P point) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void onKeyFailure(K key, QualityCode quality) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void onComplete() {
+            throw new UnsupportedOperationException();
+        }
     }
 
     @Override
@@ -623,9 +708,11 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             // string value (the type the Perspective Power Chart uses aggregated queries for)
             // then failed to coerce to a number, and because that coercion happens while the
             // framework commits the shared result set, it aborted the ENTIRE query. mapKeysToNodes()
-            // populates the context from queryForHistoricalNodes() and calls onInitialize() for us.
+            // populates the context from queryForHistoricalNodes(); the processor is initialized
+            // with it once Factry has been read (see HeldInit).
+            HeldInit<AggregatedPoint<?, ?>, AggregatedQueryKey> held = new HeldInit<>(processor);
             Map<AggregatedQueryKey, ? extends HistoricalNode> keyToNode =
-                    mapKeysToNodes(options, processor, AggregatedQueryKey::source);
+                    mapKeysToNodes(options, held, AggregatedQueryKey::source);
 
             // mapKeysToNodes only initializes the processor when it resolves at least one node.
             // If NOTHING resolved, the processor is not initialized, so calling
@@ -640,9 +727,10 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
             var queryKeys = options.getQueryKeys();
             int pointCount = 0;
+            Map<AggregatedQueryKey, QualityCode> failures = new HashMap<>();
+            // Every pen is read before the processor is initialized, so hold the points until then.
+            Map<AggregatedQueryKey, List<AggregatedPoint<?, ?>>> pointsByKey = new LinkedHashMap<>();
             Exception firstFailure = null;
-            int queriedPens = 0;
-            int failedPens = 0;
 
             for (AggregatedQueryKey key : queryKeys) {
                 QualifiedPath source = key.source();
@@ -652,46 +740,42 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
                 if (uuid == null) {
                     logger.warn("No measurement UUID found for aggregated query: " + tagPath);
-                    processor.onKeyFailure(key, QualityCode.Bad_NotFound);
+                    failures.put(key, QualityCode.Bad_NotFound);
                     continue;
                 }
 
-                queriedPens++;
+                List<AggregatedPoint<?, ?>> pts = new ArrayList<>();
                 try {
                     String aggName = key.aggregationType().name();
 
                     if ("MinMax".equals(aggName)) {
                         // MinMax: query min and max separately, emit pairs
-                        pointCount += queryMinMax(uuid, source, key, period, options, processor);
+                        pointCount += queryMinMax(uuid, source, key, period, options, pts);
                     } else {
                         String factryFunction = toFactryAggregateFunction(aggName);
-                        pointCount += querySingleAggregate(uuid, source, key, factryFunction, period, options, processor);
+                        pointCount += querySingleAggregate(uuid, source, key, factryFunction, period, options, pts);
                     }
+                    pointsByKey.put(key, pts);
                 } catch (Exception e) {
                     if (failsEveryPen(e)) {
                         throw e;
                     }
-                    // Mark only this pen, so the other pens still draw. Once the columns are built,
-                    // Ignition ignores the quality given to onKeyFailure and shows Bad_NotFound (a tag
-                    // that does not exist); a point with a bad quality shows as it is, on every row.
+                    // Mark only this pen, so the other pens still draw.
                     logger.error("Error querying aggregated data for: " + tagPath, e);
-                    processor.onPointAvailable(key, AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
-                            .value(null)
-                            .quality(QualityCode.Bad_Failure)
-                            .timestamp(failureTime(options.getTimeRange()))
-                            .build());
+                    failures.put(key, penFailed(e));
                     if (firstFailure == null) {
                         firstFailure = e;
                     }
-                    failedPens++;
                 }
             }
 
             // Every pen failed: one error says more than a chart of empty pens.
-            if (firstFailure != null && failedPens == queriedPens) {
+            if (firstFailure != null && pointsByKey.isEmpty()) {
                 throw firstFailure;
             }
 
+            held.initialize(failures);
+            pointsByKey.forEach((key, pts) -> pts.forEach(p -> processor.onPointAvailable(key, p)));
             processor.onComplete();
             metrics.recordAggregatedQuery(pointCount, System.currentTimeMillis() - startMs);
             logger.debug("Aggregated query completed with " + pointCount + " points");
@@ -806,7 +890,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     private int querySingleAggregate(
             String uuid, QualifiedPath source, AggregatedQueryKey key,
             String factryFunction, String period,
-            AggregatedQueryOptions options, AggregatedPointProcessor processor) {
+            AggregatedQueryOptions options, List<AggregatedPoint<?, ?>> out) {
 
         Aggregation aggregation = Aggregation.newBuilder()
                 .setName(factryFunction)
@@ -845,7 +929,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                                 .timestamp(timestamp)
                                 .build();
 
-                processor.onPointAvailable(key, point);
+                out.add(point);
                 count++;
             }
         }
@@ -855,7 +939,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     private int queryMinMax(
             String uuid, QualifiedPath source, AggregatedQueryKey key,
             String period, AggregatedQueryOptions options,
-            AggregatedPointProcessor processor) {
+            List<AggregatedPoint<?, ?>> out) {
 
         // Query min and max separately, grouped by status and keeping only the Good series so
         // bad/uncertain samples don't skew the min/max (see querySingleAggregate).
@@ -903,7 +987,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
                 // Emit min point
                 if (minVal != null) {
-                    processor.onPointAvailable(key,
+                    out.add(
                             AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
                                     .value(minVal).quality(QualityCode.Good).timestamp(timestamp).build());
                     count++;
@@ -911,7 +995,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
                 // Emit max point
                 if (maxVal != null) {
-                    processor.onPointAvailable(key,
+                    out.add(
                             AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
                                     .value(maxVal).quality(QualityCode.Good).timestamp(timestamp).build());
                     count++;

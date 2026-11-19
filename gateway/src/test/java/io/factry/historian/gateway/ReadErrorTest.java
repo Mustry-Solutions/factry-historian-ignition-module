@@ -97,18 +97,20 @@ class ReadErrorTest {
         assertReadFailed(average("a", "b"), "UNAVAILABLE");
     }
 
-    /** Pen a reads fine on every row; pen b is Bad_Failure on every row; no error for the read. */
+    /**
+     * Pen a reads fine on every row; pen b reads null with Bad_Failure on every row, like an
+     * unknown tag reads null with Bad_NotFound; no error for the read.
+     */
     private static void assertOnlySecondPenFailed(Dataset ds) {
         assertNull(ds.error, ds::toString);
         assertTrue(ds.rows.size() > 1, ds::toString);
         for (int i = 0; i < ds.rows.size(); i++) {
             QualityCode[] q = ds.qualities.get(i);
+            assertTrue(q[1].isGood(), ds::toString);
+            assertNotNull(ds.rows.get(i)[1], ds::toString);
             assertTrue(q[2].is(QualityCode.Bad_Failure), ds::toString);
-            // Ignition's raw rows start before a pen's first value; that one cell is not a failure.
-            if (i > 0) {
-                assertTrue(q[1].isGood(), ds::toString);
-                assertNotNull(ds.rows.get(i)[1], ds::toString);
-            }
+            // Not 0.0: a script or chart that ignores quality would take that for real data.
+            assertNull(ds.rows.get(i)[2], ds::toString);
         }
     }
 
@@ -132,6 +134,9 @@ class ReadErrorTest {
         Dataset ds = raw("a", "b");
 
         assertOnlySecondPenFailed(ds);
+        // The same rows as pen a alone: the failed pen adds none of its own.
+        assertEquals(6, ds.rows.size(), ds::toString);
+        assertEquals(START, ds.time(0), ds::toString);
         assertEquals(5.0, ((Number) ds.rows.get(ds.rows.size() - 1)[1]).doubleValue(), ds::toString);
     }
 
