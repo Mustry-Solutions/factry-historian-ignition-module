@@ -32,8 +32,8 @@ import java.util.regex.Pattern;
  * with fill "previous" (holds the value from before each bucket, weights the last bucket up to
  * the query end, leaves out buckets before the first sample, refuses group by and booleans, and
  * applies a {@code status} tag filter by exact match), and {@code last}/{@code count}/{@code mean}/
- * {@code min}/{@code max}/{@code sum}/{@code spread} per status with fill "none". Buckets start
- * at the query start. The gRPC channel is never used.
+ * {@code min}/{@code max}/{@code sum}/{@code spread}/{@code stddev} per status with fill "none".
+ * Buckets start at the query start. The gRPC channel is never used.
  */
 class TwaFakeFactry extends FactryGrpcClient {
 
@@ -251,6 +251,16 @@ class TwaFakeFactry extends FactryGrpcClient {
                         : Comparator.comparingDouble(TwaFakeFactry::num);
                 return fn.equals("min") ? in.stream().map(Pt::value).min(order).orElseThrow()
                         : in.stream().map(Pt::value).max(order).orElseThrow();
+            }
+            case "stddev": {
+                // Sample standard deviation, as InfluxQL's STDDEV. For one sample Factry 8.2.3
+                // returns the bucket without a value (checked live).
+                if (in.size() < 2) {
+                    return Value.newBuilder().setNullValue(com.google.protobuf.NullValue.NULL_VALUE).build();
+                }
+                double mean = in.stream().mapToDouble(p -> num(p.value())).average().orElseThrow();
+                double ss = in.stream().mapToDouble(p -> Math.pow(num(p.value()) - mean, 2)).sum();
+                return Value.newBuilder().setNumberValue(Math.sqrt(ss / (in.size() - 1))).build();
             }
             case "sum":
                 return Value.newBuilder().setNumberValue(
