@@ -63,6 +63,8 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
     volatile boolean ignoreOffset = false;
     /** The authorization header of every call, in order. */
     final List<String> authorizations = new CopyOnWriteArrayList<>();
+    /** When set, calls with another token fail UNAUTHENTICATED, as Factry answers a revoked token. */
+    volatile String acceptedToken = null;
 
     private final Server server;
 
@@ -79,7 +81,13 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
             @Override
             public <Q, A> ServerCall.Listener<Q> interceptCall(ServerCall<Q, A> call, Metadata headers,
                                                                ServerCallHandler<Q, A> next) {
-                authorizations.add(String.valueOf(headers.get(key)));
+                String authorization = String.valueOf(headers.get(key));
+                authorizations.add(authorization);
+                String accepted = acceptedToken;
+                if (accepted != null && !authorization.equals("Bearer " + accepted)) {
+                    call.close(Status.UNAUTHENTICATED.withDescription("invalid auth token"), new Metadata());
+                    return new ServerCall.Listener<>() {};
+                }
                 return next.startCall(call, headers);
             }
         };

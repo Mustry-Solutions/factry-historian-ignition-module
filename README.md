@@ -36,7 +36,8 @@ The module implements a custom historian that writes tag data to Factry via gRPC
 1. Go to **Config > Tags > History > Historians**
 2. Click **Create New Historian Profile**
 3. Select **Factry Historian**, click **Next**
-4. Paste the **Token** from step 1 — the connection settings (host, port, collector ID) are extracted automatically
+4. Under **Collector Token**, choose **Embedded** and paste the token from step 1 (the gateway stores it encrypted), or **Referenced** to read it from a secret provider. The connection settings (host, port, collector ID) are extracted from it.
+   Profiles from older versions keep working with the token they stored in plain text; open the profile, enter the token here and save to encrypt it.
 5. Click **Create Historian**
 6. Verify the status shows **Running**
 

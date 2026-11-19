@@ -180,7 +180,7 @@ A Java `record` that defines the **Gateway UI form** for creating/editing a hist
 
 | Field | Category | Type | Default |
 |-------|----------|------|---------|
-| `token` | Connection | textarea | *(empty)* |
+| `collectorToken` | Connection | secret (Embedded or Referenced) | *(none)* |
 | `useTls` | Connection | checkbox | `true` |
 | `skipTlsVerification` | Connection | checkbox | `false` |
 | `batchSize` | Advanced | number | `100` |
@@ -191,6 +191,8 @@ A Java `record` that defines the **Gateway UI form** for creating/editing a hist
 The `toSettings()` / `fromSettings()` methods convert between the UI record and the internal `FactryHistorianSettings` object.
 
 **Note:** The token is the only required connection field. Host, port, and collector UUID are extracted from the JWT automatically.
+
+**Collector token as a secret:** `collectorToken` is a `SecretConfig`: Embedded (the gateway encrypts it with its system key; config.json holds only ciphertext) or Referenced (read from a secret provider). `FactryHistoryProvider.resolveToken` reads it at start and on every settings change. Profiles saved before this field hold the token in plain text under `token`; it is still used when `collectorToken` is not set, with one WARN per start. `FactryHistorianExtensionPoint.encode` leaves `token` out once `collectorToken` is set, so the first save with the secret removes the plain copy. The extension point's `validate` refuses a profile without a token or with a value that is not a collector token (Embedded is decrypted for this; Referenced is not read, since Ignition runs the check on every decode). Ignition fires no change when a profile is saved unchanged, so a token replaced in a secret provider is read again when Factry refuses the one in use (the scheduled connection check), when the profile restarts, or on a save that changes something. A Referenced token that cannot be read when the profile starts (for example a remote provider whose Gateway Network link is not up yet) fails the start; disable and enable the profile then. Downgrading to a module without this field after a save loses the token.
 
 ### `FactryHistorianSettings.java`
 
