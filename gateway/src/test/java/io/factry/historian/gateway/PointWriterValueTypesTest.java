@@ -154,6 +154,37 @@ class PointWriterValueTypesTest {
     }
 
     @Test
+    void booleanTagKeepsItsTypeWhenTheFirstCreateFails() {
+        tagDataType("default/Test/Flag", DataType.Boolean);
+        factry.createFailure = io.grpc.Status.UNAVAILABLE;
+        StorageResult<AtomicPoint<?>> failed = store(point("Test/Flag", 1L, 1_000L));
+        assertFalse(failed.failedData().isEmpty(), "the flush is left for store and forward to retry");
+
+        factry.createFailure = null;
+        store(point("Test/Flag", 1L, 1_000L));
+
+        CreateMeasurement created = createdFor("default/Test/Flag");
+        assertEquals("boolean", created.getDataType());
+        assertEquals("Boolean", created.getSettings().getFieldsMap()
+                .get(MeasurementCache.IGNITION_DATA_TYPE_SETTING).getStringValue());
+    }
+
+    @Test
+    void booleanTagKeepsItsTypeWhenItsMeasurementIsCreatedAgain() {
+        factry.add("default/Test/Flag", "flag-uuid");
+        tagDataType("default/Test/Flag", DataType.Boolean);
+        store(point("Test/Flag", 1L, 1_000L));
+        assertEquals(1, writtenTo("flag-uuid").size());
+
+        // The measurement is deleted in Factry; a rejected write evicts it from the cache.
+        factry.measurements.removeIf(m -> m.getUuid().equals("flag-uuid"));
+        cache.evictByUUID("flag-uuid");
+        store(point("Test/Flag", 0L, 2_000L));
+
+        assertEquals("boolean", createdFor("default/Test/Flag").getDataType());
+    }
+
+    @Test
     void nanAndInfinityAreStoredAsBadPointsWithoutAValue() {
         String log = logOf(() -> {
             store(point("Pump/Flow", Double.NaN, 1_000L), point("Pump/Speed", Float.POSITIVE_INFINITY, 1_000L));

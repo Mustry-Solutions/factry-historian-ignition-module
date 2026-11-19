@@ -64,6 +64,12 @@ public class MeasurementCache {
 
     /** Metadata properties cached from doStoreMetadata, applied when creating measurements. */
     private final ConcurrentHashMap<String, Map<String, String>> pendingMetadata = new ConcurrentHashMap<>();
+    /**
+     * Each tag's Ignition data type, from its metadata. Kept after the metadata is taken: a failed
+     * create or a measurement deleted in Factry creates it again, and Store and Forward hands Boolean
+     * values over as Long, so without it the measurement would come back as number.
+     */
+    private final ConcurrentHashMap<String, String> ignitionDataTypes = new ConcurrentHashMap<>();
 
     private final int pageSize = ModuleProperties.getMeasurementCachePageSize();
 
@@ -735,6 +741,10 @@ public class MeasurementCache {
             existing.putAll(incoming);
             return existing;
         });
+        String ignitionType = properties.get(IGNITION_DATA_TYPE);
+        if (ignitionType != null) {
+            ignitionDataTypes.put(tagPath, ignitionType);
+        }
         logger.debug("Cached metadata for '{}': {}", tagPath, properties);
     }
 
@@ -745,9 +755,16 @@ public class MeasurementCache {
      */
     private Map<String, String> takeMetadata(String tagPath, Object value) {
         Map<String, String> metadata = pendingMetadata.remove(tagPath);
-        if (value instanceof java.util.Date && (metadata == null || !metadata.containsKey(IGNITION_DATA_TYPE))) {
+        if (metadata != null && metadata.containsKey(IGNITION_DATA_TYPE)) {
+            return metadata;
+        }
+        String ignitionType = ignitionDataTypes.get(tagPath);
+        if (ignitionType == null && value instanceof java.util.Date) {
+            ignitionType = "DateTime";
+        }
+        if (ignitionType != null) {
             metadata = metadata != null ? new HashMap<>(metadata) : new HashMap<>();
-            metadata.put(IGNITION_DATA_TYPE, "DateTime");
+            metadata.put(IGNITION_DATA_TYPE, ignitionType);
         }
         return metadata;
     }
@@ -871,8 +888,7 @@ public class MeasurementCache {
      * turn a Boolean tag into a number measurement.
      */
     String dataTypeFor(String tagPath, Object value) {
-        Map<String, String> metadata = pendingMetadata.get(tagPath);
-        String fromTag = metadata != null ? fromIgnitionDataType(metadata.get(IGNITION_DATA_TYPE)) : null;
+        String fromTag = fromIgnitionDataType(ignitionDataTypes.get(tagPath));
         return fromTag != null ? fromTag : toFactryDataType(value);
     }
 
