@@ -74,14 +74,23 @@ class GoodTimeAverageTest {
         }
     }
 
-    /** The values, checking that all of them are exact (read raw or from twa). */
+    /**
+     * The values of the buckets with Good time, checking that all of them are exact (read raw or
+     * from twa). Bad buckets are left out; {@link #bad} lists them.
+     */
     private static Map<Long, Double> exact(Map<Long, Result> out) {
         Map<Long, Double> values = new LinkedHashMap<>();
         out.forEach((k, r) -> {
             assertTrue(r.exact(), () -> "not exact at " + Instant.ofEpochMilli(k));
-            values.put(k, r.value());
+            if (!r.isBad()) {
+                values.put(k, r.value());
+            }
         });
         return values;
+    }
+
+    private static List<Long> bad(Map<Long, Result> out) {
+        return out.entrySet().stream().filter(e -> e.getValue().isBad()).map(Map.Entry::getKey).sorted().toList();
     }
 
     private static Sample good(String hhmm, double v) {
@@ -127,13 +136,15 @@ class GoodTimeAverageTest {
                 t("08:40"), status(null, true),
                 t("08:50"), status(80.0, false));
 
-        Map<Long, Double> out = exact(GoodTimeAverage.compute(
+        Map<Long, Result> res = GoodTimeAverage.compute(
                 buckets("08:00=31.5", "08:10=-1", "08:20=-1", "08:30=-1", "08:40=-1", "08:50=33.5"),
-                statuses, good("07:30", 100), 10 * MIN, t("09:00"), UNLIMITED, raw));
+                statuses, good("07:30", 100), 10 * MIN, t("09:00"), UNLIMITED, raw);
+        Map<Long, Double> out = exact(res);
 
         // 08:00: 2 min at 100 and 3 min at 40 over 5 Good minutes. 08:50: 2 min at 50 and
-        // 3 min at 80 over 5 Good minutes. The four buckets inside the outage are left out.
+        // 3 min at 80 over 5 Good minutes. The four buckets inside the outage are Bad.
         assertEquals(Map.of(t("08:00"), 64.0, t("08:50"), 68.0), out);
+        assertEquals(List.of(t("08:10"), t("08:20"), t("08:30"), t("08:40")), bad(res));
         // The two buckets where the status changes share one raw request; the outage between
         // them adds only its five Bad samples.
         assertEquals(List.of("2026-11-10T08:00:00Z..2026-11-10T09:00:00Z"), raw.calls);
@@ -287,7 +298,7 @@ class GoodTimeAverageTest {
     }
 
     @Test
-    void aBadBucketAfterABucketTooBigToRead_isAGap() {
+    void aBadBucketAfterABucketTooBigToRead_isBad() {
         // 08:00 ends Bad but is not read; 08:10 holds only a Bad sample. Without raw requests
         // left, the sample before 08:10 still shows it starts Bad: a gap, not a held Good value.
         Raw raw = new Raw(good("08:01", 1), good("08:02", 1), bad("08:03"), bad("08:15"));
@@ -297,7 +308,7 @@ class GoodTimeAverageTest {
         Map<Long, Result> out = GoodTimeAverage.compute(buckets("08:00=0", "08:10=0"),
                 statuses, null, 10 * MIN, t("08:20"), new Budget(100, 100, 0, 10), raw);
 
-        assertEquals(Map.of(t("08:00"), new Result(1, false)), out);
+        assertEquals(Map.of(t("08:00"), new Result(1, false), t("08:10"), Result.BAD), out);
         assertEquals(List.of("before 2026-11-10T08:10:00Z"), raw.calls);
     }
 

@@ -17,9 +17,9 @@ import java.util.Map;
  * <p>So per bucket this class decides from cheap aggregates which case applies:
  * <ul>
  *   <li>Good the whole bucket (held Good, no other status inside): Factry's {@code twa} is right.
- *   <li>Not Good the whole bucket (held not Good, no Good sample inside): no value, a gap. This
- *       matches Ignition's own TimeWeightedAvgAggregate, which returns no data for a block
- *       without a Good value.
+ *   <li>Not Good the whole bucket (held not Good, no Good sample inside): {@link Result#BAD}.
+ *       Not leaving the bucket out: Ignition fills a bucket without a point with a
+ *       neighbouring value marked Good, so an outage would read as a held Good value.
  *   <li>Otherwise the status changes inside the bucket: its raw samples are fetched and averaged
  *       over the Good time only.
  * </ul>
@@ -40,7 +40,14 @@ final class GoodTimeAverage {
     record Sample(long ts, double value, boolean good) {}
 
     /** One bucket's average. {@code exact} is false for a fallback value (see the class doc). */
-    record Result(double value, boolean exact) {}
+    record Result(double value, boolean exact) {
+        /** No Good time in the bucket: returned as a Bad point without a value. */
+        static final Result BAD = new Result(Double.NaN, true);
+
+        boolean isBad() {
+            return Double.isNaN(value);
+        }
+    }
 
     /** Limits on raw reads for one pen. */
     record Budget(long pointsPerRequest, long pointsPerPen, int requestsPerPen, int seedReadsPerPen) {}
@@ -175,11 +182,16 @@ final class GoodTimeAverage {
                     : held == null && !unknown && st.onlyGood(st.sameGood) ? Double.valueOf(st.sameGood)
                     : null;
             if (consistent && !heldGood && !st.hasGood) {
-                // Not Good the whole bucket: a gap.
+                // Not Good the whole bucket. Before the first sample ever there is nothing to
+                // hold, so that bucket is simply left out.
+                if (held != null || !st.isEmpty()) {
+                    out.put(start, Result.BAD);
+                }
             } else if (consistent && good != null) {
                 out.put(start, new Result(good, true));
             } else if (unknown && !st.hasGood && !st.isEmpty()) {
-                // Only not-Good samples and an unknown start: treat it as not Good, a gap.
+                // Only not-Good samples and an unknown start: treat it as not Good.
+                out.put(start, Result.BAD);
             } else {
                 if (fallback == null) {
                     fallback = source.fallback();
@@ -322,6 +334,8 @@ final class GoodTimeAverage {
             }
             if (goodMs > 0) {
                 out.put(from, new Result(sum / goodMs, true));
+            } else if (held != null) {
+                out.put(from, Result.BAD); // only not-Good time (none before the first sample)
             }
         }
         return held;

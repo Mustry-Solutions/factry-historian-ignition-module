@@ -85,12 +85,20 @@ class FactryQueryEngineAverageTest {
         }
 
         /** Value per bucket start, in order. */
+        /** Value per bucket start, in order, for the buckets with Good time. */
         Map<Long, Double> values() {
             Map<Long, Double> out = new LinkedHashMap<>();
             for (AggregatedPoint<?, ?> p : points) {
-                out.put(p.timestamp().toEpochMilli(), ((Number) p.value()).doubleValue());
+                if (!p.quality().isBad()) {
+                    out.put(p.timestamp().toEpochMilli(), ((Number) p.value()).doubleValue());
+                }
             }
             return out;
+        }
+
+        /** The bucket starts returned as Bad (no Good time). */
+        List<Long> bad() {
+            return points.stream().filter(p -> p.quality().isBad()).map(p -> p.timestamp().toEpochMilli()).toList();
         }
 
         Map<Long, QualityCode> qualities() {
@@ -135,9 +143,9 @@ class FactryQueryEngineAverageTest {
         Recorder rec = average(engine(), "a", t("08:00"), t("09:00"), TimeWindow.ofMinutes(10));
 
         // 08:00: 2 min at 100 (held from 07:30) and 3 min at 40 over 5 Good minutes.
-        // 08:50: 2 min at 50 and 3 min at 80. The buckets inside the outage are gaps.
+        // 08:50: 2 min at 50 and 3 min at 80. The buckets inside the outage are Bad.
         assertValues(Map.of(t("08:00"), 64.0, t("08:50"), 68.0), rec.values());
-        assertTrue(rec.qualities().values().stream().allMatch(QualityCode::isGood));
+        assertEquals(List.of(t("08:10"), t("08:20"), t("08:30"), t("08:40")), rec.bad());
     }
 
     @Test
@@ -255,6 +263,7 @@ class FactryQueryEngineAverageTest {
         Recorder rec = average(engine, "a", t("08:00"), t("09:00"), TimeWindow.ofMinutes(10));
 
         assertEquals(Map.of(), rec.values());
+        assertEquals(6, rec.bad().size());
     }
 
     @Test
@@ -339,5 +348,59 @@ class FactryQueryEngineAverageTest {
         assertEquals(1, rec.points.size());
         assertEquals(new java.util.Date(t("02:00")), rec.points.get(0).value());
         assertEquals(1, factry.aggregateQueries("twa").size());
+    }
+
+    @Test
+    void aBadBucket_readsAsBadThroughIgnitionsQueryPath_notAsTheHeldValue() throws Exception {
+        // Live on 8.3.6: Ignition fills a bucket without a point with the previous value, marked
+        // Good. A bucket that is Bad the whole time must read as Bad instead.
+        long t0 = t("10:38") + 5_911;
+        String u = factry.addMeasurement("default/out", "number");
+        factry.add(u, t0, 100, "Good");
+        factry.add(u, t0 + 15_000, 0, "Bad");
+        factry.add(u, t0 + 35_000, 60, "Good");
+        FactryQueryEngine engine = engine();
+        engine.now = () -> t0 + 60_000;
+
+        AverageHistoryQuery.Dataset ds = AverageHistoryQuery.wide(engine, t0, t0 + 60_000, 6,
+                AggregationMode.Average, "out");
+
+        assertNull(ds.error, ds::toString);
+        assertEquals(6, ds.rows.size(), ds::toString);
+        // 05-15 Good 100; 15-25 Bad from 20; 25-35 Bad throughout; 35-45 Bad until 40.
+        assertEquals(100.0, ((Number) ds.rows.get(0)[1]).doubleValue(), 1e-9, ds::toString);
+        assertEquals(100.0, ((Number) ds.rows.get(1)[1]).doubleValue(), 1e-9, ds::toString);
+        Object v = ds.rows.get(2)[1];
+        assertTrue(v == null || Double.isNaN(((Number) v).doubleValue()), ds::toString);
+        assertTrue(ds.qualities.get(2)[1].isBad(), ds::toString);
+        assertEquals(60.0, ((Number) ds.rows.get(3)[1]).doubleValue(), 1e-9, ds::toString);
+        assertTrue(ds.qualities.get(3)[1].isGood(), ds::toString);
+    }
+
+    @Test
+    void beforeTheFirstSampleAndAfterNow_readAsBadThroughIgnitionsQueryPath() throws Exception {
+        // Ignition fills a bucket without a point from its neighbour, marked Good: here the
+        // value 100 would show before it was ever stored and after now.
+        long t0 = t("10:38");
+        String u = factry.addMeasurement("default/out", "number");
+        factry.add(u, t0 + 20_000, 100, "Good");
+        FactryQueryEngine engine = engine();
+        engine.now = () -> t0 + 40_000;
+
+        AverageHistoryQuery.Dataset ds = AverageHistoryQuery.wide(engine, t0, t0 + 60_000, 6,
+                AggregationMode.Average, "out");
+
+        assertNull(ds.error, ds::toString);
+        assertEquals(6, ds.rows.size(), ds::toString);
+        for (int r = 0; r < 6; r++) {
+            boolean good = r == 2 || r == 3; // 10:38:20 to now (10:38:40)
+            assertEquals(good, ds.qualities.get(r)[1].isGood(), "row " + r + "\n" + ds);
+            Object v = ds.rows.get(r)[1];
+            if (good) {
+                assertEquals(100.0, ((Number) v).doubleValue(), 1e-9, ds::toString);
+            } else {
+                assertTrue(v == null || Double.isNaN(((Number) v).doubleValue()), ds::toString);
+            }
+        }
     }
 }

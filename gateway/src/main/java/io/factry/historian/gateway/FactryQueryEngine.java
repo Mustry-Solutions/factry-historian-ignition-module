@@ -680,8 +680,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      * Ignition's "Average" over Good time only (see {@link GoodTimeAverage}). Factry's twa gives
      * the buckets that are Good throughout; a per-status {@code last} aggregate and the sample
      * before the range tell which buckets that is. Only buckets where the status changes are
-     * fetched raw, within {@link #RAW_BUDGET}. Buckets that are not Good throughout get no point,
-     * so they show as a gap.
+     * fetched raw, within {@link #RAW_BUDGET}. Buckets that are not Good throughout get a Bad
+     * point without a value, so they show as a gap.
      *
      * <p>A Boolean is averaged the same way, as the fraction of Good time it was true: a run bit
      * on for 1 minute of the hour averages 0.017, where Factry's sample {@code mean} says 0.5. Factry's twa refuses Booleans, so a
@@ -695,13 +695,48 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             boolean isBoolean, boolean asDate, AggregatedQueryOptions options, AggregatedPointProcessor processor) {
 
         long startMs = options.getTimeRange().get().startTime().toEpochMilli();
+        long rangeEndMs = options.getTimeRange().get().endTime().toEpochMilli();
+        Map<Long, GoodTimeAverage.Result> values =
+                timeWeightedAverage(uuid, period, periodMs, isBoolean, startMs, rangeEndMs);
+
+        // Every bucket gets a point. Ignition fills a bucket without one with a neighbouring
+        // value marked Good (checked through its own query path), so a bucket left out would
+        // read as a held Good value: in an outage, before the first sample and after now. A
+        // bucket without Good time is a Bad point instead, which the Power Chart draws as a gap.
+        int count = 0;
+        for (long b = startMs; b < rangeEndMs; b += periodMs) {
+            GoodTimeAverage.Result r = values.getOrDefault(b, GoodTimeAverage.Result.BAD);
+            processor.onPointAvailable(key,
+                    AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
+                            // A DateTime tag is stored as epoch ms; its average is a date too.
+                            // A Bad bucket carries NaN (a null would read back as 0.0 in a Float
+                            // column), or null for a date.
+                            .value(r.isBad() ? (asDate ? null : (Object) Double.NaN)
+                                    : asDate ? toDate(r.value()) : r.value())
+                            // A numeric fallback is Good: the Power Chart drops points that are
+                            // not Good, and the twa over Good samples bridges Bad time inside the
+                            // bucket, as Ignition's own average does there. A Boolean fallback is
+                            // a sample mean, which can be far off for a Boolean stored on change
+                            // (0.5 for a bit on 1 minute of the hour), so it is Uncertain.
+                            .quality(r.isBad() ? QualityCode.Bad
+                                    : r.exact() || !isBoolean ? QualityCode.Good : QualityCode.Uncertain)
+                            .timestamp(Instant.ofEpochMilli(b))
+                            .build());
+            count++;
+        }
+        return count;
+    }
+
+    /** The average per bucket start; buckets without Good time are Bad or absent. */
+    private Map<Long, GoodTimeAverage.Result> timeWeightedAverage(
+            String uuid, String period, long periodMs, boolean isBoolean, long startMs, long rangeEndMs) {
         // Stop at now. Fill "previous" would carry the last value into future buckets and weight
         // it up to the bucket end, while Ignition's own Average has no value after now (its
         // interpolator returns nothing past the current time). Factry weights the last bucket
-        // up to the query end, so clamping the end is enough.
-        long endMs = Math.min(options.getTimeRange().get().endTime().toEpochMilli(), now.getAsLong());
+        // up to the query end, so clamping the end is enough; the buckets after now are Bad.
+        long endMs = Math.min(rangeEndMs, now.getAsLong());
         if (endMs <= startMs) {
-            return 0;
+            return Map.of();
         }
 
         Map<Long, Double> twa = new LinkedHashMap<>();
@@ -719,7 +754,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 }
             }
             if (twa.isEmpty()) {
-                return 0;
+                return Map.of();
             }
         }
 
@@ -794,24 +829,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             }
         };
 
-        Map<Long, GoodTimeAverage.Result> values = GoodTimeAverage.compute(
-                twa, statuses, seed, periodMs, endMs, RAW_BUDGET, factry);
-
-        for (Map.Entry<Long, GoodTimeAverage.Result> e : values.entrySet()) {
-            processor.onPointAvailable(key,
-                    AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
-                            // A DateTime tag is stored as epoch ms; its average is a date too.
-                            .value(asDate ? toDate(e.getValue().value()) : e.getValue().value())
-                            // A numeric fallback is Good: the Power Chart drops points that are
-                            // not Good, and the twa over Good samples bridges Bad time inside the
-                            // bucket, as Ignition's own average does there. A Boolean fallback is
-                            // a sample mean, which can be far off for a Boolean stored on change
-                            // (0.5 for a bit on 1 minute of the hour), so it is Uncertain.
-                            .quality(e.getValue().exact() || !isBoolean ? QualityCode.Good : QualityCode.Uncertain)
-                            .timestamp(Instant.ofEpochMilli(e.getKey()))
-                            .build());
-        }
-        return values.size();
+        return GoodTimeAverage.compute(twa, statuses, seed, periodMs, endMs, RAW_BUDGET, factry);
     }
 
     private static QueryTimeseriesRequest.Builder withRange(QueryTimeseriesRequest.Builder b, long startMs, long endMs) {
