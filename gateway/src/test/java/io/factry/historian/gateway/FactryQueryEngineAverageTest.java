@@ -308,9 +308,10 @@ class FactryQueryEngineAverageTest {
     }
 
     @Test
-    void booleanBucketBeyondTheBudget_fallsBackToItsMean() {
+    void booleanBucketBeyondTheBudget_isUncertain() {
         // 08:00-09:00 toggles every 50 ms (72,000 samples, more than one raw request may hold);
-        // 09:00-10:00 is on for 6 minutes. The first falls back to the sample mean.
+        // 09:00-10:00 is on for 6 minutes. The first falls back to the sample mean, which is
+        // not a time-weighted average, so it must not pass as Good.
         String u = factry.addMeasurement("default/run", "boolean");
         for (long ts = t("08:00"); ts < t("09:00"); ts += 50) {
             factry.add(u, ts, (ts / 50) % 2 == 0, "Good");
@@ -322,5 +323,6 @@ class FactryQueryEngineAverageTest {
         Recorder rec = average(engine(), "run", t("08:00"), t("10:00"), TimeWindow.ofHours(1));
 
         assertValues(Map.of(t("08:00"), 0.5, t("09:00"), 0.1), rec.values());
+        assertEquals(Map.of(t("08:00"), QualityCode.Uncertain, t("09:00"), QualityCode.Good), rec.qualities());
     }
 }

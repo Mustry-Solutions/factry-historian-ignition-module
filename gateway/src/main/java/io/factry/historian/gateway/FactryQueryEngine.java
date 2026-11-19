@@ -667,7 +667,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      * on for 1 minute of the hour averages 0.017, where Factry's sample {@code mean} says 0.5. Factry's twa refuses Booleans, so a
      * per-status {@code mean} stands in: a Good mean of exactly 0 or 1 means the bucket never
      * changes value, and the bucket needs no raw read when that value is the one held. Other
-     * buckets with samples are read raw; beyond the budget a bucket falls back to that mean.
+     * buckets with samples are read raw; beyond the budget a bucket falls back to that mean,
+     * marked Uncertain.
      */
     private int queryTimeWeightedAverage(
             String uuid, QualifiedPath source, AggregatedQueryKey key, String period, long periodMs,
@@ -780,11 +781,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             processor.onPointAvailable(key,
                     AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
                             .value(e.getValue().value())
-                            // Good also for a fallback value: the Power Chart drops points that
-                            // are not Good, so an Uncertain fallback would draw as a gap. The
-                            // fallback bridges Bad time inside the bucket, as Ignition's own
-                            // average does there.
-                            .quality(QualityCode.Good)
+                            // A numeric fallback is Good: the Power Chart drops points that are
+                            // not Good, and the twa over Good samples bridges Bad time inside the
+                            // bucket, as Ignition's own average does there. A Boolean fallback is
+                            // a sample mean, which can be far off for a Boolean stored on change
+                            // (0.5 for a bit on 1 minute of the hour), so it is Uncertain.
+                            .quality(e.getValue().exact() || !isBoolean ? QualityCode.Good : QualityCode.Uncertain)
                             .timestamp(Instant.ofEpochMilli(e.getKey()))
                             .build());
         }
