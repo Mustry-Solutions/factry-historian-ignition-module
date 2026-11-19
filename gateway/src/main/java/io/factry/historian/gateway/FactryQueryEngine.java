@@ -650,9 +650,11 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      * Limits on the raw samples one Average pen may read (see {@link GoodTimeAverage}). A sample
      * is about 25 bytes on the wire, so 50,000 per request stays far below the 4 MiB gRPC
      * message limit, and 200,000 per pen (about 5 MB over at most 10 requests) keeps a trend
-     * refresh quick. Buckets beyond this get Factry's twa over the Good samples instead.
+     * refresh quick. Buckets beyond this get Factry's twa over the Good samples instead. Up to
+     * 10 more one-sample reads find the status at a bucket start after a bucket that was not
+     * read.
      */
-    static final GoodTimeAverage.Budget RAW_BUDGET = new GoodTimeAverage.Budget(50_000, 200_000, 10);
+    static final GoodTimeAverage.Budget RAW_BUDGET = new GoodTimeAverage.Budget(50_000, 200_000, 10, 10);
 
     /**
      * Ignition's "Average" over Good time only (see {@link GoodTimeAverage}). Factry's twa gives
@@ -710,8 +712,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             }
         }
 
-        List<GoodTimeAverage.Sample> before = samples(grpcClient.queryTimeseries(sampleBeforeRequest(uuid, startMs)));
-        GoodTimeAverage.Sample seed = before.isEmpty() ? null : before.get(before.size() - 1);
+        GoodTimeAverage.Sample seed = sampleBefore(uuid, startMs);
 
         GoodTimeAverage.Source factry = new GoodTimeAverage.Source() {
             @Override
@@ -724,6 +725,11 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     }
                 }
                 return counts;
+            }
+
+            @Override
+            public GoodTimeAverage.Sample before(long ts) {
+                return sampleBefore(uuid, ts);
             }
 
             @Override
@@ -805,6 +811,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 .setDesc(true)
                 .setLimit(1)
                 .build();
+    }
+
+    /** The last sample before {@code ts}, of any status, or null when there is none. */
+    private GoodTimeAverage.Sample sampleBefore(String uuid, long ts) {
+        List<GoodTimeAverage.Sample> before = samples(grpcClient.queryTimeseries(sampleBeforeRequest(uuid, ts)));
+        return before.isEmpty() ? null : before.get(before.size() - 1);
     }
 
     /** The raw samples of a status-grouped reply, merged in time order. */

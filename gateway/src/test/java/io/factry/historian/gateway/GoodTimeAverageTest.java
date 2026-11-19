@@ -27,7 +27,7 @@ class GoodTimeAverageTest {
         return Instant.parse("2026-11-10T" + hhmm + ":00Z").toEpochMilli();
     }
 
-    private static final Budget UNLIMITED = new Budget(Long.MAX_VALUE, Long.MAX_VALUE, Integer.MAX_VALUE);
+    private static final Budget UNLIMITED = new Budget(Long.MAX_VALUE, Long.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE);
 
     /**
      * Raw samples on a fake Factry; records each [from, to) it is asked for. Counts per bucket
@@ -59,6 +59,18 @@ class GoodTimeAverageTest {
         public Map<Long, Double> fallback() {
             fallbackCalls++;
             return fallback;
+        }
+
+        @Override
+        public Sample before(long ts) {
+            calls.add("before " + Instant.ofEpochMilli(ts));
+            Sample last = null;
+            for (Sample s : all) {
+                if (s.ts() < ts) {
+                    last = s;
+                }
+            }
+            return last;
         }
     }
 
@@ -229,7 +241,7 @@ class GoodTimeAverageTest {
                 t("08:00"), status(1.0, true), t("08:10"), status(2.0, true), t("08:20"), status(3.0, true));
 
         Map<Long, Double> out = exact(GoodTimeAverage.compute(buckets("08:00=0", "08:10=0", "08:20=0"),
-                statuses, null, 10 * MIN, t("08:30"), new Budget(4, 100, 10), raw));
+                statuses, null, 10 * MIN, t("08:30"), new Budget(4, 100, 10, 10), raw));
 
         assertEquals(buckets("08:00=1", "08:10=2", "08:20=3"), out);
         assertEquals(List.of("2026-11-10T08:00:00Z..2026-11-10T08:20:00Z",
@@ -245,7 +257,7 @@ class GoodTimeAverageTest {
                 t("08:00"), status(1.0, true), t("08:10"), status(2.0, true), t("08:20"), status(3.0, true));
 
         Map<Long, Result> out = GoodTimeAverage.compute(buckets("08:00=0", "08:10=0", "08:20=0"),
-                statuses, null, 10 * MIN, t("08:30"), new Budget(100, 2, 10), raw);
+                statuses, null, 10 * MIN, t("08:30"), new Budget(100, 2, 10, 10), raw);
 
         assertEquals(Map.of(t("08:00"), new Result(1, true), t("08:10"), new Result(8, false),
                 t("08:20"), new Result(9, false)), out);
@@ -254,19 +266,36 @@ class GoodTimeAverageTest {
     }
 
     @Test
-    void afterAMixedBucketThatWasNotRead_theNextBucketWithSamplesIsAFallbackToo() {
-        // 08:00 is too big to read, so the status at 08:10's start is unknown: 08:10 cannot be
-        // averaged from its own samples. 08:20 starts Good again (08:10 held only Good samples).
-        Raw raw = new Raw(good("08:01", 1), bad("08:02"), good("08:03", 1), good("08:15", 2));
+    void aBucketTooBigToRead_doesNotKeepTheBucketsAfterItFromBeingRead() {
+        // 08:00 is too big to read, so the status at 08:10's start is unknown. One read of the
+        // sample before 08:10 settles it, and 08:10 is averaged from its own samples.
+        Raw raw = new Raw(good("08:01", 1), bad("08:02"), good("08:03", 1), bad("08:12"), good("08:15", 2));
         raw.fallback = buckets("08:00=7", "08:10=8", "08:20=9");
-        Map<Long, BucketStatus> statuses = Map.of(t("08:00"), status(1.0, true), t("08:10"), status(2.0, false));
+        Map<Long, BucketStatus> statuses = Map.of(t("08:00"), status(1.0, true), t("08:10"), status(2.0, true));
 
         Map<Long, Result> out = GoodTimeAverage.compute(buckets("08:00=0", "08:10=0", "08:20=2"),
-                statuses, null, 10 * MIN, t("08:30"), new Budget(2, 100, 10), raw);
+                statuses, null, 10 * MIN, t("08:30"), new Budget(2, 100, 10, 10), raw);
 
-        assertEquals(Map.of(t("08:00"), new Result(7, false), t("08:10"), new Result(8, false),
+        // 08:10: 2 min at 1 (held from 08:03), Bad 08:12 to 08:15, 5 min at 2.
+        assertEquals(Map.of(t("08:00"), new Result(7, false), t("08:10"), new Result((2 * 1 + 5 * 2) / 7.0, true),
                 t("08:20"), new Result(2, true)), out);
-        assertEquals(List.of(), raw.calls);
+        assertEquals(List.of("before 2026-11-10T08:10:00Z", "2026-11-10T08:10:00Z..2026-11-10T08:20:00Z"),
+                raw.calls);
+    }
+
+    @Test
+    void aBadBucketAfterABucketTooBigToRead_isAGap() {
+        // 08:00 ends Bad but is not read; 08:10 holds only a Bad sample. Without raw requests
+        // left, the sample before 08:10 still shows it starts Bad: a gap, not a held Good value.
+        Raw raw = new Raw(good("08:01", 1), good("08:02", 1), bad("08:03"), bad("08:15"));
+        raw.fallback = buckets("08:00=1", "08:10=1");
+        Map<Long, BucketStatus> statuses = Map.of(t("08:00"), status(1.0, true), t("08:10"), status(null, true));
+
+        Map<Long, Result> out = GoodTimeAverage.compute(buckets("08:00=0", "08:10=0"),
+                statuses, null, 10 * MIN, t("08:20"), new Budget(100, 100, 0, 10), raw);
+
+        assertEquals(Map.of(t("08:00"), new Result(1, false)), out);
+        assertEquals(List.of("before 2026-11-10T08:10:00Z"), raw.calls);
     }
 
     @Test

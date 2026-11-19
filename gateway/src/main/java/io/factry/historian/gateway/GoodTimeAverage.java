@@ -41,7 +41,7 @@ final class GoodTimeAverage {
     record Result(double value, boolean exact) {}
 
     /** Limits on raw reads for one pen. */
-    record Budget(long pointsPerRequest, long pointsPerPen, int requestsPerPen) {}
+    record Budget(long pointsPerRequest, long pointsPerPen, int requestsPerPen, int seedReadsPerPen) {}
 
     /** What Factry is asked for beyond the aggregates passed in. Each call is one request. */
     interface Source {
@@ -53,6 +53,9 @@ final class GoodTimeAverage {
 
         /** A value per bucket start for buckets the budget cannot read raw. */
         Map<Long, Double> fallback();
+
+        /** The last sample before {@code ts}, or null when there is none. */
+        Sample before(long ts);
     }
 
     /** What one bucket holds, from Factry's {@code last} aggregate grouped by status. */
@@ -90,10 +93,8 @@ final class GoodTimeAverage {
     private enum Held {
         /** No sample yet. */
         NONE, GOOD, NOT_GOOD,
-        /** Known only once a raw request that is in the plan has been read. */
-        READ,
-        /** Unknown: the bucket that set it was not read raw. */
-        LOST
+        /** After a bucket holding more than one status: known only once its samples are read. */
+        UNKNOWN
     }
 
     /** Buckets {@code first..last} (indexes) read in one raw request. */
@@ -119,30 +120,43 @@ final class GoodTimeAverage {
         Map<Long, Result> out = new LinkedHashMap<>();
         Map<Long, Double> fallback = null;
         Sample held = seed;
-        boolean lost = false;
+        // True after a bucket holding more than one status that was not read raw: the status
+        // at the next bucket start is then unknown until the sample before it is read.
+        boolean unknown = false;
+        int seedReads = 0;
         int nextSpan = 0;
 
         int i = 0;
         while (i < buckets.size()) {
-            if (nextSpan < spans.size() && spans.get(nextSpan).first() == i) {
+            long start = buckets.get(i);
+            BucketStatus st = statuses.getOrDefault(start, EMPTY);
+            boolean inSpan = nextSpan < spans.size() && spans.get(nextSpan).first() == i;
+            if (unknown && (inSpan || !st.isMixed()) && seedReads < budget.seedReadsPerPen()) {
+                held = source.before(start);
+                unknown = false;
+                seedReads++;
+            }
+            if (inSpan) {
                 Span span = spans.get(nextSpan++);
-                held = averageRaw(buckets, span, held, periodMs, rangeEndMs, source, out);
-                lost = false;
+                // Out of seed reads, the time before the span's first sample counts as not Good.
+                held = averageRaw(buckets, span, unknown ? null : held, periodMs, rangeEndMs, source, out);
+                unknown = false;
                 i = span.last() + 1;
                 continue;
             }
 
-            long start = buckets.get(i);
-            BucketStatus st = statuses.getOrDefault(start, EMPTY);
-            boolean heldGood = held != null && held.good();
-            boolean exact = !lost && !st.isMixed()
-                    && !(heldGood && st.hasNotGood) && !(held != null && !heldGood && st.hasGood);
+            boolean heldGood = !unknown && held != null && held.good();
+            boolean heldNotGood = !unknown && held != null && !held.good();
+            boolean consistent = !unknown && !st.isMixed()
+                    && !(heldGood && st.hasNotGood) && !(heldNotGood && st.hasGood);
             // Without a twa a Good bucket is known only when nothing changes inside it.
             Double good = twa.get(start) != null ? twa.get(start) : st.isEmpty() && heldGood ? held.value() : null;
-            if (exact && !heldGood && !st.hasGood) {
+            if (consistent && !heldGood && !st.hasGood) {
                 // Not Good the whole bucket: a gap.
-            } else if (exact && good != null) {
+            } else if (consistent && good != null) {
                 out.put(start, new Result(good, true));
+            } else if (unknown && !st.hasGood && !st.isEmpty()) {
+                // Only not-Good samples and an unknown start: treat it as not Good, a gap.
             } else {
                 if (fallback == null) {
                     fallback = source.fallback();
@@ -154,13 +168,13 @@ final class GoodTimeAverage {
             }
 
             if (st.isMixed()) {
-                lost = true;
+                unknown = true;
             } else if (st.hasGood) {
                 held = new Sample(start, st.lastGood, true);
-                lost = false;
+                unknown = false;
             } else if (st.hasNotGood) {
                 held = new Sample(start, Double.NaN, false);
-                lost = false;
+                unknown = false;
             }
             i++;
         }
@@ -168,55 +182,54 @@ final class GoodTimeAverage {
     }
 
     /**
-     * Picks the raw requests: one pass that predicts which buckets need raw samples and groups
-     * them under the budget. A request never starts where the held status is lost, because its
-     * first bucket could then not be averaged.
+     * Picks the raw requests: predicts which buckets need raw samples and groups them under the
+     * budget. Each request is self-contained (the sample before it is read when needed), so a
+     * bucket too big to read does not keep later buckets from being read.
      */
     private static List<Span> plan(List<Long> buckets, Map<Long, Double> twa,
-                                   Map<Long, BucketStatus> statuses, Sample seed,
-                                   Budget budget, Source source) {
-        List<Span> spans = new ArrayList<>();
-        long[] before = null; // before[i] = samples in buckets 0..i-1
-        long penPoints = 0;
-        int first = -1;
-        int last = -1;
+                                   Map<Long, BucketStatus> statuses, Sample seed, Budget budget, Source source) {
+        List<Integer> wanted = new ArrayList<>();
         Held held = seed == null ? Held.NONE : seed.good() ? Held.GOOD : Held.NOT_GOOD;
-
         for (int i = 0; i < buckets.size(); i++) {
             BucketStatus st = statuses.getOrDefault(buckets.get(i), EMPTY);
-            boolean inSpan = false;
             if (needsRaw(held, st, twa.get(buckets.get(i)) != null)) {
-                if (before == null) {
-                    before = prefixCounts(buckets, source.counts());
-                }
-                if (first >= 0 && before[i + 1] - before[first] <= budget.pointsPerRequest()
-                        && penPoints + before[i + 1] - before[last + 1] <= budget.pointsPerPen()) {
-                    // Extend the open request; the buckets in between come along.
-                    penPoints += before[i + 1] - before[last + 1];
-                    last = i;
-                    inSpan = true;
-                } else {
-                    if (first >= 0) {
-                        spans.add(new Span(first, last));
-                        first = -1;
-                    }
-                    long own = before[i + 1] - before[i];
-                    if (held != Held.LOST && own <= budget.pointsPerRequest()
-                            && penPoints + own <= budget.pointsPerPen()
-                            && spans.size() < budget.requestsPerPen()) {
-                        first = i;
-                        last = i;
-                        penPoints += own;
-                        inSpan = true;
-                    }
-                }
+                wanted.add(i);
             }
             if (st.isMixed()) {
-                held = inSpan ? Held.READ : Held.LOST;
+                held = Held.UNKNOWN;
             } else if (st.hasGood) {
                 held = Held.GOOD;
             } else if (st.hasNotGood) {
                 held = Held.NOT_GOOD;
+            }
+        }
+        if (wanted.isEmpty()) {
+            return List.of();
+        }
+
+        long[] before = prefixCounts(buckets, source.counts()); // before[i] = samples in buckets 0..i-1
+        List<Span> spans = new ArrayList<>();
+        long penPoints = 0;
+        int first = -1;
+        int last = -1;
+        for (int i : wanted) {
+            if (first >= 0 && before[i + 1] - before[first] <= budget.pointsPerRequest()
+                    && penPoints + before[i + 1] - before[last + 1] <= budget.pointsPerPen()) {
+                // Extend the open request; the buckets in between come along.
+                penPoints += before[i + 1] - before[last + 1];
+                last = i;
+                continue;
+            }
+            if (first >= 0) {
+                spans.add(new Span(first, last));
+                first = -1;
+            }
+            long own = before[i + 1] - before[i];
+            if (own <= budget.pointsPerRequest() && penPoints + own <= budget.pointsPerPen()
+                    && spans.size() < budget.requestsPerPen()) {
+                first = i;
+                last = i;
+                penPoints += own;
             }
         }
         if (first >= 0) {
@@ -227,21 +240,13 @@ final class GoodTimeAverage {
 
     /** Whether the bucket's status may change inside it, or it has samples but no twa. */
     private static boolean needsRaw(Held held, BucketStatus st, boolean hasTwa) {
-        if (st.isMixed() || (!hasTwa && st.hasGood)) {
+        if (st.isEmpty()) {
+            return false;
+        }
+        if (st.isMixed() || held == Held.UNKNOWN || (!hasTwa && st.hasGood)) {
             return true;
         }
-        switch (held) {
-            case LOST:
-                return true;
-            case READ:
-                return !st.isEmpty();
-            case GOOD:
-                return st.hasNotGood;
-            case NOT_GOOD:
-                return st.hasGood;
-            default:
-                return false;
-        }
+        return held == Held.GOOD ? st.hasNotGood : held == Held.NOT_GOOD && st.hasGood;
     }
 
     private static long[] prefixCounts(List<Long> buckets, Map<Long, Long> counts) {
