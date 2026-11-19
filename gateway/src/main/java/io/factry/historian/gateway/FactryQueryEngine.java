@@ -480,14 +480,14 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                         pointCount += queryMinMax(uuid, source, key, period, options, processor);
                     } else {
                         String factryFunction = toFactryAggregateFunction(aggName);
-                        if (TIME_WEIGHTED_AVERAGE.equals(factryFunction)
-                                && keyToNode.get(key).dataType().filter(t -> t != DataType.Float8).isPresent()) {
-                            // Factry's twa only takes numbers; a Boolean average stays a mean.
+                        DataType dataType = keyToNode.get(key).dataType().orElse(DataType.Float8);
+                        if (TIME_WEIGHTED_AVERAGE.equals(factryFunction) && dataType == DataType.String) {
+                            // Factry's twa only takes numbers, and a String has no average.
                             factryFunction = "mean";
                         }
                         if (TIME_WEIGHTED_AVERAGE.equals(factryFunction) && options.getTimeRange().isPresent()) {
                             pointCount += queryTimeWeightedAverage(uuid, source, key, period,
-                                    periodMs, options, processor);
+                                    periodMs, dataType == DataType.Boolean, options, processor);
                         } else {
                             pointCount += querySingleAggregate(uuid, source, key, factryFunction, period, options, processor);
                         }
@@ -660,10 +660,16 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      * before the range tell which buckets that is. Only buckets where the status changes are
      * fetched raw, within {@link #RAW_BUDGET}. Buckets that are not Good throughout get no point,
      * so they show as a gap.
+     *
+     * <p>A Boolean is averaged the same way, as the fraction of Good time it was true: Ignition
+     * holds a Boolean until the next sample, so a run bit on for 1 minute of the hour averages
+     * 0.017, where Factry's sample {@code mean} says 0.5. Factry's twa refuses Booleans, so every
+     * bucket with samples is read raw; beyond the budget a bucket falls back to the sample
+     * {@code mean} of its Good samples, marked Uncertain.
      */
     private int queryTimeWeightedAverage(
             String uuid, QualifiedPath source, AggregatedQueryKey key, String period, long periodMs,
-            AggregatedQueryOptions options, AggregatedPointProcessor processor) {
+            boolean isBoolean, AggregatedQueryOptions options, AggregatedPointProcessor processor) {
 
         long startMs = options.getTimeRange().get().startTime().toEpochMilli();
         // Stop at now. Fill "previous" would carry the last value into future buckets and weight
@@ -676,14 +682,22 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         }
 
         Map<Long, Double> twa = new LinkedHashMap<>();
-        for (Series series : grpcClient.queryTimeseries(withRange(
-                aggregateRequest(uuid, TIME_WEIGHTED_AVERAGE, period), startMs, endMs).build()).getSeriesList()) {
-            for (SeriesPoint pt : series.getDataPointsList()) {
-                twa.put(pt.getTimestamp(), toDouble(pt.getValue()));
+        if (isBoolean) {
+            // No twa: every bucket, without a value. Factry starts its buckets at the query
+            // start (checked live on 8.2.3), so these line up with the other aggregates.
+            for (long b = startMs; b < endMs; b += periodMs) {
+                twa.put(b, null);
             }
-        }
-        if (twa.isEmpty()) {
-            return 0;
+        } else {
+            for (Series series : grpcClient.queryTimeseries(withRange(
+                    aggregateRequest(uuid, TIME_WEIGHTED_AVERAGE, period), startMs, endMs).build()).getSeriesList()) {
+                for (SeriesPoint pt : series.getDataPointsList()) {
+                    twa.put(pt.getTimestamp(), toDouble(pt.getValue()));
+                }
+            }
+            if (twa.isEmpty()) {
+                return 0;
+            }
         }
 
         Map<Long, GoodTimeAverage.BucketStatus> statuses = new HashMap<>();
@@ -722,8 +736,13 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             @Override
             public Map<Long, Double> fallback() {
                 Map<Long, Double> values = new HashMap<>();
-                for (Series series : grpcClient.queryTimeseries(withRange(
-                        goodOnlyTwaRequest(uuid, period), startMs, endMs).build()).getSeriesList()) {
+                QueryTimeseriesRequest.Builder req = isBoolean
+                        ? aggregateRequest(uuid, "mean", period)
+                        : goodOnlyTwaRequest(uuid, period);
+                for (Series series : grpcClient.queryTimeseries(withRange(req, startMs, endMs).build()).getSeriesList()) {
+                    if (!isGoodStatus(seriesStatus(series))) {
+                        continue; // the Boolean mean is grouped by status
+                    }
                     for (SeriesPoint pt : series.getDataPointsList()) {
                         values.put(pt.getTimestamp(), toDouble(pt.getValue()));
                     }
@@ -801,8 +820,16 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         return out;
     }
 
+    /** A number as is, a Boolean as 1 or 0 (so its average is the fraction of time true). */
     private static double toDouble(com.google.protobuf.Value v) {
-        return v.getKindCase() == com.google.protobuf.Value.KindCase.NUMBER_VALUE ? v.getNumberValue() : Double.NaN;
+        switch (v.getKindCase()) {
+            case NUMBER_VALUE:
+                return v.getNumberValue();
+            case BOOL_VALUE:
+                return v.getBoolValue() ? 1 : 0;
+            default:
+                return Double.NaN;
+        }
     }
 
     /** The Factry aggregate behind Ignition's (time-weighted) "Average". */

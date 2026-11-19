@@ -100,7 +100,9 @@ final class GoodTimeAverage {
     private record Span(int first, int last) {}
 
     /**
-     * @param twa        Factry's twa per bucket start, in time order (fill "previous", no filter)
+     * @param twa        Factry's twa per bucket start, in time order (fill "previous", no filter);
+     *                   a null value where Factry has none (Booleans: every bucket), so that
+     *                   bucket needs raw samples unless no sample falls inside it
      * @param statuses   per bucket start, which statuses it holds (buckets without samples absent)
      * @param seed       the last sample before the range, or null when there is none
      * @param periodMs   bucket length
@@ -112,7 +114,7 @@ final class GoodTimeAverage {
             long periodMs, long rangeEndMs, Budget budget, Source source) {
 
         List<Long> buckets = new ArrayList<>(twa.keySet());
-        List<Span> spans = plan(buckets, statuses, seed, budget, source);
+        List<Span> spans = plan(buckets, twa, statuses, seed, budget, source);
 
         Map<Long, Result> out = new LinkedHashMap<>();
         Map<Long, Double> fallback = null;
@@ -135,11 +137,12 @@ final class GoodTimeAverage {
             boolean heldGood = held != null && held.good();
             boolean exact = !lost && !st.isMixed()
                     && !(heldGood && st.hasNotGood) && !(held != null && !heldGood && st.hasGood);
-            if (exact) {
-                if (heldGood || st.hasGood) {
-                    out.put(start, new Result(twa.get(start), true));
-                }
-                // else: not Good the whole bucket, a gap.
+            // Without a twa a Good bucket is known only when nothing changes inside it.
+            Double good = twa.get(start) != null ? twa.get(start) : st.isEmpty() && heldGood ? held.value() : null;
+            if (exact && !heldGood && !st.hasGood) {
+                // Not Good the whole bucket: a gap.
+            } else if (exact && good != null) {
+                out.put(start, new Result(good, true));
             } else {
                 if (fallback == null) {
                     fallback = source.fallback();
@@ -169,7 +172,8 @@ final class GoodTimeAverage {
      * them under the budget. A request never starts where the held status is lost, because its
      * first bucket could then not be averaged.
      */
-    private static List<Span> plan(List<Long> buckets, Map<Long, BucketStatus> statuses, Sample seed,
+    private static List<Span> plan(List<Long> buckets, Map<Long, Double> twa,
+                                   Map<Long, BucketStatus> statuses, Sample seed,
                                    Budget budget, Source source) {
         List<Span> spans = new ArrayList<>();
         long[] before = null; // before[i] = samples in buckets 0..i-1
@@ -181,7 +185,7 @@ final class GoodTimeAverage {
         for (int i = 0; i < buckets.size(); i++) {
             BucketStatus st = statuses.getOrDefault(buckets.get(i), EMPTY);
             boolean inSpan = false;
-            if (needsRaw(held, st)) {
+            if (needsRaw(held, st, twa.get(buckets.get(i)) != null)) {
                 if (before == null) {
                     before = prefixCounts(buckets, source.counts());
                 }
@@ -221,9 +225,9 @@ final class GoodTimeAverage {
         return spans;
     }
 
-    /** Whether the bucket's status may change inside it, so twa alone cannot tell its Good time. */
-    private static boolean needsRaw(Held held, BucketStatus st) {
-        if (st.isMixed()) {
+    /** Whether the bucket's status may change inside it, or it has samples but no twa. */
+    private static boolean needsRaw(Held held, BucketStatus st, boolean hasTwa) {
+        if (st.isMixed() || (!hasTwa && st.hasGood)) {
             return true;
         }
         switch (held) {

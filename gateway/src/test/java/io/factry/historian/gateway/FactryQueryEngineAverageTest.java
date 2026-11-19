@@ -248,4 +248,33 @@ class FactryQueryEngineAverageTest {
 
         assertEquals(Map.of(), rec.values());
     }
+
+    @Test
+    void booleanAverage_isTheFractionOfGoodTimeTrue() {
+        // A run bit on for 1 minute of the hour. Ignition holds a Boolean until the next sample,
+        // so its Average is 1/60; the mean of the two samples in the hour would be 0.5.
+        String u = factry.addMeasurement("default/run", "boolean");
+        factry.add(u, t("07:00"), false, "Good");
+        factry.add(u, t("08:10"), true, "Good");
+        factry.add(u, t("08:11"), false, "Good");
+        factry.add(u, t("08:40"), true, "Good");
+        factry.add(u, t("08:45"), false, "Bad");
+
+        Recorder rec = average(engine(), "run", t("08:00"), t("09:00"), TimeWindow.ofMinutes(30));
+
+        // 08:00-08:30: true 1 of 30 minutes. 08:30-09:00: true 5 of the 15 Good minutes.
+        assertValues(Map.of(t("08:00"), 1 / 30.0, t("08:30"), 5 / 15.0), rec.values());
+        assertTrue(rec.qualities().values().stream().allMatch(QualityCode::isGood));
+    }
+
+    @Test
+    void booleanWithoutSamplesInTheRange_holdsItsValueWithoutRawReads() {
+        String u = factry.addMeasurement("default/run", "boolean");
+        factry.add(u, t("07:00"), true, "Good");
+
+        Recorder rec = average(engine(), "run", t("08:00"), t("08:30"), TimeWindow.ofMinutes(10));
+
+        assertValues(Map.of(t("08:00"), 1.0, t("08:10"), 1.0, t("08:20"), 1.0), rec.values());
+        assertEquals(0, factry.rawQueries().size());
+    }
 }
