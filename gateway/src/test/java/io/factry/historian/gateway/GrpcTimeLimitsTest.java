@@ -218,12 +218,22 @@ class GrpcTimeLimitsTest {
     }
 
     @Test
+    void assetCallsGiveUpAfterReadDeadline() {
+        factry.hang = true;
+        List<Executable> calls = List.of(
+                client::getAssets,
+                () -> client.getAssetProperties(GetAssetPropertiesRequest.getDefaultInstance()));
+        for (Executable call : calls) {
+            Duration took = timed(Duration.ofSeconds(10), () -> assertDeadlineExceeded(call));
+            assertTrue(took.toMillis() >= 5_000, "asset calls get the read deadline: " + took);
+        }
+    }
+
+    @Test
     void smallCallsGiveUpAfterCallDeadline() {
         factry.hang = true;
         List<Executable> calls = List.of(
                 client::getCollectors,
-                client::getAssets,
-                () -> client.getAssetProperties(GetAssetPropertiesRequest.getDefaultInstance()),
                 () -> client.getMeasurements(MeasurementRequest.getDefaultInstance()),
                 () -> client.registerCollector(RegisterCollectorSchema.getDefaultInstance()),
                 () -> client.updateHealth(HealthUpdates.getDefaultInstance()),

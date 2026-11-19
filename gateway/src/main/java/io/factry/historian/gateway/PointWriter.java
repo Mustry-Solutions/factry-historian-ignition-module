@@ -457,8 +457,11 @@ class PointWriter {
     /**
      * Seed {@code state} with the elements of the most recent array value stored in Factry
      * for the given measurement. Used on a cache miss so that a partial element update from
-     * Ignition is merged onto the full array rather than truncating it. Best-effort: on any
-     * error (or when Factry has no prior value) the state is left unchanged.
+     * Ignition is merged onto the full array rather than truncating it. When Factry has no
+     * prior value, or refuses the query, the state is left unchanged. A connection error
+     * (UNAVAILABLE, DEADLINE_EXCEEDED) is thrown instead: merging onto the empty state would
+     * keep an array with missing elements that is never seeded again, so the flush fails and
+     * store and forward retries it with a new seed.
      */
     private void seedArrayStateFromFactry(String basePath, String measurementUUID,
                                           java.util.TreeMap<Integer, Object> state) {
@@ -484,6 +487,12 @@ class PointWriter {
                     }
                 }
             }
+        } catch (StatusRuntimeException e) {
+            Status.Code code = e.getStatus().getCode();
+            if (code == Status.Code.UNAVAILABLE || code == Status.Code.DEADLINE_EXCEEDED) {
+                throw e;
+            }
+            logger.warn("Could not seed array state for '" + basePath + "' from Factry: " + e.getMessage());
         } catch (Exception e) {
             logger.warn("Could not seed array state for '" + basePath + "' from Factry: " + e.getMessage());
         }
