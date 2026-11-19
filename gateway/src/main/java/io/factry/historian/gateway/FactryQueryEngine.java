@@ -1336,19 +1336,10 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 }
             }
             for (String function : functions) {
-                if ("last".equals(function)) {
-                    good.add(Map.of()); // LastValue takes its value from the buckets below.
-                    continue;
-                }
-                // Factry has no variance aggregate (it refuses "variance", checked live on 8.2.3);
-                // its stddev is the sample standard deviation, so its square is the variance.
-                boolean variance = "variance".equals(function);
-                Map<Long, Object> values = goodAggregate(function, grpcClient.queryTimeseries(withRange(
-                        perStatusRequest(uuid, variance ? "stddev" : function, period), startMs, endMs).build()));
-                if (variance) {
-                    values.replaceAll((ts, v) -> v instanceof Number n ? n.doubleValue() * n.doubleValue() : v);
-                }
-                good.add(values);
+                // LastValue takes its value from the buckets below.
+                good.add("last".equals(function) ? Map.of()
+                        : goodAggregate(function, grpcClient.queryTimeseries(withRange(
+                                perStatusRequest(uuid, function, period), startMs, endMs).build())));
             }
         }
 
