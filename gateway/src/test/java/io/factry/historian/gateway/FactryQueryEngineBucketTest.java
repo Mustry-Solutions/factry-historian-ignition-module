@@ -384,4 +384,20 @@ class FactryQueryEngineBucketTest {
         assertEquals(1.0, ((Number) ds.rows.get(0)[1]).doubleValue(), 1e-9, ds::toString);
         assertTrue(ds.qualities.get(0)[1].isGood(), ds::toString);
     }
+
+    @Test
+    void aBucketWithOneSample_hasNoStandardDeviation_andTheOtherBucketsStillDo() throws Exception {
+        // Factry answers such a bucket without a value; it must not fail the whole pen.
+        String u = factry.addMeasurement("default/out", "number");
+        factry.add(u, T0 + 1_000, 5, "Good");
+        factry.add(u, T0 + 11_000, 1, "Good");
+        factry.add(u, T0 + 12_000, 2, "Good");
+        factry.add(u, T0 + 13_000, 3, "Good");
+
+        AverageHistoryQuery.Dataset ds = read(AggregationMode.StdDev);
+
+        assertTrue(ds.qualities.get(0)[1].isBad(), ds::toString);
+        assertEquals(1.0, ((Number) ds.rows.get(1)[1]).doubleValue(), 1e-9, ds::toString);
+        assertTrue(ds.qualities.get(1)[1].isGood(), ds::toString);
+    }
 }

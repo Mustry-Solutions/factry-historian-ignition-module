@@ -258,10 +258,14 @@ class TwaFakeFactry extends FactryGrpcClient {
                         : in.stream().map(Pt::value).max(order).orElseThrow();
             }
             case "stddev": {
-                // Sample standard deviation, as InfluxQL's STDDEV.
+                // Sample standard deviation, as InfluxQL's STDDEV. For one sample Factry 8.2.3
+                // returns the bucket without a value (checked live).
+                if (in.size() < 2) {
+                    return Value.newBuilder().setNullValue(com.google.protobuf.NullValue.NULL_VALUE).build();
+                }
                 double mean = in.stream().mapToDouble(p -> num(p.value())).average().orElseThrow();
                 double ss = in.stream().mapToDouble(p -> Math.pow(num(p.value()) - mean, 2)).sum();
-                return Value.newBuilder().setNumberValue(in.size() > 1 ? Math.sqrt(ss / (in.size() - 1)) : 0).build();
+                return Value.newBuilder().setNumberValue(Math.sqrt(ss / (in.size() - 1))).build();
             }
             case "variance":
                 // Not a Factry aggregate (checked live on 8.2.3, gRPC and REST).
