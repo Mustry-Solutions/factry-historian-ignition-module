@@ -34,7 +34,7 @@ class TokenSecretTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        factry = new FakeFactryServer();
+        factry = new FakeFactryServer(TestTls.LOOPBACK);
         String uuid = factry.addMeasurement("default/a", "number");
         factry.addPoint(uuid, START, 1.0);
         token = jwt(factry.port(), "sig-one");
@@ -168,6 +168,7 @@ class TokenSecretTest {
         JsonObject config = new JsonObject();
         config.add(key, tokenValue);
         config.addProperty("delimiter", "/");
+        config.addProperty("customCaCert", TestTls.caPem());
         return new FactryHistorianExtensionPoint().decode(config);
     }
 

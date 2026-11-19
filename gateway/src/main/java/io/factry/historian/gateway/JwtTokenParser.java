@@ -101,6 +101,15 @@ public final class JwtTokenParser {
         });
     }
 
+    /**
+     * The {@code use-self-signed-certificate} claim: Factry serves its built-in certificate (its
+     * USE_SELF_SIGNED_CERTIFICATE setting). Factry v8.2.3 writes a JSON boolean; a string "true" is
+     * accepted too. Absent means false.
+     */
+    public static boolean usesFactryCertificate(JsonObject payload) {
+        return getStringField(payload, "use-self-signed-certificate").map(Boolean::parseBoolean).orElse(false);
+    }
+
     private static Optional<String> getStringField(JsonObject obj, String field) {
         if (obj != null && obj.has(field) && !obj.get(field).isJsonNull()) {
             String value = obj.get(field).getAsString();

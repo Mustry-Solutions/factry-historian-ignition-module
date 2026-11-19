@@ -74,7 +74,16 @@ public class FactryGrpcClient {
     private static final long READ_DEADLINE_SECONDS = ModuleProperties.getReadDeadlineSeconds();
     private static final long CALL_DEADLINE_SECONDS = ModuleProperties.getCallDeadlineSeconds();
     private static final long SHUTDOWN_GRACE_SECONDS = ModuleProperties.getShutdownGraceSeconds();
-    private static final String CA_CERT_RESOURCE = "factry-historian-ca.crt";
+    /**
+     * Factry's own root CA ("FACTRY BVBA CA", valid to 2041), which signs the certificate every
+     * Factry Historian serves when it uses its built-in one. That certificate and its private key
+     * are inside every Factry server binary, so checking it shows the server is a Factry with the
+     * built-in certificate, not that it is yours. It still stops a man in the middle that offers
+     * any other certificate, which skipping the check does not.
+     */
+    private static final String FACTRY_CA_RESOURCE = "factry-root-ca.crt";
+    /** The only name in Factry's built-in certificate (besides historian.factry.dev). */
+    static final String FACTRY_CERTIFICATE_NAME = "historian.factry.local";
     private static final String FRAME_LOGGER = "io.grpc.netty.shaded.io.grpc.netty.NettyClientHandler";
 
     /**
@@ -95,13 +104,47 @@ public class FactryGrpcClient {
     private volatile boolean connected = true;
     private final AtomicBoolean writeGzip = new AtomicBoolean(WRITE_GZIP);
     private volatile String collectorUUID;
+    /** The CA of Factry's built-in certificate; another one in tests. */
+    private final List<X509Certificate> factryCa;
 
+    /** Plain text ({@code useTls} false) is for tests: Factry's gRPC port always uses TLS. */
     public FactryGrpcClient(String host, int port, String collectorUUID, String token,
                             boolean useTls, boolean skipTlsVerification, String customCaCert) {
+        this(host, port, collectorUUID, token, useTls, skipTlsVerification, customCaCert, false);
+    }
+
+    /**
+     * @param factryCertificate the token says Factry uses its built-in certificate
+     *                          ({@code use-self-signed-certificate}); then, without a custom CA,
+     *                          the certificate is checked against Factry's CA and its name
+     *                          {@value #FACTRY_CERTIFICATE_NAME}, whatever host the client connects to
+     */
+    public FactryGrpcClient(String host, int port, String collectorUUID, String token,
+                            boolean useTls, boolean skipTlsVerification, String customCaCert,
+                            boolean factryCertificate) {
+        this(host, port, collectorUUID, token, useTls, skipTlsVerification, customCaCert, factryCertificate,
+                bundledFactryCa());
+    }
+
+    FactryGrpcClient(String host, int port, String collectorUUID, String token,
+                     boolean useTls, boolean skipTlsVerification, String customCaCert,
+                     boolean factryCertificate, List<X509Certificate> factryCa) {
+        this.factryCa = factryCa;
         keepTokenOutOfFrameLog();
-        buildChannel(host, port, collectorUUID, token, useTls, skipTlsVerification, customCaCert);
+        buildChannel(host, port, collectorUUID, token, useTls, skipTlsVerification, customCaCert, factryCertificate);
         logger.info("gRPC client created ({}), target={}:{}, collectorUUID={}",
-                tlsLabel(useTls, skipTlsVerification), host, port, collectorUUID);
+                tlsLabel(useTls, skipTlsVerification, customCaCert, factryCertificate), host, port, collectorUUID);
+    }
+
+    static List<X509Certificate> bundledFactryCa() {
+        try (InputStream in = FactryGrpcClient.class.getClassLoader().getResourceAsStream(FACTRY_CA_RESOURCE)) {
+            if (in == null) {
+                throw new IllegalStateException("Factry CA certificate '" + FACTRY_CA_RESOURCE + "' missing from the module");
+            }
+            return parseCaCertificates(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("Cannot read Factry CA certificate '" + FACTRY_CA_RESOURCE + "'", e);
+        }
     }
 
     /**
@@ -355,16 +398,24 @@ public class FactryGrpcClient {
      */
     public void reconfigure(String host, int port, String collectorUUID, String token,
                             boolean useTls, boolean skipTlsVerification, String customCaCert) {
+        reconfigure(host, port, collectorUUID, token, useTls, skipTlsVerification, customCaCert, false);
+    }
+
+    /** See {@link #FactryGrpcClient(String, int, String, String, boolean, boolean, String, boolean)}. */
+    public void reconfigure(String host, int port, String collectorUUID, String token,
+                            boolean useTls, boolean skipTlsVerification, String customCaCert,
+                            boolean factryCertificate) {
         logger.info("Reconfiguring gRPC client: {}:{}", host, port);
         lockChannel();
         try {
             shutdownChannel();
-            buildChannel(host, port, collectorUUID, token, useTls, skipTlsVerification, customCaCert);
+            buildChannel(host, port, collectorUUID, token, useTls, skipTlsVerification, customCaCert,
+                    factryCertificate);
             // New settings may point at another Factry, or the same one after an upgrade, so
             // gzip is tried again instead of staying off for the life of the client.
             writeGzip.set(WRITE_GZIP);
             logger.info("gRPC client reconfigured ({}), target={}:{}, collectorUUID={}",
-                    tlsLabel(useTls, skipTlsVerification), host, port, collectorUUID);
+                    tlsLabel(useTls, skipTlsVerification, customCaCert, factryCertificate), host, port, collectorUUID);
         } finally {
             channelLock.writeLock().unlock();
         }
@@ -375,43 +426,33 @@ public class FactryGrpcClient {
     // (seen on v8.2.3 with pings every 30 s and every 5 minutes). Deadlines on every call and
     // enterIdle() in testConnection() deal with connections the network dropped.
     private void buildChannel(String host, int port, String collectorUUID, String token,
-                              boolean useTls, boolean skipTlsVerification, String customCaCert) {
-        if (useTls) {
+                              boolean useTls, boolean skipTlsVerification, String customCaCert,
+                              boolean factryCertificate) {
+        NettyChannelBuilder builder = NettyChannelBuilder.forAddress(host, port)
+                .maxInboundMessageSize(MAX_INBOUND_MESSAGE_BYTES);
+        if (!useTls) {
+            builder.usePlaintext();
+        } else {
             try {
                 var sslBuilder = GrpcSslContexts.forClient();
                 if (skipTlsVerification) {
                     sslBuilder.trustManager(InsecureTrustManagerFactory.INSTANCE);
+                } else if (hasCustomCa(customCaCert) || !factryCertificate) {
+                    // A custom CA means Factry, or a proxy in front of it, has a certificate of its
+                    // own, so it is checked against the host the client connects to.
+                    sslBuilder.trustManager(buildCombinedTrustManagerFactory(null, customCaCert));
                 } else {
-                    // Trust the system/public CAs AND the bundled Factry CA, plus any custom CA
-                    // the user supplied per-profile. This lets publicly-signed (e.g. Let's Encrypt),
-                    // Factry-signed, and internal/enterprise-CA or self-signed certificates all
-                    // verify without having to disable verification entirely.
-                    try (InputStream caCert = getClass().getClassLoader().getResourceAsStream(CA_CERT_RESOURCE)) {
-                        if (caCert == null) {
-                            logger.warn("Bundled CA certificate '{}' not found; using system CAs only", CA_CERT_RESOURCE);
-                        }
-                        boolean hasCustomCa = customCaCert != null && !customCaCert.isBlank();
-                        logger.info("TLS verification using system CAs plus bundled Factry CA{}",
-                                hasCustomCa ? " plus a custom CA certificate" : "");
-                        sslBuilder.trustManager(buildCombinedTrustManagerFactory(caCert, customCaCert));
-                    } catch (Exception e) {
-                        logger.warn("Failed to build combined trust store ({}), using the system default trust store",
-                                e.getMessage());
-                    }
+                    sslBuilder.trustManager(factryCa.toArray(new X509Certificate[0]));
+                    builder.overrideAuthority(FACTRY_CERTIFICATE_NAME);
                 }
-                this.channel = NettyChannelBuilder.forAddress(host, port)
-                        .sslContext(sslBuilder.build())
-                        .maxInboundMessageSize(MAX_INBOUND_MESSAGE_BYTES)
-                        .build();
-            } catch (SSLException e) {
+                builder.sslContext(sslBuilder.build());
+            } catch (IllegalArgumentException e) {
+                throw e;
+            } catch (Exception e) {
                 throw new RuntimeException("Failed to create TLS-enabled gRPC channel", e);
             }
-        } else {
-            this.channel = NettyChannelBuilder.forAddress(host, port)
-                    .usePlaintext()
-                    .maxInboundMessageSize(MAX_INBOUND_MESSAGE_BYTES)
-                    .build();
         }
+        this.channel = builder.build();
 
         this.collectorUUID = collectorUUID;
         Metadata headers = new Metadata();
@@ -436,22 +477,14 @@ public class FactryGrpcClient {
     };
 
     /**
-     * Build a TrustManagerFactory that trusts the JVM's default (system/public) CAs plus the
-     * bundled Factry CA. Convenience overload with no user-supplied custom CA.
-     */
-    static TrustManagerFactory buildCombinedTrustManagerFactory(InputStream extraCaCerts) throws Exception {
-        return buildCombinedTrustManagerFactory(extraCaCerts, null);
-    }
-
-    /**
      * Build a TrustManagerFactory that trusts the JVM's default (system/public) CAs, the given
-     * bundled CA certificate(s), and any user-supplied custom CA certificate(s) in PEM form.
+     * extra CA certificate(s), and any user-supplied custom CA certificate(s) in PEM form.
      * This lets the module verify servers using a publicly-signed certificate (e.g. Let's
-     * Encrypt), a Factry-signed one, or one issued by a customer's internal/enterprise CA (or a
-     * self-signed certificate pasted directly), without having to turn off verification.
+     * Encrypt), or one issued by a customer's internal/enterprise CA (or a self-signed
+     * certificate pasted directly), without having to turn off verification.
      *
      * <p>Trust is purely additive: the custom CA is added alongside, never in place of, the
-     * system and bundled CAs. If {@code extraCaCerts} is null only the system CAs and any custom
+     * system CAs. If {@code extraCaCerts} is null only the system CAs and any custom
      * CA are trusted; if {@code customCaCertPem} is null/blank no custom CA is added.
      *
      * @throws IllegalArgumentException if {@code customCaCertPem} is non-blank but not valid PEM
@@ -474,7 +507,7 @@ public class FactryGrpcClient {
             }
         }
 
-        // 2. Extra (bundled Factry) CA certificate(s).
+        // 2. Extra CA certificate(s).
         if (extraCaCerts != null) {
             CertificateFactory cf = CertificateFactory.getInstance("X.509");
             for (Certificate cert : cf.generateCertificates(extraCaCerts)) {
@@ -522,9 +555,48 @@ public class FactryGrpcClient {
         return result;
     }
 
-    private static String tlsLabel(boolean useTls, boolean skipTlsVerification) {
+    private static boolean hasCustomCa(String customCaCert) {
+        return customCaCert != null && !customCaCert.isBlank();
+    }
+
+    /** Which certificate check the client makes, for the log. */
+    static String tlsLabel(boolean useTls, boolean skipTlsVerification, String customCaCert,
+                           boolean factryCertificate) {
         if (!useTls) return "plaintext";
-        return skipTlsVerification ? "TLS (insecure)" : "TLS";
+        if (skipTlsVerification) return "TLS, certificate not checked";
+        if (hasCustomCa(customCaCert)) return "TLS, certificate checked against the system CAs and the custom CA";
+        if (factryCertificate) return "TLS, Factry's built-in certificate checked against Factry's CA as "
+                + FACTRY_CERTIFICATE_NAME;
+        return "TLS, certificate checked against the system CAs";
+    }
+
+    /**
+     * What to change when the connection check fails on TLS, from the cause gRPC reports, or empty.
+     * Ends without a space; starts with one when not empty.
+     */
+    static String tlsHint(Status status) {
+        String causes = causes(status);
+        if (causes.contains("not an SSL/TLS record") || causes.contains("NotSslRecordException")) {
+            return " The server does not answer with TLS. Factry's gRPC port always uses TLS: check Host Override"
+                    + " and Port Override, or the grpc-port in the token.";
+        }
+        if (causes.contains("No subject alternative") || causes.contains("No name matching")) {
+            return " Factry's certificate does not name the host the module connects to. Set Host Override to a"
+                    + " name in the certificate, or give Factry a certificate for this host.";
+        }
+        if (causes.contains("PKIX path") || causes.contains("unable to find valid certification path")) {
+            return " Factry's certificate is not signed by a CA the module trusts. If Factry, or a proxy in front"
+                    + " of it, has a certificate of its own, paste the CA that signed it in Custom CA Certificate.";
+        }
+        return "";
+    }
+
+    private static String causes(Status status) {
+        StringBuilder sb = new StringBuilder(String.valueOf(status.getDescription()));
+        for (Throwable t = status.getCause(); t != null && sb.length() < 10_000; t = t.getCause()) {
+            sb.append(' ').append(t.getClass().getName()).append(": ").append(t.getMessage());
+        }
+        return sb.toString();
     }
 
     public void shutdown() {

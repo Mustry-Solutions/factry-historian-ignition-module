@@ -229,8 +229,8 @@ final class WriteHealth {
         }
 
         String details(Status status) {
-            return String.format(details, describe(status)) + " Store and forward keeps the data until it can"
-                    + " be stored.";
+            return String.format(details, describe(status)) + FactryGrpcClient.tlsHint(status)
+                    + " Store and forward keeps the data until it can be stored.";
         }
     }
 

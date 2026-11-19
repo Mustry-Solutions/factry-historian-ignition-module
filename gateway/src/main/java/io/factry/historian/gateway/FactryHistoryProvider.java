@@ -69,13 +69,14 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         this.writeHealth = new WriteHealth(historianName);
 
         this.grpcClient = new FactryGrpcClient(
-                settings.getGrpcHost(),
-                settings.getGrpcPort(),
+                settings.getHost(),
+                settings.getPort(),
                 settings.getCollectorUUID(),
                 token,
-                settings.isUseTls(),
+                true, // Factry's gRPC port always uses TLS
                 settings.isSkipTlsVerification(),
-                settings.getCustomCaCert()
+                settings.getCustomCaCert(),
+                settings.usesFactryCertificate()
         );
         this.measurementCache = new MeasurementCache();
 
@@ -84,7 +85,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
                 writeHealth);
 
         logger.info("Factry Historian created: name={}, grpcTarget={}:{}, collectorUUID={}",
-                historianName, settings.getGrpcHost(), settings.getGrpcPort(), settings.getCollectorUUID());
+                historianName, settings.getHost(), settings.getPort(), settings.getCollectorUUID());
     }
 
     public FactryHistoryProvider(GatewayContext context, String historianName) {
@@ -258,13 +259,14 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
 
             // Reconfigure the gRPC client (shuts down old channel, creates new one)
             grpcClient.reconfigure(
-                    newSettings.getGrpcHost(),
-                    newSettings.getGrpcPort(),
+                    newSettings.getHost(),
+                    newSettings.getPort(),
                     newSettings.getCollectorUUID(),
                     token,
-                    newSettings.isUseTls(),
+                    true, // Factry's gRPC port always uses TLS
                     newSettings.isSkipTlsVerification(),
-                    newSettings.getCustomCaCert()
+                    newSettings.getCustomCaCert(),
+                    newSettings.usesFactryCertificate()
             );
             this.activeToken = token;
             // Judge and log refusals of writes afresh; before the refresh, which can throw.

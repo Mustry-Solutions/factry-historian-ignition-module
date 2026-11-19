@@ -69,10 +69,22 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
     private final Server server;
 
     FakeFactryServer() throws Exception {
+        this(null);
+    }
+
+    /**
+     * @param certificate null for plain text, else the name of a server certificate in
+     *                    {@link TestTls}, as Factry's gRPC port always uses TLS
+     */
+    FakeFactryServer(String certificate) throws Exception {
         // Loopback only: forPort(0) binds the wildcard address, and macOS can hand out a port that
         // another process already holds on 127.0.0.1, so the client would talk to that process.
-        server = NettyServerBuilder.forAddress(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0))
-                .addService(ServerInterceptors.intercept(this, recordAuthorization())).build().start();
+        NettyServerBuilder builder = NettyServerBuilder.forAddress(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0))
+                .addService(ServerInterceptors.intercept(this, recordAuthorization()));
+        if (certificate != null) {
+            builder.sslContext(TestTls.server(certificate));
+        }
+        server = builder.build().start();
     }
 
     private ServerInterceptor recordAuthorization() {
@@ -132,6 +144,13 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
     @Override
     public void getCollectors(GetCollectorsRequest request, StreamObserver<Collectors> observer) {
         observer.onNext(Collectors.getDefaultInstance());
+        observer.onCompleted();
+    }
+
+    /** The connection check. */
+    @Override
+    public void getCollector(com.google.protobuf.Empty request, StreamObserver<io.factry.historian.proto.Collector> observer) {
+        observer.onNext(io.factry.historian.proto.Collector.newBuilder().setUuid("collector").build());
         observer.onCompleted();
     }
 

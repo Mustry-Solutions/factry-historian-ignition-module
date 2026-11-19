@@ -136,7 +136,8 @@ The single point of contact with Factry. Wraps a gRPC `ManagedChannel` and expos
 | `testConnection()` | `GetCollector` (5 s deadline) | Connection and token check; not `GetMeasurements`, which is too slow on large sites |
 
 **Key design points:**
-- **TLS modes**: plain text, TLS with bundled CA cert, TLS with insecure trust (skip verification), fallback to system trust store
+- **TLS**: always on; Factry's gRPC port has no plain text mode (plain text remains in the client constructor for tests only). The certificate check, in order: Skip TLS Verification (none); a Custom CA (system CAs plus the custom CA, name checked against the host); the token's `use-self-signed-certificate` claim (only Factry's root CA, bundled as `factry-root-ca.crt`, name checked as `historian.factry.local` with `overrideAuthority`, whatever host is used); otherwise the system CAs against the host. Factry's built-in certificate and key are inside every Factry server binary, so that check proves "a Factry with the built-in certificate", not "your Factry"; it still stops a man in the middle with any other certificate, which skipping does not. For real verification give Factry (or a proxy in front of it) its own certificate and paste its CA. The old bundled `factry-historian-ca.crt` was a 2022 leaf certificate that matched no current Factry; it is gone
+- **Connection hints**: a failed connection check that is a TLS problem adds what to change to the status details and the WARN (`FactryGrpcClient.tlsHint`): no TLS answer (check Host/Port Override), a certificate that does not name the host (Host Override), a certificate from an unknown CA (Custom CA)
 - **Connection tracking**: `connected` flag set to `false` on `createPoints()` failure, checked by `StorageEngine.isEngineUnavailable()` so S&F can buffer without hitting the network
 - **Deadlines**: every call has one, so a Factry that never answers cannot hang the module: 3 s for store lookups, 3 s plus 1 ms per point or measurement (at most 30 s) for writes and measurement creation, 30 s for history queries, each cache refresh page and the asset fetches, 10 s for the other small calls (configurable via `ModuleProperties`). The connection test has a fixed 5 s
 - **Dead connections**: no keepalive pings, because Factry closes a connection that pings without a call running (`too_many_pings`). When `testConnection()` times out, the channel drops its connection with `enterIdle()` so the next call opens a new one
@@ -181,7 +182,8 @@ A Java `record` that defines the **Gateway UI form** for creating/editing a hist
 | Field | Category | Type | Default |
 |-------|----------|------|---------|
 | `collectorToken` | Connection | secret (Embedded or Referenced) | *(none)* |
-| `useTls` | Connection | checkbox | `true` |
+| `hostOverride` | Connection | text | *(empty: the token's host)* |
+| `portOverride` | Connection | number | *(empty: the token's grpc-port)* |
 | `skipTlsVerification` | Connection | checkbox | `false` |
 | `batchSize` | Advanced | number | `100` |
 | `batchIntervalMs` | Advanced | number | `5000` |
@@ -200,7 +202,8 @@ The `toSettings()` / `fromSettings()` methods convert between the UI record and 
 
 Internal settings object implementing `HistorianSettings`. Holds all configuration plus derived fields:
 
-- `applyTokenDefaults(token)`: cleans the token with `JwtTokenParser.normalize()`, parses the JWT to extract `grpcHost`, `grpcPort`, `collectorUUID`, and returns the cleaned token, which the provider gives to the gRPC client
+- `applyTokenDefaults(token)`: cleans the token with `JwtTokenParser.normalize()`, parses the JWT for the collector, host, port and certificate claim, and returns the cleaned token, which the provider gives to the gRPC client. The host and port used (`getHost()`, `getPort()`) are the overrides when set, else the token's; they are transient, so a resolved value never turns into a stored override, and a new token moves them. It logs once where it connects, whether each value came from the token or an override, and the certificate check
+- Host and port of profiles saved before the overrides (`grpcHost`, `grpcPort`) are moved into `hostOverride` and `portOverride` when the profile is decoded, so they show in the form and the next save stores the new keys. `localhost` and `9876` were the defaults written with every save, so they count as not set. A stored `useTls` is ignored and dropped at the next save
 - `validate()` — checks that collector ID, host, port (1-65535), batch size (>0), batch interval (>0) are valid
 
 This is what the engines and gRPC client receive. The separation from `FactryHistorianConfig` allows internal fields (like parsed JWT claims) that aren't shown in the UI.
