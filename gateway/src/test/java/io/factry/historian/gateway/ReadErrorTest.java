@@ -224,6 +224,15 @@ class ReadErrorTest {
     }
 
     @Test
+    void rawReadOverThePointCapIsAnError() throws Exception {
+        // Part of the range would show a cut-short pen as a flat line; the chart shows the reason.
+        startEngine(true);
+        engine.maxRawPoints = 5;
+
+        assertReadFailed(raw("a", "b"), "query.raw.max.points");
+    }
+
+    @Test
     void unknownTagIsStillNotFoundAndNotAnError() throws Exception {
         startEngine(true);
 
