@@ -48,6 +48,8 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
     volatile int maxAnswerBytes = Integer.MAX_VALUE;
     /** QueryTimeseries calls that include one of these measurements fail. */
     final java.util.Set<String> failingMeasurements = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    /** When set, every QueryTimeseries call fails with this status, like a Factry that is down or hangs. */
+    volatile Status queryFailure = null;
     /** Answers every page from the start, like a Factry that does not support offset. */
     volatile boolean ignoreOffset = false;
 
@@ -109,6 +111,10 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
     public void queryTimeseries(QueryTimeseriesRequest request,
                                 StreamObserver<QueryTimeseriesResponse> observer) {
         queries.add(request);
+        if (queryFailure != null) {
+            observer.onError(queryFailure.asRuntimeException());
+            return;
+        }
         if (request.getMeasurementUUIDsList().stream().anyMatch(failingMeasurements::contains)) {
             observer.onError(Status.INTERNAL.withDescription("query failed").asRuntimeException());
             return;

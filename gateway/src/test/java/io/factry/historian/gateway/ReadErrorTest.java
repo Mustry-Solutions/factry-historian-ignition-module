@@ -4,6 +4,7 @@ import com.inductiveautomation.ignition.common.FillMode;
 import com.inductiveautomation.ignition.common.model.values.QualityCode;
 import com.inductiveautomation.ignition.common.sqltags.history.AggregationMode;
 import io.factry.historian.gateway.IgnitionHistoryQuery.Dataset;
+import io.grpc.Status;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -194,6 +195,32 @@ class ReadErrorTest {
 
         assertReadFailed(raw("a", "b"), "INTERNAL");
         assertReadFailed(raw("a"), "INTERNAL");
+    }
+
+    @Test
+    void factryTimingOutStopsAfterTheFirstCall() throws Exception {
+        // A Factry that hangs answers every call with DEADLINE_EXCEEDED after the read deadline.
+        // Each call more would add a full deadline to the wait.
+        String[] tags = new String[10];
+        for (int i = 0; i < tags.length; i++) {
+            tags[i] = "p" + i;
+            factry.addMeasurement("default/p" + i, "number");
+        }
+        startEngine(true);
+        factry.queryFailure = Status.DEADLINE_EXCEEDED;
+
+        assertReadFailed(IgnitionHistoryQuery.wide(engine, START, START + FIVE_MINUTES, 5, AggregationMode.MinMax,
+                tags), "DEADLINE_EXCEEDED");
+        assertEquals(1, factry.queries.size(), "calls after Factry timed out");
+
+        factry.queries.clear();
+        assertReadFailed(IgnitionHistoryQuery.wide(engine, START, START + FIVE_MINUTES, 5, AggregationMode.MinMax,
+                FillMode.DERIVED, tags), "DEADLINE_EXCEEDED");
+        assertEquals(1, factry.queries.size(), "calls after Factry timed out, one query per pen");
+
+        factry.queries.clear();
+        assertReadFailed(raw(tags), "DEADLINE_EXCEEDED");
+        assertEquals(1, factry.queries.size(), "raw calls after Factry timed out");
     }
 
     @Test

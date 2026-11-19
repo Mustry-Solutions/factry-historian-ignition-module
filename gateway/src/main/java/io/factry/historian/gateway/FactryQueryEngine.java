@@ -756,6 +756,9 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     }
                     pointsByKey.put(key, pts);
                 } catch (Exception e) {
+                    // Factry itself cannot be read: the next pen would wait for the same timeout,
+                    // so fail the read now. With FillMode.DERIVED each pen is its own query, and
+                    // this exception also ends Ignition's loop over those queries.
                     if (failsEveryPen(e)) {
                         throw e;
                     }
