@@ -103,6 +103,33 @@ class TlsConnectionTest {
         assertTrue(FactryGrpcClient.tlsHint(check).contains("does not answer with TLS"), FactryGrpcClient.tlsHint(check));
     }
 
+    /**
+     * Netty's NotSslRecordException names the channel pipeline and dumps the reply in hex: over a
+     * thousand characters in front of the hint, unreadable in the status tooltip.
+     */
+    @Test
+    void notTlsStatusIsShortWithTheHint() throws Exception {
+        FakeFactryServer plain = server(null);
+        Status check = client(plain, false, TestTls.caPem()).checkConnection();
+
+        String details = WriteHealth.checkFailure(check).details(check);
+
+        assertTrue(details.contains("UNAVAILABLE"), details);
+        assertTrue(details.contains("not an SSL/TLS record"), details);
+        assertTrue(details.contains("The server does not answer with TLS"), details);
+        assertFalse(details.contains("Channel Pipeline") || details.contains("SslHandler"), details);
+        assertTrue(details.length() < 500, details.length() + ": " + details);
+    }
+
+    /** Any other long cause is cut, so no Netty text can blow up the status either. */
+    @Test
+    void longCauseIsCut() {
+        Status status = Status.UNAVAILABLE.withDescription("io exception")
+                .withCause(new RuntimeException("x".repeat(5_000)));
+
+        assertTrue(WriteHealth.describe(status).length() <= 250, WriteHealth.describe(status));
+    }
+
     private FakeFactryServer server(String certificate) throws Exception {
         FakeFactryServer server = new FakeFactryServer(certificate);
         open.add(server);
