@@ -282,6 +282,139 @@ class SitesTest {
         factry.lookups = 0;
 
         assertEquals(33.0, read("histprov:Factry:/tag:[site_b]default/Late/Flow"));
-        assertEquals(1, factry.lookups, "one page, not every page up to the bound");
+        long sitePages = factry.filterRequests.stream()
+                .filter(r -> r.hasKeyword() && r.getDatabaseUUIDsList().equals(List.of("db-b"))).count();
+        assertEquals(1, sitePages, "one page in Site B's database, not every page up to the bound");
+    }
+
+    /** A cache and engine over {@code other}, with this test's answers to reads. */
+    private FactryQueryEngine engineOver(FakeFactry other) {
+        MeasurementCache fresh = new MeasurementCache(MeasurementCacheTest.NO_WAIT);
+        fresh.refresh(other);
+        other.respond = this::answer;
+        FactryHistorianSettings settings = new FactryHistorianSettings();
+        settings.setDelimiter("/");
+        return new FactryQueryEngine(FakeFactryServer.gatewayContext(), "Factry", settings, other, fresh,
+                new HistorianMetrics());
+    }
+
+    private static Object readWith(FactryQueryEngine e, String path) throws Exception {
+        IgnitionHistoryQuery.Dataset ds = IgnitionHistoryQuery.rawPaths(e, T0 - 60_000, T0, path);
+        return ds.rows.stream().map(row -> row[1]).filter(v -> v != null).findFirst().orElse(null);
+    }
+
+    private static List<String> browseIds(FactryQueryEngine e, String path) {
+        QualifiedPath root = QualifiedPath.parseSafe(path);
+        RootBrowsePublisher publisher = new RootBrowsePublisher(root);
+        e.doBrowse(root, null, publisher);
+        return publisher.getResults().getResults().stream()
+                .map(r -> String.valueOf(r.getPath().getPathComponent("tag"))).sorted().toList();
+    }
+
+    @Test
+    void theDefaultDatabaseIsTheOwnSiteEvenWhenTheOnlyMeasurementIsElsewhere() throws Exception {
+        // This collector's only measurement was made by hand in Site B's database.
+        FakeFactry other = new FakeFactry();
+        try {
+            other.databases.put("db-b", "site_b");
+            other.add("default/Opc/Temp", "opc-temp", OPC, "Active");
+            other.database = "db-b";
+            other.add("default/Stray/Level", "x-only");
+            other.add("default/OnlyB/Flow", "b-only", SITE_B, "Active");
+            other.defaultDatabase = FakeFactry.DB;
+            FactryQueryEngine e = engineOver(other);
+
+            assertNull(readWith(e, "sys:siteA:/prov:default:/tag:OnlyB/Flow"), "not Site B's data marked Good");
+            assertEquals(5.0, readWith(e, "sys:siteA:/prov:default:/tag:Opc/Temp"));
+            assertEquals(9.0, readWith(e, "sys:siteA:/prov:default:/tag:Stray/Level"));
+        } finally {
+            other.shutdown();
+        }
+    }
+
+    @Test
+    void withOneDatabaseAMeasurementInNoListedDatabaseStillReadsAndBrowses() throws Exception {
+        FakeFactry other = new FakeFactry();
+        try {
+            other.add("default/Line/Own", "a-own");
+            other.database = "db-unlisted";
+            other.add("default/Line/Calc", "x-only", OPC, "Active");
+            FactryQueryEngine e = engineOver(other);
+
+            assertEquals(9.0, readWith(e, "sys:siteA:/prov:default:/tag:Line/Calc"));
+            assertEquals(List.of("default/Line/Calc"), browseIds(e,
+                    "histprov:Factry:/folder:Measurements:/folder:opc-collector:/folder:default:/folder:Line"));
+        } finally {
+            other.shutdown();
+        }
+    }
+
+    @Test
+    void anotherCollectorsSameNameInTwoDatabasesIsBrowsableTwice() {
+        factry.databases.put("db-c", "site_c");
+        factry.database = "db-c";
+        factry.add("default/OnlyB/Flow", "x-only", SITE_B, "Active");
+        factry.database = FakeFactry.DB;
+        cache.refresh(factry);
+
+        assertEquals(List.of("[site_b]default/OnlyB/Flow", "[site_c]default/OnlyB/Flow"), browseIds(engine,
+                "histprov:Factry:/folder:Measurements:/folder:collector-b:/folder:default:/folder:OnlyB"));
+    }
+
+    @Test
+    void aRealNameThatLooksQualifiedWinsOverAnotherSitesKey() throws Exception {
+        factry.add("[site_b]default/OnlyB/Flow", "a-own");
+        cache.refresh(factry);
+
+        assertEquals(3.0, read("histprov:Factry:/tag:[site_b]default/OnlyB/Flow"));
+    }
+
+    @Test
+    void aMissedRealNameThatLooksQualifiedIsLookedUpLiterallyFirst() throws Exception {
+        // Made after the last refresh, and Site B's measurement is not cached either: both miss.
+        factry.add("[site_b]default/OnlyB/Flow", "a-own");
+        cache.evictByUUID("b-only");
+
+        assertEquals(3.0, read("histprov:Factry:/tag:[site_b]default/OnlyB/Flow"));
+    }
+
+    @Test
+    void measurementsInAnUnlistedDatabaseSurviveATotalOfZero() throws Exception {
+        factry.database = "db-hidden";
+        factry.add("default/Hidden/Flow", "x-only");
+        factry.database = FakeFactry.DB;
+        cache.refresh(factry);
+        factry.totalOverride = 0L;
+        cache.refresh(factry);
+
+        assertEquals(9.0, read("sys:siteA:/prov:default:/tag:Hidden/Flow"));
+        assertEquals("x-only", cache.writeUUID("default/Hidden/Flow", FakeFactry.OWN));
+    }
+
+    @Test
+    void aFactryThatDoesNotListItsDatabasesIsReportedOnce() {
+        factry.databasesFailure = io.grpc.Status.UNIMPLEMENTED;
+        try (LogCapture log = new LogCapture(MeasurementCache.class.getName(), ch.qos.logback.classic.Level.INFO)) {
+            cache.refresh(factry);
+            cache.refresh(factry);
+            cache.refresh(factry);
+
+            assertEquals(1, log.events().stream()
+                    .filter(ev -> ev.getLevel() == ch.qos.logback.classic.Level.WARN
+                            && ev.getFormattedMessage().contains("time-series databases")).count());
+        }
+    }
+
+    @Test
+    void withoutADatabaseListingAReadPrefersThisCollectorsMeasurementOnALaterPage() throws Exception {
+        factry.databasesFailure = io.grpc.Status.UNIMPLEMENTED;
+        cache.refresh(factry);
+        factry.add("default/Pref/X", "b-only", SITE_B, "Active");
+        for (int i = 0; i < 55; i++) {
+            factry.add("default/Pref/X" + i, "pref-" + i, SITE_B, "Active");
+        }
+        factry.add("default/Pref/X", "x-only");
+
+        assertEquals(9.0, read("sys:siteA:/prov:default:/tag:Pref/X"), "this collector's, not Site B's");
     }
 }

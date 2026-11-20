@@ -292,6 +292,34 @@ public class FactryGrpcClient {
         }
     }
 
+    /**
+     * The UUID of this collector's default time-series database, from Factry's REST API (gRPC does
+     * not give it), or null when that cannot be asked or Factry does not say. Never throws.
+     */
+    public String getDefaultDatabaseUUID() {
+        RestTarget target = restTarget;
+        if (target == null) {
+            return null;
+        }
+        try {
+            return FactryRestClient.defaultDatabaseUUID(target.host(), target.token(), target.useTls(),
+                    target.skipTlsVerification(), target.customCaCert());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (Exception e) {
+            logger.debug("Factry's REST API did not give the default database: {}", e.toString());
+            return null;
+        }
+    }
+
+    /** Where {@link #getDefaultDatabaseUUID} asks: the gRPC host and TLS settings, and the token. */
+    private record RestTarget(String host, String token, boolean useTls, boolean skipTlsVerification,
+                              String customCaCert) {
+    }
+
+    private volatile RestTarget restTarget;
+
     public TimeseriesDatabases getTimeseriesDatabases() {
         logger.debug("Sending GetTimeseriesDatabases");
         channelLock.readLock().lock();
@@ -428,6 +456,7 @@ public class FactryGrpcClient {
         }
 
         this.collectorUUID = collectorUUID;
+        this.restTarget = new RestTarget(host, token, useTls, skipTlsVerification, customCaCert);
         Metadata headers = new Metadata();
         headers.put(COLLECTOR_UUID_KEY, collectorUUID);
         headers.put(AUTHORIZATION_KEY, "Bearer " + token);

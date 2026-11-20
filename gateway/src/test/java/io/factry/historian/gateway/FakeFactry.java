@@ -51,6 +51,12 @@ class FakeFactry extends FactryGrpcClient {
     final Map<String, String> databaseOf = new HashMap<>();
     /** The database of measurements added or created from now on. */
     String database = DB;
+    /** This collector's default database, as Factry's REST API gives it; null when it does not. */
+    String defaultDatabase = null;
+    /** When set, the total a one-row list call without filters answers. */
+    Long totalOverride = null;
+    /** When set, listing the databases fails with this status. */
+    Status databasesFailure = null;
     /** Every list request, in order. */
     final List<GetMeasurementsByFilterRequest> filterRequests = new ArrayList<>();
     /** Every history query, in order. */
@@ -173,9 +179,11 @@ class FakeFactry extends FactryGrpcClient {
         int to = request.getPagination().getLimit() > 0
                 ? (int) Math.min(from + request.getPagination().getLimit(), found.size())
                 : found.size();
+        boolean countOnly = request.getPagination().getLimit() == 1 && !request.hasKeyword()
+                && request.getDatabaseUUIDsCount() == 0 && request.getStatusesCount() == 0;
         return Measurements.newBuilder()
                 .addAllMeasurements(found.subList(from, to))
-                .setTotal(found.size())
+                .setTotal(countOnly && totalOverride != null ? totalOverride : found.size())
                 .build();
     }
 
@@ -221,7 +229,15 @@ class FakeFactry extends FactryGrpcClient {
     }
 
     @Override
+    public String getDefaultDatabaseUUID() {
+        return defaultDatabase;
+    }
+
+    @Override
     public TimeseriesDatabases getTimeseriesDatabases() {
+        if (databasesFailure != null) {
+            throw new StatusRuntimeException(databasesFailure);
+        }
         TimeseriesDatabases.Builder reply = TimeseriesDatabases.newBuilder();
         databases.forEach((uuid, name) -> reply.addTimeseriesDatabases(
                 TimeseriesDatabase.newBuilder().setUuid(uuid).setName(name).setStatus("Active")));

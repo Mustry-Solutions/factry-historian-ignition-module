@@ -170,7 +170,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         // used as the tag node id). The browse name is the stored measurement name
         // transformed by the configured delimiter; toStoredTagPath reverses it.
         Map<String, String> displayToBrowse = new HashMap<>();
-        Map<String, String> qualified = new HashMap<>();
+        List<String[]> qualified = new ArrayList<>();
         for (Measurement m : measurementCache.getAllMeasurements()) {
             // The node id is the measurement's read key, so it reads this measurement and no
             // other Site's with the same name. Not listed while the cache does not know its Site.
@@ -187,18 +187,17 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     : browseName;
             String database = TagPathUtil.database(readKey);
             if (database != null && !readKey.equals(m.getName())) {
-                qualified.put(displayPath, TagPathUtil.toBrowseId(readKey, delimiter) + "\n" + database);
+                qualified.add(new String[] {displayPath, TagPathUtil.toBrowseId(readKey, delimiter), database});
             } else {
                 displayToBrowse.put(displayPath, TagPathUtil.toBrowseId(readKey, delimiter));
             }
         }
-        // A collector with the same name in two databases: the one the bare name does not read
-        // gets its database after its leaf name.
-        qualified.forEach((displayPath, idAndDatabase) -> {
-            String[] parts = idAndDatabase.split("\n", 2);
-            displayToBrowse.put(displayToBrowse.containsKey(displayPath)
-                    ? displayPath + " [" + parts[1] + "]" : displayPath, parts[0]);
-        });
+        // A collector with the same name in two databases: every qualified one whose leaf is
+        // taken gets its database after its leaf name.
+        qualified.sort(java.util.Comparator.comparing((String[] q) -> q[1]));
+        for (String[] q : qualified) {
+            displayToBrowse.put(displayToBrowse.containsKey(q[0]) ? q[0] + " [" + q[2] + "]" : q[0], q[1]);
+        }
         return displayToBrowse;
     }
 
