@@ -97,29 +97,16 @@ class FactryHistorianSettingsTest {
         assertEquals("new.example.com", s.getHost());
         assertEquals(9001, s.getPort());
         assertEquals("", s.getHostOverride());
-        assertNull(s.getPortOverride());
+        assertEquals(0, s.getPortOverride());
     }
 
     @Test
-    void zeroPortOverrideIsStoredAndShownAsEmpty() {
-        // An empty Port Override reaches the module as 0 from the web form; it must read back as empty.
-        FactryHistorianConfig fromForm = new FactryHistorianConfig(null, "", 0, false, "", false, "/");
-        assertNull(FactryHistorianConfig.fromSettings(fromForm.toSettings()).portOverride());
-    }
-
-    @Test
-    void storedZeroPortOverrideIsShownAsEmpty() {
-        FactryHistorianSettings stored = new com.google.gson.Gson().fromJson("{\"portOverride\":0}",
-                FactryHistorianSettings.class);
-        assertNull(FactryHistorianConfig.fromSettings(stored).portOverride());
-    }
-
-    @Test
-    void portOverrideCanBeClearedInTheForm() throws Exception {
-        // Ignition's form schema reads this FIELD-target annotation from the record's field.
-        var nullable = FactryHistorianConfig.class.getDeclaredField("portOverride").getAnnotation(
-                com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.IsNullable.class);
-        assertTrue(nullable != null && nullable.value());
+    void noPortOverrideShowsAsZeroInTheForm() throws Exception {
+        // Ignition's form refuses a cleared number field, so "use the token's port" must be 0, not empty.
+        assertEquals(0, FactryHistorianConfig.fromSettings(new FactryHistorianSettings()).portOverride());
+        var defaultValue = FactryHistorianConfig.class.getDeclaredField("portOverride").getAnnotation(
+                com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.DefaultValue.class);
+        assertEquals("0", defaultValue.value());
     }
 
     @Test

@@ -64,7 +64,7 @@ class FactryHistorianConfigTest {
                 "{\"token\":\"a.b.c\",\"grpcHost\":\"localhost\",\"grpcPort\":9876,\"useTls\":true}"));
 
         assertEquals("", FactryHistorianConfig.fromSettings(settings).hostOverride());
-        assertNull(FactryHistorianConfig.fromSettings(settings).portOverride());
+        assertEquals(0, FactryHistorianConfig.fromSettings(settings).portOverride());
         JsonObject stored = ep.encode(settings).getAsJsonObject();
         assertFalse(stored.has("portOverride") || stored.has("grpcHost") || stored.has("grpcPort"), stored.toString());
     }

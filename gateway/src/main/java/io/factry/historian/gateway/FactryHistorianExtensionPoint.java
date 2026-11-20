@@ -103,7 +103,7 @@ public class FactryHistorianExtensionPoint extends HistorianExtensionPoint<Factr
     protected void validate(FactryHistorianSettings settings, ValidationErrors.Builder errors) {
         Integer port = settings.getPortOverride();
         if (port != null && (port < 0 || port > 65535)) {
-            errors.addFieldMessage("portOverride", "Port Override must be between 1 and 65535, or empty to use the"
+            errors.addFieldMessage("portOverride", "Port Override must be between 1 and 65535, or 0 to use the"
                     + " token's port.");
         }
         try {

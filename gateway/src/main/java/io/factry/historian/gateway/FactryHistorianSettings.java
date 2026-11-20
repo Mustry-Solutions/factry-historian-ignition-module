@@ -76,14 +76,12 @@ public class FactryHistorianSettings implements HistorianSettings {
     }
 
     public Integer getPortOverride() {
-        // A profile saved before the fix below may still hold 0.
-        return isSet(portOverride) ? portOverride : null;
+        // 0, not empty, is "not set" in the form; a profile saved before the overrides holds null.
+        return isSet(portOverride) ? portOverride : 0;
     }
 
     public void setPortOverride(Integer portOverride) {
-        // An empty Port Override reaches here as 0 from the web form; store it as empty so the next edit
-        // shows an empty field instead of "0".
-        this.portOverride = isSet(portOverride) ? portOverride : null;
+        this.portOverride = portOverride;
     }
 
     /** The host the client connects to; set by {@link #applyTokenDefaults(String)}. */

@@ -193,7 +193,7 @@ A Java `record` that defines the **Gateway UI form** for creating/editing a hist
 |-------|----------|------|---------|
 | `collectorToken` | Connection | secret (Embedded or Referenced) | *(none)* |
 | `hostOverride` | Connection | text | *(empty: the token's host)* |
-| `portOverride` | Connection | number | *(empty: the token's grpc-port)* |
+| `portOverride` | Connection | number | `0` (the token's grpc-port) |
 | `skipTlsVerification` | Connection | checkbox | `false` |
 | `batchSize` | Advanced | number | `100` |
 | `batchIntervalMs` | Advanced | number | `5000` |
