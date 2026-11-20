@@ -124,7 +124,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     @Override
     protected void doBrowse(QualifiedPath root, BrowseFilter filter, BrowsePublisher publisher) {
         try {
-            measurementCache.refresh(grpcClient);
+            // From the cache only: the scheduled refresh keeps it current. Reloading every
+            // measurement on each browse step cost a full download per click.
 
             // Extract browse prefix from root (AdaptedQualifiedPath)
             String prefix = extractBrowsePrefix(root);
@@ -995,12 +996,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             int pointCount = 0;
             for (MetadataQueryKey key : options.getQueryKeys()) {
                 String tagPath = toStoredTagPath(key.identifier());
-                Measurement m = measurementCache.getMeasurementByName(tagPath);
-
-                if (m == null) {
-                    measurementCache.refresh(grpcClient);
-                    m = measurementCache.getMeasurementByName(tagPath);
-                }
+                Measurement m = measurementCache.findForRead(tagPath, grpcClient);
 
                 if (m == null) {
                     processor.onKeyFailure(key, QualityCode.Bad_NotFound);
@@ -1719,11 +1715,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
     private Optional<FactryRecord> findNode(String tagPath, QualifiedPath path) {
         // Try measurement
-        Measurement m = measurementCache.getMeasurementByName(tagPath);
-        if (m == null) {
-            measurementCache.refresh(grpcClient);
-            m = measurementCache.getMeasurementByName(tagPath);
-        }
+        Measurement m = measurementCache.findForRead(tagPath, grpcClient);
         if (m != null) {
             Instant createdTime = m.hasCreatedAt()
                     ? Instant.ofEpochSecond(m.getCreatedAt().getSeconds(), m.getCreatedAt().getNanos())
@@ -1745,20 +1737,9 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     }
 
     private String lookupUUID(String tagPath) {
-        // Try measurement
-        String uuid = measurementCache.getUUID(tagPath);
-        if (uuid != null) return uuid;
-
-        // Try asset
-        uuid = measurementCache.getAssetUUID(tagPath);
-        if (uuid != null) return uuid;
-
-        // Refresh and retry
-        measurementCache.refresh(grpcClient);
-        uuid = measurementCache.getUUID(tagPath);
-        if (uuid != null) return uuid;
-        uuid = measurementCache.getAssetUUID(tagPath);
-        return uuid;
+        // findNode resolved the key already, so this is a cache hit or a remembered miss.
+        Measurement m = measurementCache.findForRead(tagPath, grpcClient);
+        return m != null ? m.getUuid() : measurementCache.getAssetUUID(tagPath);
     }
 
     void updateSettings(FactryHistorianSettings newSettings) {

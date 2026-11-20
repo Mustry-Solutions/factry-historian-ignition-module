@@ -268,6 +268,7 @@ Loads tuning values from `factry-historian.properties` (bundled in the .modl). T
 | `grpc.shutdown.grace.seconds` | 3 | How long a settings save or shutdown waits for running calls before it cancels them |
 | `status.cache.ms` | 30000 | How often the connection check runs; it pauses S&F while Factry is unreachable and resumes it when it is back |
 | `measurement.cache.refresh.seconds` | 30 | How often to reload measurements from Factry |
+| `measurement.lookup.miss.seconds` | 60 | How long a read remembers that Factry has no measurement with a name, before it looks the name up again |
 | `query.raw.max.points` | 500000 | Most raw points one query reads over all its pens; a range that holds more fails the read with an error. An aggregated read fails the same way, before it asks Factry, when pens x intervals (twice for MinMax) is more. About 200 bytes of heap per point while the query runs, so about 100 MB per query |
 
 ---
@@ -305,7 +306,7 @@ Extends `AbstractQueryEngine`. Handles all data retrieval from Factry.
 
 **`doQueryRaw(options, processor)`**:
 1. Maps each `RawQueryKey` to stored tag path → measurement UUID (via `lookupUUID`)
-2. `lookupUUID` checks cache, then refreshes from Factry on miss
+2. `lookupUUID` checks the cache; on a miss, one exact-name lookup in Factry (see `lookupUUID` below)
 3. Builds `QueryTimeseriesRequest` with measurement UUIDs and time range, grouped by status
 4. Reads in pages of `limit`/`offset` (Factry applies both per series), halving the page when an answer is too large, and keeps only the first `returnSize` points across all pens when Ignition sets one. With `returnSize`, each page drops the points past the first `returnSize` and stops paging pens whose next points come after them, so a read holds about `returnSize` points plus one page per pen, and the cap counts only the points kept. When Factry refuses a pen (see item 7), the read starts again from the first page without that pen: its points may have decided where the first `returnSize` end and which pens stopped paging. Fails the read when the range holds more than `query.raw.max.points` points over all pens, or when a page starts before the previous one ended, as a Factry that ignores `offset` would answer. Part of a range is never returned: Ignition repeats a pen's last value with Good quality into every row after its data stops, so a pen cut short looks like a flat line. Ignition's own `HistoryWriter` fails the same way at its row limit
 5. Adds per pen the last sample before the start and the first sample at or after the end, at their own times and qualities, as Ignition's Core Historian adds its seed values. A tag stored on change then has a value at the start of a trend, also when it did not change inside the range. Two requests for all pens (`limit 1` grouped by status, `desc` for the one before; Factry applies the limit per measurement and status), none for pens Factry refused, and none after the end when the range ends after now. Left out when the query options carry `NO_BOUND_VALUES` (`queryTagHistory(..., includeBoundingValues=False)`), or `NO_SEED_VALUES` without `YES_BOUND_VALUES`. Ignition 8.3.6 (historian 1.3.6, `HistorianQueryInterface.createQuery`) sets `NO_SEED_VALUES` on every raw read through its legacy path, which `system.tag.queryTagHistory` uses: there the bounds come only with `includeBoundingValues=True` (`YES_BOUND_VALUES`, which wins, as in Ignition's legacy loaders). Ignition 8.3.0 to 8.3.5 (historian 1.3.3) set it only for raw columns in a read that also has aggregated ones, so there plain raw reads (`queryTagHistory` without `includeBoundingValues`, `queryRawPoints`, raw bindings) get the bounds by default, as from the Core Historian on those versions. The Core Historian ignores `YES_BOUND_VALUES` and returns no bounds on that path at all. `system.historian.queryRawPoints` takes the same path (`HistorianManagerImpl.queryDataPoints` turns its options into legacy query parameters), so in 8.3.6 it gets no bounds either, unless a `RawQueryOptions` passed as its first argument carries `YES_BOUND_VALUES`. Only a caller of the query engine itself that sets no option gets them by default. With `returnSize` the value before the start counts as the first point and the one after the end only fits if the cap is not reached. When Factry refuses these reads, the range is returned without them; when Factry itself cannot be read (unavailable, timed out, token refused) the read fails, as for the range. A sample exactly at the end is the value after the end (Factry's end is exclusive, checked live), and comes back once. The read before the start scans from epoch 0, so on a large database it can be the slowest request of the read (the Average path sends the same one). Ignition's wide writer keeps only the first row past the end
@@ -357,14 +358,14 @@ Extends `AbstractQueryEngine`. Handles all data retrieval from Factry.
 - Measurements: parses stored paths into hierarchical sys/prov/tag structure, publishes folders and leaf nodes
 - Assets: splits asset names on "/" to build folder hierarchy
 - Uses `BrowsePublisher` to emit folder and tag nodes
+- Reads the cache only; it never asks Factry. A measurement made by hand or by another collector shows up from the next cache refresh
 
 **`doQueryMetadata(options, processor)`**:
 - Returns measurement metadata: data type, status, name, engineering specs (UOM, hi/lo limits)
 
-**`lookupUUID(tagPath)`**:
-- Cache hit → return
-- Cache miss → `measurementCache.refresh()` → retry
-- Checks both measurements and assets
+**`lookupUUID(tagPath)`** (and `findNode`, `doQueryMetadata`, through `MeasurementCache.findForRead`):
+- Cache hit, or an asset with that name → return
+- Cache miss → one exact-name lookup in Factry (`GetMeasurementsByFilter` with the name as keyword), so a measurement made since the last refresh reads at once. A name Factry does not have is remembered for `measurement.lookup.miss.seconds` (60 s), so a trend of a misspelt or deleted tag does not ask on every poll, and a read resolves its tags once, not once in `findNode` and again in `lookupUUID`. Before, every miss downloaded every measurement of the organisation, twice per read
 
 ---
 
