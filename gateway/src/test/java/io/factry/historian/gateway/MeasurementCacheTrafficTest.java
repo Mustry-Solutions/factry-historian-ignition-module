@@ -108,6 +108,34 @@ class MeasurementCacheTrafficTest {
         assertEquals(1, factry.lookups, "one exact-name lookup per read, not one per step of the read");
     }
 
+    @Test
+    void elementsOfACachedArrayAskFactryNothing() throws Exception {
+        factry.measurements.add(io.factry.historian.proto.Measurement.newBuilder().setName("default/Line/Arr")
+                .setUuid("uuid-arr").setCollectorUUID(FakeFactry.OWN).setStatus("Active").setDatatype("[]number")
+                .build());
+        cache.refresh(factry);
+        factry.fullLoads = 0;
+
+        read("Line/Arr[0]");
+        read("Line/Arr[1]");
+
+        assertEquals(0, factry.lookups, "each element resolves to the cached array, no lookup of 'Arr[i]'");
+        assertEquals(0, factry.fullLoads);
+    }
+
+    @Test
+    void anElementOfANewArrayReadsAtOnce() throws Exception {
+        factry.measurements.add(io.factry.historian.proto.Measurement.newBuilder().setName("default/Line/New")
+                .setUuid("uuid-new").setCollectorUUID(FakeFactry.OWN).setStatus("Active").setDatatype("[]number")
+                .build());
+
+        read("Line/New[0]");
+
+        assertEquals(0, factry.fullLoads);
+        assertEquals(2, factry.lookups, "one for 'New[0]', one for its array 'New'");
+        assertEquals("uuid-new", cache.cachedForRead("default/Line/New").getUuid());
+    }
+
     private static QueryTimeseriesResponse onePoint(String uuid, long ts, double value) {
         return QueryTimeseriesResponse.newBuilder().addSeries(Series.newBuilder()
                 .setMeasurementUUID(uuid)
