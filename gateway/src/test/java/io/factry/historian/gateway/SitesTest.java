@@ -64,7 +64,7 @@ class SitesTest {
 
     /** Every read answers one point per measurement it asks for, with that measurement's value. */
     private static final Map<String, Double> VALUES = Map.of(
-            "a-flow", 1.0, "a-own", 3.0, "opc-temp", 5.0, "b-flow", 2.0, "b-only", 22.0, "b-new", 33.0, "x-only", 9.0);
+            "a-flow", 1.0, "a-own", 3.0, "opc-temp", 5.0, "b-flow", 2.0, "b-only", 22.0, "b-hidden", 22.0, "b-new", 33.0, "x-only", 9.0);
 
     private QueryTimeseriesResponse answer(QueryTimeseriesRequest request) {
         QueryTimeseriesResponse.Builder reply = QueryTimeseriesResponse.newBuilder();
@@ -363,7 +363,8 @@ class SitesTest {
 
     @Test
     void aRealNameThatLooksQualifiedWinsOverAnotherSitesKey() throws Exception {
-        factry.add("[site_b]default/OnlyB/Flow", "a-own");
+        // Another collector's, in the own database: it reads by its name, so the name is its.
+        factry.add("[site_b]default/OnlyB/Flow", "a-own", OPC, "Active");
         cache.refresh(factry);
 
         assertEquals(3.0, read("histprov:Factry:/tag:[site_b]default/OnlyB/Flow"));
@@ -441,5 +442,58 @@ class SitesTest {
         factry.queries.clear();
         assertNull(read("sys:siteA:/prov:default:/tag:ArrB[0]"));
         assertEquals(List.of(), uuidsRead(), "an array only Site B has does not read by path");
+    }
+
+    @Test
+    void anotherCollectorsMeasurementInAnUnlistedDatabaseDoesNotReadByTagPath() throws Exception {
+        factry.database = "db-hidden";
+        factry.add("default/Hidden/Flow", "b-hidden", SITE_B, "Active");
+        factry.database = FakeFactry.DB;
+        factry.defaultDatabase = FakeFactry.DB;
+        cache.refresh(factry);
+
+        assertNull(read("sys:siteA:/prov:default:/tag:Hidden/Flow"), "its Site is unknown: not by tag path");
+    }
+
+    @Test
+    void aFailedRestCallKeepsTheLastDefaultDatabase() throws Exception {
+        // This collector's only measurement is in Site B's database; its default is site_a.
+        FakeFactry other = new FakeFactry();
+        try {
+            other.databases.put("db-b", "site_b");
+            other.database = "db-b";
+            other.add("default/Stray/Level", "x-only");
+            other.add("default/OnlyB/Flow", "b-only", SITE_B, "Active");
+            other.database = FakeFactry.DB;
+            other.defaultDatabase = FakeFactry.DB;
+            MeasurementCache fresh = new MeasurementCache(MeasurementCacheTest.NO_WAIT);
+            fresh.refresh(other);
+            other.respond = this::answer;
+            FactryHistorianSettings settings = new FactryHistorianSettings();
+            settings.setDelimiter("/");
+            FactryQueryEngine e = new FactryQueryEngine(FakeFactryServer.gatewayContext(), "Factry", settings,
+                    other, fresh, new HistorianMetrics());
+            assertNull(readWith(e, "sys:siteA:/prov:default:/tag:OnlyB/Flow"));
+
+            other.defaultDatabaseFails = true;
+            fresh.refresh(other);
+
+            assertNull(readWith(e, "sys:siteA:/prov:default:/tag:OnlyB/Flow"), "Site B's data after a REST blip");
+        } finally {
+            other.shutdown();
+        }
+    }
+
+    @Test
+    void factryAnsweringNoDefaultDropsTheLastOne() throws Exception {
+        factry.defaultDatabase = "db-b";
+        cache.refresh(factry);
+        assertEquals(22.0, read("sys:siteA:/prov:default:/tag:OnlyB/Flow"), "db-b is the default here");
+
+        factry.defaultDatabase = null;
+        cache.refresh(factry);
+        factry.queries.clear();
+
+        assertNull(read("sys:siteA:/prov:default:/tag:OnlyB/Flow"));
     }
 }

@@ -53,6 +53,8 @@ class FakeFactry extends FactryGrpcClient {
     String database = DB;
     /** This collector's default database, as Factry's REST API gives it; null when it does not. */
     String defaultDatabase = null;
+    /** Whether asking the REST API for the default database fails (Factry not reachable on it). */
+    boolean defaultDatabaseFails = false;
     /** When set, the total a one-row list call without filters answers. */
     Long totalOverride = null;
     /** When set, listing the databases fails with this status. */
@@ -230,6 +232,9 @@ class FakeFactry extends FactryGrpcClient {
 
     @Override
     public String getDefaultDatabaseUUID() {
+        if (defaultDatabaseFails) {
+            throw new IllegalStateException("REST port not reachable");
+        }
         return defaultDatabase;
     }
 

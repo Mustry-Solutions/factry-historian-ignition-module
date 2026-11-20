@@ -192,8 +192,14 @@ public class MeasurementCache {
 
     /** Whether Factry listed its databases at the last full refresh; null before the first. */
     private Boolean databasesListed = null;
-    /** This collector's default database at the last full refresh; null when Factry did not say. */
+    /**
+     * This collector's default database as Factry's REST API last gave it, and for which collector;
+     * null when it never did or answered without one. Kept when a later call fails.
+     */
     private String lastDefaultDatabase = null;
+    private String lastDefaultCollector = null;
+    /** What the log last said about the default database, so it is said once per change. */
+    private String defaultDatabaseReport = null;
     /** Measurements in databases Factry did not list, at the last full refresh. */
     private int unlistedCount = 0;
 
@@ -231,6 +237,39 @@ public class MeasurementCache {
             databasesListed = listed;
         }
         return listed ? databases : null;
+    }
+
+    /**
+     * This collector's default database from Factry's REST API. When the call fails (REST port
+     * not reachable, a time-out, a refusal), the last answer for this collector stays: a blip
+     * must not bring back reading another Site by tag path. An answer without one drops it.
+     * Logged once per change.
+     */
+    private String defaultDatabase(FactryGrpcClient grpcClient, Map<String, String> databases) {
+        String collectorUUID = grpcClient.getCollectorUUID();
+        if (!Objects.equals(collectorUUID, lastDefaultCollector)) {
+            lastDefaultDatabase = null;
+            lastDefaultCollector = collectorUUID;
+        }
+        String report;
+        try {
+            lastDefaultDatabase = grpcClient.getDefaultDatabaseUUID();
+            report = lastDefaultDatabase != null
+                    ? "This collector's default time-series database: "
+                        + databases.getOrDefault(lastDefaultDatabase, lastDefaultDatabase)
+                    : "Factry's REST API names no default time-series database for this collector; going by"
+                        + " where its measurements are";
+        } catch (RuntimeException e) {
+            report = "Could not ask Factry's REST API for this collector's default time-series database ("
+                    + e.getMessage() + "); " + (lastDefaultDatabase != null
+                        ? "keeping " + databases.getOrDefault(lastDefaultDatabase, lastDefaultDatabase)
+                        : "going by where its measurements are");
+        }
+        if (!report.equals(defaultDatabaseReport)) {
+            logger.info(report);
+            defaultDatabaseReport = report;
+        }
+        return lastDefaultDatabase;
     }
 
     /** Read every page of a measurement list, handing each measurement to {@code take}. */
@@ -345,13 +384,7 @@ public class MeasurementCache {
                 }
                 // Factry's REST API knows the collector's default database; gRPC does not. Without it,
                 // go by where this collector's measurements are.
-                String defaultDatabase = grpcClient.getDefaultDatabaseUUID();
-                if (!Objects.equals(defaultDatabase, lastDefaultDatabase)) {
-                    logger.info("This collector's default time-series database: {}", defaultDatabase != null
-                            ? freshDatabases.getOrDefault(defaultDatabase, defaultDatabase)
-                            : "unknown (Factry's REST API did not say), going by where its measurements are");
-                    lastDefaultDatabase = defaultDatabase;
-                }
+                String defaultDatabase = defaultDatabase(grpcClient, freshDatabases);
                 if (defaultDatabase != null && freshDatabases.containsKey(defaultDatabase)) {
                     freshOwnDatabases.clear();
                     freshOwnDatabases.add(defaultDatabase);
@@ -368,7 +401,8 @@ public class MeasurementCache {
             // Real names first: a name that happens to look like "[database]name" wins over that key.
             Map<String, String> freshReadKeys = new HashMap<>();
             for (Measurement m : freshMeasurements.values()) {
-                if (mayReadByName(m, databaseOf.get(m.getUuid()), freshOwnDatabases, ownCollectorUUID)) {
+                if (mayReadByName(m, databaseOf.get(m.getUuid()), freshOwnDatabases, ownCollectorUUID,
+                        freshDatabases == null ? 0 : freshDatabases.size())) {
                     String current = freshReadKeys.get(m.getName());
                     if (current == null || takesName(freshMeasurements.get(current), m, ownCollectorUUID)) {
                         freshReadKeys.put(m.getName(), m.getUuid());
@@ -852,11 +886,13 @@ public class MeasurementCache {
 
     /**
      * Whether a tag path, which gives the bare name, may read {@code m}: when Sites are not told
-     * apart, when it is this collector's, or when it is in the own Site's one database.
+     * apart, when it is this collector's, or when it is in the own Site's one database. A
+     * measurement whose database Factry did not list only in an organisation of one database.
      */
-    private static boolean mayReadByName(Measurement m, String database, Set<String> own, String collectorUUID) {
+    private static boolean mayReadByName(Measurement m, String database, Set<String> own, String collectorUUID,
+                                         int databaseCount) {
         return own == null || isOwnCollector(m, collectorUUID)
-                || own.size() == 1 && (database == null || own.contains(database));
+                || own.size() == 1 && (database != null ? own.contains(database) : databaseCount <= 1);
     }
 
     /** Whether {@code m} takes a bare name {@code current} has: only this collector's from another's. */
