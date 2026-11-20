@@ -101,6 +101,13 @@ class FactryHistorianSettingsTest {
     }
 
     @Test
+    void zeroPortOverrideIsStoredAndShownAsEmpty() {
+        // An empty Port Override reaches the module as 0 from the web form; it must read back as empty.
+        FactryHistorianConfig fromForm = new FactryHistorianConfig(null, "", 0, false, "", false, "/");
+        assertNull(FactryHistorianConfig.fromSettings(fromForm.toSettings()).portOverride());
+    }
+
+    @Test
     void emptyPortOverrideMeansTheTokensPort() {
         assertEquals(8001, withPortOverride(null).getPort());
         assertEquals(8001, withPortOverride(0).getPort());

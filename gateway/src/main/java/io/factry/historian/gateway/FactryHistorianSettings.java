@@ -80,7 +80,9 @@ public class FactryHistorianSettings implements HistorianSettings {
     }
 
     public void setPortOverride(Integer portOverride) {
-        this.portOverride = portOverride;
+        // An empty Port Override reaches here as 0 from the web form; store it as empty so the next edit
+        // shows an empty field instead of "0".
+        this.portOverride = isSet(portOverride) ? portOverride : null;
     }
 
     /** The host the client connects to; set by {@link #applyTokenDefaults(String)}. */
