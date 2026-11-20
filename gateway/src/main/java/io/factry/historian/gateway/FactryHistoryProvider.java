@@ -264,7 +264,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         }
         Optional<EngineInformation> info = Optional.empty();
         try {
-            info = storeAndForwardManager.getEngineInformation(engineName, true);
+            info = storeAndForwardManager.getEngineInformation(engineName, false);
         } catch (Exception e) {
             logger.debug("No engine information for '{}'", engineName, e);
         }
@@ -293,6 +293,14 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         try {
             String token = newSettings.applyTokenDefaults(newSettings.getToken());
             newSettings.validate();
+            // Ignition calls this on every save, before handleNameChange on a rename: nothing to apply
+            if (newSettings.sameAs(settings)) {
+                logger.info("Historian settings unchanged");
+                return true;
+            }
+            boolean sameFactry = newSettings.getGrpcHost().equals(settings.getGrpcHost())
+                    && newSettings.getGrpcPort() == settings.getGrpcPort()
+                    && newSettings.getCollectorUUID().equals(settings.getCollectorUUID());
 
             // Reconfigure the gRPC client (shuts down old channel, creates new one)
             grpcClient.reconfigure(
@@ -308,8 +316,19 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
             storageEngine.clearRefusals();
             writeHealth.clearWrites();
 
-            // Refresh measurement cache from the new endpoint
-            measurementCache.refresh(grpcClient);
+            // Refresh measurement cache from the new endpoint. With Factry down, a restart would
+            // gain nothing for the same Factry and collector (the scheduled sync retries), and a
+            // restart of a just-renamed profile leaves its buffered data behind. For another
+            // Factry or collector the cache must not keep the old one's measurements: restart.
+            try {
+                measurementCache.refresh(grpcClient);
+            } catch (RuntimeException e) {
+                if (!sameFactry) {
+                    throw e;
+                }
+                logger.warn("Measurement cache refresh failed after the settings change ({}); the scheduled "
+                        + "refresh retries", e.getMessage());
+            }
 
             // Update settings references in the engines
             queryEngine.updateSettings(newSettings);

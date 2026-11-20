@@ -94,6 +94,39 @@ class ProfileRenameTest {
                 "a third-party engine stops with the profile and Ignition then drops tag data sent to it");
     }
 
+    /**
+     * Ignition (8.3.3 to 8.3.6) calls handleSettingsChange before handleNameChange on every save,
+     * a rename-only save too. A false there restarts the profile under the new name at once, and
+     * the backlog in the old engine is left behind: exactly what the rename warning is about.
+     */
+    @Test
+    void aRenameOnlySaveWhileFactryIsDownDoesNotRestartTheProfile() throws Exception {
+        provider = started("factry-r");
+
+        assertTrue(provider.handleSettingsChange(unreachableFactry()), "same settings: nothing to apply");
+        assertTrue(provider.handleNameChange("factry-r2"));
+    }
+
+    @Test
+    void aSettingsSaveWhileFactryIsDownKeepsTheProfileRunning() throws Exception {
+        provider = started("factry-r");
+        FactryHistorianSettings changed = unreachableFactry();
+        changed.setDelimiter("/");
+
+        assertTrue(provider.handleSettingsChange(changed), "a cache refresh that fails is retried by the schedule");
+        assertEquals("/", provider.getSettings().getDelimiter());
+    }
+
+    @Test
+    void aNewFactryThatCannotBeReadStillRestartsTheProfile() throws Exception {
+        provider = started("factry-r");
+        FactryHistorianSettings elsewhere = unreachableFactry();
+        elsewhere.setGrpcPort(2);
+
+        assertFalse(provider.handleSettingsChange(elsewhere),
+                "the cache still holds the old Factry's measurements; a fresh start does not");
+    }
+
     /** A profile started the way Ignition starts it; Factry is not reachable, which is fine here. */
     private FactryHistoryProvider started(String name) throws Exception {
         FactryHistoryProvider p = new FactryHistoryProvider(gatewayContext(), name, unreachableFactry());
