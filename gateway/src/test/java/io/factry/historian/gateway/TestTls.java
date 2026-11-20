@@ -71,4 +71,39 @@ final class TestTls {
         }
         return in;
     }
+
+    interface Body {
+        void run() throws Exception;
+    }
+
+    /** Runs {@code body} with the test CA as the JVM's only system CA (javax.net.ssl.trustStore). */
+    static void withTestCaAsSystemCa(Body body) throws Exception {
+        java.nio.file.Path store = java.nio.file.Files.createTempFile("test-ca", ".p12");
+        java.security.KeyStore ks = java.security.KeyStore.getInstance("PKCS12");
+        ks.load(null, null);
+        ks.setCertificateEntry("test-ca", TestTls.ca().get(0));
+        try (var out = java.nio.file.Files.newOutputStream(store)) {
+            ks.store(out, "changeit".toCharArray());
+        }
+        String[] keys = {"javax.net.ssl.trustStore", "javax.net.ssl.trustStoreType", "javax.net.ssl.trustStorePassword"};
+        String[] old = new String[keys.length];
+        for (int i = 0; i < keys.length; i++) {
+            old[i] = System.getProperty(keys[i]);
+        }
+        System.setProperty(keys[0], store.toString());
+        System.setProperty(keys[1], "PKCS12");
+        System.setProperty(keys[2], "changeit");
+        try {
+            body.run();
+        } finally {
+            for (int i = 0; i < keys.length; i++) {
+                if (old[i] == null) {
+                    System.clearProperty(keys[i]);
+                } else {
+                    System.setProperty(keys[i], old[i]);
+                }
+            }
+            java.nio.file.Files.deleteIfExists(store);
+        }
+    }
 }
