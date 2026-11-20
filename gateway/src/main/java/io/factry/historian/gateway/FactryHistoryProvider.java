@@ -1,10 +1,14 @@
 package io.factry.historian.gateway;
 
 import com.inductiveautomation.historian.gateway.api.AbstractHistorian;
+import com.inductiveautomation.historian.gateway.api.HistorianExtensionPoint;
 import com.inductiveautomation.historian.gateway.api.query.QueryEngine;
 import com.inductiveautomation.historian.gateway.api.storage.StorageEngine;
 import com.inductiveautomation.historian.gateway.interop.TagHistoryDataSinkBridge;
 import com.inductiveautomation.historian.gateway.interop.TagHistoryStorageEngineBridge;
+import com.inductiveautomation.ignition.common.ImmutableBytes;
+import com.inductiveautomation.ignition.common.gson.JsonElement;
+import com.inductiveautomation.ignition.common.gson.JsonParser;
 import com.inductiveautomation.ignition.common.resourcecollection.ChangeOperation;
 import com.inductiveautomation.ignition.common.resourcecollection.Resource;
 import com.inductiveautomation.ignition.common.resourcecollection.ResourceBuilder;
@@ -49,6 +53,21 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
     private ScheduledExecutorService scheduledExecutor;
     private volatile String sfEngineName;
 
+    /** What the gRPC client was last set up with, to tell a save that changes nothing. */
+    record Connection(String host, int port, String collectorUUID, String token, boolean useTls,
+                      boolean skipTlsVerification, String customCaCert) {
+        static Connection of(FactryHistorianSettings s, String token) {
+            return new Connection(s.getGrpcHost(), s.getGrpcPort(), s.getCollectorUUID(), token, s.isUseTls(),
+                    s.isSkipTlsVerification(), s.getCustomCaCert());
+        }
+    }
+
+    private volatile Connection connection;
+
+    Connection connection() {
+        return connection;
+    }
+
     /** The profile status, from the connection check (on the scheduler) and the writes. */
     private final WriteHealth writeHealth;
     private static final long STATUS_CHECK_MS = ModuleProperties.getStatusCacheMs();
@@ -71,6 +90,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
                 settings.isSkipTlsVerification(),
                 settings.getCustomCaCert()
         );
+        this.connection = Connection.of(settings, token);
         this.measurementCache = new MeasurementCache();
 
         this.queryEngine = new FactryQueryEngine(context, historianName, settings, grpcClient, measurementCache, metrics);
@@ -248,7 +268,30 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         writeHealth.rename(newName);
         reportEngineLeftBehind(context.getStoreAndForwardManager(),
                 sfEngineName != null ? sfEngineName : historianName, newName);
+        // Ignition 8.3.8 and newer call only this on a save that renames, so apply settings
+        // changed in the same save here. (8.3.3 to 8.3.6 have applied them already.)
+        Optional<FactryHistorianSettings> saved = storedSettings(newName);
+        if (saved.isPresent()) {
+            return handleSettingsChange(saved.get());
+        }
         return true;
+    }
+
+    /** The settings saved for the profile {@code name}, as Ignition decodes them. */
+    private Optional<FactryHistorianSettings> storedSettings(String name) {
+        try {
+            Optional<Resource> resource = context.getConfigurationManager()
+                    .getNamedResource(HistorianExtensionPoint.RESOURCE_TYPE, name);
+            Optional<ImmutableBytes> data = resource.flatMap(r -> r.getData("config.json"));
+            if (data.isEmpty()) {
+                return Optional.empty();
+            }
+            JsonElement saved = JsonParser.parseString(data.get().getBytesAsString()).getAsJsonObject().get("settings");
+            return saved == null ? Optional.empty() : Optional.of(new FactryHistorianExtensionPoint().decode(saved));
+        } catch (Exception e) {
+            logger.debug("Could not read the saved settings of profile '{}'", name, e);
+            return Optional.empty();
+        }
     }
 
     /**
@@ -293,8 +336,9 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         try {
             String token = newSettings.applyTokenDefaults(newSettings.getToken());
             newSettings.validate();
-            // Ignition calls this on every save, before handleNameChange on a rename: nothing to apply
-            if (newSettings.sameAs(settings)) {
+            // Ignition 8.3.3 to 8.3.6 call this on every save, also before handleNameChange on a
+            // rename: nothing to apply. (8.3.8 and newer call only handleNameChange on a rename.)
+            if (newSettings.sameAs(settings) && Connection.of(newSettings, token).equals(connection)) {
                 logger.info("Historian settings unchanged");
                 return true;
             }
@@ -312,6 +356,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
                     newSettings.isSkipTlsVerification(),
                     newSettings.getCustomCaCert()
             );
+            this.connection = Connection.of(newSettings, token);
             // Judge and log refusals of writes afresh; before the refresh, which can throw.
             storageEngine.clearRefusals();
             writeHealth.clearWrites();
@@ -320,12 +365,14 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
             // gain nothing for the same Factry and collector (the scheduled sync retries), and a
             // restart of a just-renamed profile leaves its buffered data behind. For another
             // Factry or collector the cache must not keep the old one's measurements: restart.
+            boolean cacheRefreshed = true;
             try {
                 measurementCache.refresh(grpcClient);
             } catch (RuntimeException e) {
                 if (!sameFactry) {
                     throw e;
                 }
+                cacheRefreshed = false;
                 logger.warn("Measurement cache refresh failed after the settings change ({}); the scheduled "
                         + "refresh retries", e.getMessage());
             }
@@ -339,7 +386,8 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
             // next poll, not up to STATUS_CHECK_MS later.
             refreshConnectionStatus();
 
-            logger.info("Settings change applied successfully");
+            logger.info(cacheRefreshed ? "Settings change applied successfully"
+                    : "Settings change applied; the measurement cache refresh will be retried");
             return true;
         } catch (Exception e) {
             logger.error("Failed to apply settings change", e);

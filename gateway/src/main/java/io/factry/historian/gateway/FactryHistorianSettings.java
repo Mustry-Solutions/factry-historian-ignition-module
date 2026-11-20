@@ -178,19 +178,18 @@ public class FactryHistorianSettings implements HistorianSettings {
         FactryGrpcClient.parseCaCertificates(customCaCert);
     }
 
-    /** Whether {@code other} holds the same settings, all fields compared. */
+    /**
+     * Whether {@code other} holds the same settings: the same form (every field the operator
+     * edits, compared as {@link FactryHistorianConfig}, which new form fields join) and the same
+     * values taken from the token. SettingsSameAsTest checks that every field counts.
+     */
     boolean sameAs(FactryHistorianSettings other) {
         return other != null
+                && FactryHistorianConfig.fromSettings(this).equals(FactryHistorianConfig.fromSettings(other))
                 && java.util.Objects.equals(collectorUUID, other.collectorUUID)
                 && java.util.Objects.equals(collectorName, other.collectorName)
                 && java.util.Objects.equals(grpcHost, other.grpcHost)
-                && grpcPort == other.grpcPort
-                && debugLogging == other.debugLogging
-                && useTls == other.useTls
-                && skipTlsVerification == other.skipTlsVerification
-                && java.util.Objects.equals(token, other.token)
-                && java.util.Objects.equals(customCaCert, other.customCaCert)
-                && java.util.Objects.equals(delimiter, other.delimiter);
+                && grpcPort == other.grpcPort;
     }
 
     @Override

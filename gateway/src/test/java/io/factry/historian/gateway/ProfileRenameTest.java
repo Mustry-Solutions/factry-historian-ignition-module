@@ -4,7 +4,11 @@ import ch.qos.logback.classic.Level;
 import com.codahale.metrics.Meter;
 import com.codahale.metrics.MetricRegistry;
 import com.inductiveautomation.ignition.common.resourcecollection.ChangeOperation;
+import com.inductiveautomation.historian.gateway.api.HistorianExtensionPoint;
+import com.inductiveautomation.ignition.common.gson.JsonObject;
 import com.inductiveautomation.ignition.common.resourcecollection.Resource;
+import com.inductiveautomation.ignition.common.resourcecollection.ResourceBuilder;
+import com.inductiveautomation.ignition.gateway.model.ProfileStatus;
 import com.inductiveautomation.ignition.gateway.config.ConfigurationManager;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 import com.inductiveautomation.ignition.gateway.storeforward.StoreAndForwardManager;
@@ -32,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class ProfileRenameTest {
 
     private final List<Resource> engines = new ArrayList<>();
+    private final java.util.Map<String, Resource> profiles = new java.util.HashMap<>();
     private int pending = 7;
     private int quarantined = 2;
     private FactryHistoryProvider provider;
@@ -127,11 +132,81 @@ class ProfileRenameTest {
                 "the cache still holds the old Factry's measurements; a fresh start does not");
     }
 
+    /**
+     * Ignition 8.3.8 and newer (historian 1.3.8) call only handleNameChange on a save that renames,
+     * so settings changed in the same save must be picked up there.
+     */
+    @Test
+    void settingsChangedInTheSameSaveAsARenameAreApplied() throws Exception {
+        provider = started("factry-r");
+        FactryHistorianSettings saved = unreachableFactry();
+        saved.setDelimiter("/");
+        storedProfile("factry-r2", saved);
+
+        assertTrue(provider.handleNameChange("factry-r2"));
+
+        assertEquals("/", provider.getSettings().getDelimiter());
+    }
+
+    @Test
+    void aRenameWithTheSameSettingsAppliesNothing() throws Exception {
+        provider = started("factry-r");
+        FactryHistorianSettings running = provider.getSettings();
+        storedProfile("factry-r2", unreachableFactry());
+
+        assertTrue(provider.handleNameChange("factry-r2"));
+
+        assertSame(running, provider.getSettings());
+    }
+
+    @Test
+    void aNewTokenForTheSameCollectorWhileFactryIsDownIsApplied() throws Exception {
+        provider = started("factry-r");
+        FactryHistorianSettings newToken = unreachableFactry();
+        newToken.setToken(newToken.getToken() + "2");
+
+        assertTrue(provider.handleSettingsChange(newToken));
+
+        assertSame(newToken, provider.getSettings());
+        assertEquals(newToken.getToken(), provider.connection().token(), "the client uses the new token");
+        assertEquals(ProfileStatus.State.Errored, provider.getStatus().getState(), "Factry is still down");
+    }
+
+    @Test
+    void aTlsChangeForTheSameCollectorWhileFactryIsDownIsApplied() throws Exception {
+        provider = started("factry-r");
+        FactryHistorianSettings tls = unreachableFactry();
+        tls.setUseTls(!provider.getSettings().isUseTls());
+        tls.setSkipTlsVerification(true);
+
+        assertTrue(provider.handleSettingsChange(tls));
+
+        assertSame(tls, provider.getSettings());
+        assertEquals(tls.isUseTls(), provider.connection().useTls());
+        assertEquals(ProfileStatus.State.Errored, provider.getStatus().getState());
+    }
+
     /** A profile started the way Ignition starts it; Factry is not reachable, which is fine here. */
     private FactryHistoryProvider started(String name) throws Exception {
         FactryHistoryProvider p = new FactryHistoryProvider(gatewayContext(), name, unreachableFactry());
         p.startup();
         return p;
+    }
+
+    /** The profile resource as Ignition saves it. */
+    private void storedProfile(String name, FactryHistorianSettings settings) {
+        JsonObject config = new JsonObject();
+        JsonObject profile = new JsonObject();
+        profile.addProperty("type", FactryHistorianExtensionPoint.TYPE_ID);
+        profile.addProperty("enabled", true);
+        config.add("profile", profile);
+        config.add("settings", new FactryHistorianExtensionPoint().encode(settings));
+        ResourceBuilder builder = Resource.newBuilder();
+        builder.setResourceCollectionName("core");
+        builder.setResourcePath(HistorianExtensionPoint.RESOURCE_TYPE.childPath(name));
+        builder.setApplicationScope("G");
+        builder.putData("config.json", config.toString());
+        profiles.put(name, builder.build());
     }
 
     private static FactryHistorianSettings unreachableFactry() {
@@ -180,6 +255,7 @@ class ProfileRenameTest {
         return (ConfigurationManager) Proxy.newProxyInstance(ConfigurationManager.class.getClassLoader(),
                 new Class<?>[]{ConfigurationManager.class}, (proxy, method, args) -> switch (method.getName()) {
                     case "getResources" -> new ArrayList<>(engines);
+                    case "getNamedResource" -> Optional.ofNullable(profiles.get((String) args[1]));
                     case "push" -> {
                         for (Object o : (List<?>) args[0]) {
                             engines.add(ChangeOperation.getResourceFromChange((ChangeOperation) o));
