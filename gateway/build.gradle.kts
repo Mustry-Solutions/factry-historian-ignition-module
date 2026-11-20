@@ -60,8 +60,9 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testImplementation("com.inductiveautomation.ignitionsdk:ignition-common:${rootProject.extra["sdk_version"]}")
-    // GatewayContext, to build storage and query engines in tests
-    testImplementation("com.inductiveautomation.ignition:gateway-api:${rootProject.extra["sdk_version"]}")
+    // GatewayContext, to build storage and query engines in tests. 8.3.6 as in the historian jars
+    // below: it has the store and forward rename event (SinkLifecycleEvent) the module calls by reflection.
+    testImplementation("com.inductiveautomation.ignition:gateway-api:8.3.6")
     testImplementation("com.inductiveautomation.historian:historian-gateway-api:1.3.6") {
         isTransitive = false
     }
