@@ -261,4 +261,16 @@ class CaseOnlyRenameTest {
             assertFalse(log.text().contains("without finding an Active measurement"), log.text());
         }
     }
+
+    @Test
+    void aMeasurementWithoutACollectorCountsAsOwnForReadsAsForWrites() throws Exception {
+        factry.add("default/Tank/Flow", "flow-uuid", "", "Active");
+        factry.add("default/Tank/FLOW", "upper-uuid", FakeFactry.OTHER, "Active");
+        cache.refresh(factry);
+
+        write("Tank/flow");
+
+        assertEquals(List.of("flow-uuid"), sentUUIDs(), "the write takes the one without a collector");
+        assertEquals(1.0, read("sys:siteA:/prov:default:/tag:Tank/flow"), "and the read takes the same one");
+    }
 }

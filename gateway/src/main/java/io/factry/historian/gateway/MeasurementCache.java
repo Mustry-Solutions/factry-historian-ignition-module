@@ -84,13 +84,14 @@ public class MeasurementCache {
     /** UUID → the key browse publishes: the bare name when it reads this measurement, else qualified. */
     private volatile ConcurrentHashMap<String, String> uuidToReadKey = new ConcurrentHashMap<>();
     /**
-     * Lowercased name → the names and read keys with that spelling ignoring case, from
+     * Lowercased name → the name or read key with that spelling ignoring case (a String), or
+     * the several of them (an immutable Set, replaced on change; rare), from
      * {@link #tagPathToUUID}, {@link #inactiveByName} and {@link #readKeyToUUID}. Lets a name
      * nothing has exactly find a measurement whose name differs in case only, without walking
      * the cache. Rebuilt on every refresh and only added to in between: a name removed since
      * may linger, so every candidate is checked against those maps.
      */
-    private volatile ConcurrentHashMap<String, Set<String>> byLowerCase = new ConcurrentHashMap<>();
+    private volatile ConcurrentHashMap<String, Object> byLowerCase = new ConcurrentHashMap<>();
     /** This collector, from the last refresh, so a read can prefer its measurement. */
     private volatile String ownCollector = null;
     /** Measurement UUID → database UUID, where known. */
@@ -450,17 +451,19 @@ public class MeasurementCache {
             // Swap in freshly-built maps by reference so deleted measurements don't linger and
             // concurrent readers never observe a half-filled map. The UUID map goes first, so a
             // name found in the new path map always has its measurement.
-            uuidToMeasurement = new ConcurrentHashMap<>(freshMeasurements);
-            tagPathToUUID = new ConcurrentHashMap<>(freshPaths);
-            inactiveByName = new ConcurrentHashMap<>(freshInactive);
-            uuidToReadKey = new ConcurrentHashMap<>(freshKeyOf);
-            readKeyToUUID = new ConcurrentHashMap<>(freshReadKeys);
-            ConcurrentHashMap<String, Set<String>> freshLowerCase = new ConcurrentHashMap<>();
+            // The index goes before the maps: a name another thread caches after the swap of the
+            // maps is then indexed too.
+            ConcurrentHashMap<String, Object> freshLowerCase = new ConcurrentHashMap<>();
             for (Set<String> names : List.of(freshPaths.keySet(), freshInactive.keySet(), freshReadKeys.keySet())) {
                 names.forEach(name -> index(freshLowerCase, name));
             }
             byLowerCase = freshLowerCase;
             ownCollector = ownCollectorUUID;
+            uuidToMeasurement = new ConcurrentHashMap<>(freshMeasurements);
+            tagPathToUUID = new ConcurrentHashMap<>(freshPaths);
+            inactiveByName = new ConcurrentHashMap<>(freshInactive);
+            uuidToReadKey = new ConcurrentHashMap<>(freshKeyOf);
+            readKeyToUUID = new ConcurrentHashMap<>(freshReadKeys);
             uuidToDatabase = new ConcurrentHashMap<>(databaseOf);
             unlistedCount = freshUnlisted;
             databaseNames = freshDatabases != null ? Map.copyOf(freshDatabases) : Map.of();
@@ -897,7 +900,8 @@ public class MeasurementCache {
             // the measurement it writes to.
             String key = oneIgnoringCase(readKey, sameIgnoringCase(readKey), keys::get, uuid2 -> {
                 Measurement m = uuidToMeasurement.get(uuid2);
-                return m != null && isOwnCollector(m, own);
+                // The write path's check: one without a collector counts as this collector's
+                return m != null && isOwnedBy(m, own);
             });
             uuid = key != null ? keys.get(key) : null;
         }
@@ -1120,14 +1124,28 @@ public class MeasurementCache {
         index(byLowerCase, name);
     }
 
-    private static void index(Map<String, Set<String>> byLowerCase, String name) {
-        byLowerCase.computeIfAbsent(name.toLowerCase(Locale.ROOT), k -> ConcurrentHashMap.newKeySet()).add(name);
+    private static void index(ConcurrentHashMap<String, Object> byLowerCase, String name) {
+        // toLowerCase returns the name itself when it is lowercase already: no copy then
+        byLowerCase.merge(name.toLowerCase(Locale.ROOT), name, (current, added) -> {
+            Set<String> names = asSet(current);
+            if (names.contains(name)) {
+                return current;
+            }
+            Set<String> more = new HashSet<>(names);
+            more.add(name);
+            return Set.copyOf(more);
+        });
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Set<String> asSet(Object indexed) {
+        return indexed instanceof String one ? Set.of(one) : (Set<String>) indexed;
     }
 
     /** The indexed names that may match {@code name} ignoring case; check each. */
     private Set<String> sameIgnoringCase(String name) {
-        Set<String> names = byLowerCase.get(name.toLowerCase(Locale.ROOT));
-        return names != null ? names : Set.of();
+        Object names = byLowerCase.get(name.toLowerCase(Locale.ROOT));
+        return names != null ? asSet(names) : Set.of();
     }
 
     /** Why the module does not write a tag's values to the measurement Factry has under its name. */
