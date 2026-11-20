@@ -190,4 +190,75 @@ class CaseOnlyRenameTest {
         assertNull(read("sys:siteA:/prov:default:/tag:OnlyB/flow"), "not Site B's data by the own path");
         assertEquals(22.0, read("histprov:Factry:/tag:[site_b]default/OnlyB/flow"));
     }
+
+    @Test
+    void writeAndReadAgreeWhenAnotherCollectorHasAThirdSpelling() throws Exception {
+        factry.add("default/Tank/Flow", "flow-uuid");
+        factry.add("default/Tank/FLOW", "upper-uuid", FakeFactry.OTHER, "Active");
+        cache.refresh(factry);
+
+        try (LogCapture log = new LogCapture(MeasurementCache.class.getName(), Level.INFO)) {
+            write("Tank/flow");
+
+            assertEquals(List.of("flow-uuid"), sentUUIDs(), "writes go to this collector's Tank/Flow");
+            assertEquals(1.0, read("sys:siteA:/prov:default:/tag:Tank/flow"), "and the tag reads them back");
+            assertFalse(log.text().contains("ignoring case"), log.text());
+        }
+    }
+
+    @Test
+    void aMissLooksOnlyAtNamesThatDifferInCase() {
+        for (int i = 0; i < 10_000; i++) {
+            factry.add("default/Area/Tag" + i, "u" + i);
+        }
+        factry.add("default/Tank/Flow", "flow-uuid");
+        cache.refresh(factry);
+
+        for (int i = 0; i < 100; i++) {
+            assertEquals("flow-uuid", cache.writeUUID("default/Tank/flow", FakeFactry.OWN));
+            assertEquals("flow-uuid", cache.cachedForRead("default/Tank/flow").getUuid());
+            assertNull(cache.cachedForRead("default/Arr[2]"));
+        }
+
+        assertTrue(cache.caseCandidatesExamined <= 400,
+                "no walk over all 10,000 names per miss: " + cache.caseCandidatesExamined);
+    }
+
+    @Test
+    void aClashThatIsGoneIsReportedAgainWhenItComesBack() {
+        factry.add("default/Tank/Flow", "flow-uuid");
+        factry.add("default/Tank/FLOW", "upper-uuid");
+        cache.refresh(factry);
+
+        try (LogCapture log = new LogCapture(MeasurementCache.class.getName(), Level.INFO)) {
+            assertNull(cache.cachedForRead("default/Tank/flow"));
+            factry.setStatus("upper-uuid", "Deleted");
+            cache.refresh(factry);
+            assertEquals("flow-uuid", cache.cachedForRead("default/Tank/flow").getUuid());
+            factry.setStatus("upper-uuid", "Active");
+            cache.refresh(factry);
+            assertNull(cache.cachedForRead("default/Tank/flow"));
+
+            assertEquals(2, log.text().split("match 'default/Tank/flow' ignoring case", -1).length - 1, log.text());
+        }
+    }
+
+    @Test
+    void aLookupThatFoundAnotherSpellingDoesNotWarnItFoundNothing() {
+        cache.refresh(factry);
+        // The search matches substrings: the measurement sits on the fifth and last page read.
+        for (int i = 0; i < 300; i++) {
+            if (i == 200) {
+                factry.add("default/Tank/Flow", "flow-uuid");
+            }
+            factry.add("default/Tank/Flow/x" + i, "x" + i);
+        }
+
+        try (LogCapture log = new LogCapture(MeasurementCache.class.getName(), Level.INFO)) {
+            write("Tank/flow");
+
+            assertEquals(List.of("flow-uuid"), sentUUIDs());
+            assertFalse(log.text().contains("without finding an Active measurement"), log.text());
+        }
+    }
 }
