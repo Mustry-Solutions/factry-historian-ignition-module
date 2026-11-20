@@ -17,10 +17,12 @@ import com.inductiveautomation.ignition.gateway.storeforward.engine.EngineInform
 import com.inductiveautomation.ignition.gateway.storeforward.quarantine.QuarantineInterface;
 import com.inductiveautomation.ignition.gateway.storeforward.quarantine.QuarantinedDataInfo;
 import com.inductiveautomation.ignition.gateway.storeforward.resource.StoreAndForwardEngineSettings;
+import com.inductiveautomation.ignition.gateway.storeforward.sinks.DataSink;
 import io.grpc.Status;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Optional;
@@ -233,14 +235,72 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         return Optional.of(storageBridge != null ? storageBridge : storageEngine);
     }
 
+    /**
+     * Store and forward keeps this profile's buffered data in an engine named after the profile.
+     * Like Ignition's own historians (8.3.6 and newer), announce the rename so Ignition renames that
+     * engine with its data, then return false so Ignition restarts the profile under the new name and
+     * the new instance forwards from the renamed engine. Measurement names in Factry do not contain the
+     * profile name, so Factry needs no change.
+     */
     @Override
     public boolean handleNameChange(String newName) {
         logger.info("Historian name changed: {} -> {}", historianName, newName);
         writeHealth.rename(newName);
-        // Measurement names in Factry don't contain the historian profile name,
-        // so no data migration is needed.
-        // The framework updates the historianName field in AbstractHistorian.
-        return true;
+        if (dataSinkBridge != null) {
+            renameStoreAndForwardSink(context.getStoreAndForwardManager(), dataSinkBridge, sfEngineName, newName,
+                    SINK_LIFECYCLE_EVENT);
+        }
+        return false;
+    }
+
+    /** Ignition 8.3.6 added this; our SDK (and our minimum Ignition version) is older. */
+    static final String SINK_LIFECYCLE_EVENT = "com.inductiveautomation.ignition.gateway.storeforward.SinkLifecycleEvent";
+
+    /**
+     * Sends {@code SinkLifecycleEvent.sinkRenamed(sink, newName)} by reflection, so the module still
+     * loads on gateways older than 8.3.6. There, the data still buffered for the old name stays in the
+     * old engine; say so, with how much it is.
+     */
+    static boolean renameStoreAndForwardSink(StoreAndForwardManager storeAndForwardManager, DataSink<?> sink,
+                                             String engineName, String newName, String eventClassName) {
+        Method sinkRenamed;
+        Method handle;
+        try {
+            Class<?> eventClass = Class.forName(eventClassName, true, StoreAndForwardManager.class.getClassLoader());
+            sinkRenamed = eventClass.getMethod("sinkRenamed", DataSink.class, String.class);
+            handle = StoreAndForwardManager.class.getMethod("handleSinkLifecycleEvent", eventClass);
+        } catch (ReflectiveOperationException | LinkageError e) {
+            warnDataLeftBehind(storeAndForwardManager, engineName, newName,
+                    "this Ignition version cannot move it (needs 8.3.6 or newer)");
+            return false;
+        }
+        try {
+            handle.invoke(storeAndForwardManager, sinkRenamed.invoke(null, sink, newName));
+            logger.info("Store and forward engine '{}' handed over to the new name '{}'", engineName, newName);
+            return true;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Throwable cause = e instanceof InvocationTargetException ? e.getCause() : e;
+            logger.error("Could not move store and forward data from '{}' to '{}'", engineName, newName, cause);
+            warnDataLeftBehind(storeAndForwardManager, engineName, newName, "the move failed");
+            return false;
+        }
+    }
+
+    private static void warnDataLeftBehind(StoreAndForwardManager storeAndForwardManager, String engineName,
+                                           String newName, String why) {
+        Optional<EngineInformation> info = Optional.empty();
+        try {
+            info = storeAndForwardManager.getEngineInformation(engineName, true);
+        } catch (Exception e) {
+            logger.debug("No engine information for '{}'", engineName, e);
+        }
+        logger.warn("Profile renamed to '{}', but {}: data still buffered in store and forward engine '{}' "
+                        + "({} pending, {} quarantined) is not forwarded to Factry until the profile is renamed "
+                        + "back to '{}'. Let store and forward empty before renaming a profile.",
+                newName, why, engineName,
+                info.map(i -> String.valueOf(i.totalPending())).orElse("unknown"),
+                info.map(i -> String.valueOf(i.totalQuarantined())).orElse("unknown"),
+                engineName);
     }
 
     @Override
@@ -357,21 +417,18 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
     static EngineCreation ensureStoreAndForwardEngine(ConfigurationManager configurationManager,
                                                       StoreAndForwardManager storeAndForwardManager,
                                                       String engineName, long timeoutMs) {
-        Optional<EngineInformation> existing = storeAndForwardManager.getEngineInformation(engineName, true);
-        if (existing.isPresent()) {
+        // The resource also covers engines not started yet (a third-party engine starts with its first sink)
+        Optional<Resource> existing = findEngineResource(configurationManager, engineName);
+        if (existing.isPresent() || storeAndForwardManager.getEngineInformation(engineName, true).isPresent()) {
             logger.debug("S&F engine '{}' already exists", engineName);
-            return EngineCreation.EXISTS;
-        }
-
-        // Also check if a resource already exists (covers engines not yet started)
-        if (engineResourceExists(configurationManager, engineName)) {
-            logger.debug("S&F engine resource '{}' already exists", engineName);
+            existing.ifPresent(r -> markThirdParty(configurationManager, r));
             return EngineCreation.EXISTS;
         }
 
         logger.info("S&F engine '{}' does not exist — creating it automatically", engineName);
         try {
-            StoreAndForwardEngineSettings engineSettings = new StoreAndForwardEngineSettings();
+            // Third party: Ignition renames the engine, with its data, when the profile is renamed
+            StoreAndForwardEngineSettings engineSettings = new StoreAndForwardEngineSettings().withIsThirdParty(true);
 
             ResourceBuilder builder = Resource.newBuilder();
             builder.setResourceCollectionName("core");
@@ -389,7 +446,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
             // push() writes the resource before it returns; its future only waits for the change
             // listeners. When this profile is itself being started from a config change, those
             // listeners queue behind us, so the wait times out although the engine is there.
-            if (engineResourceExists(configurationManager, engineName)) {
+            if (findEngineResource(configurationManager, engineName).isPresent()) {
                 logger.info("S&F engine '{}' created; Ignition is still applying it", engineName);
                 return EngineCreation.CREATED_PENDING;
             }
@@ -401,9 +458,43 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         }
     }
 
-    private static boolean engineResourceExists(ConfigurationManager configurationManager, String engineName) {
+    private static Optional<Resource> findEngineResource(ConfigurationManager configurationManager, String engineName) {
         return configurationManager.getResources(StoreAndForwardEngineSettings.getType()).stream()
-                .anyMatch(r -> r.getResourceName().equalsIgnoreCase(engineName));
+                .filter(r -> r.getResourceName().equalsIgnoreCase(engineName))
+                .findFirst();
+    }
+
+    /**
+     * Engines created by module versions before this one are not third party, and for those Ignition
+     * renames only the sink inside the old engine, which the restarted profile never looks at. So mark
+     * the engine now, long before anyone renames the profile. Ignition applies the change to a running
+     * engine with configure(): no restart, and its buffered data stays where it is. Only the flag
+     * changes; the other engine settings are kept. Not waited for, for the same reason as the create
+     * (the listeners may queue behind this startup).
+     */
+    static void markThirdParty(ConfigurationManager configurationManager, Resource resource) {
+        String engineName = resource.getResourceName();
+        try {
+            var codec = StoreAndForwardEngineSettings.getMeta().getCodec();
+            StoreAndForwardEngineSettings settings = codec.decode(resource).config();
+            if (settings.isThirdParty()) {
+                return;
+            }
+            ResourceBuilder builder = resource.toBuilder();
+            codec.encode(settings.withIsThirdParty(true), builder);
+            configurationManager.push(List.of(ChangeOperation.newModifyOp(builder.build(), resource.getResourceSignature())))
+                    .whenComplete((ignored, e) -> {
+                        if (e != null) {
+                            logger.warn("Could not mark S&F engine '{}' as third party; renaming the profile "
+                                    + "will leave its buffered data behind: {}", engineName, e.toString());
+                        }
+                    });
+            logger.info("S&F engine '{}' marked third party, so a profile rename takes its buffered data along",
+                    engineName);
+        } catch (Exception e) {
+            logger.warn("Could not mark S&F engine '{}' as third party; renaming the profile will leave its "
+                    + "buffered data behind: {}", engineName, e.toString());
+        }
     }
 
     private void retryQuarantinedData(String engineName) {

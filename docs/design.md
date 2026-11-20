@@ -409,6 +409,7 @@ Extends `AbstractHistorian<FactryHistorianSettings>`. The orchestrator that ties
 **Startup sequence (`onStartup()`)**:
 1. Refresh measurement cache from Factry
 2. If S&F engine configured:
+   - Create the engine named after the profile if it is missing (third party, see `handleNameChange()`), or mark an existing one third party
    - Create `TagHistoryDataSinkBridge` (wraps StorageEngine for S&F)
    - Register sink with S&F manager
    - Force-initialize sink via reflection (workaround for Ignition 8.3.x issue where late-registered sinks stay stuck in "Storage Only")
@@ -427,7 +428,9 @@ With Factry as a History Splitter's primary, an Errored status also sends the sp
 
 **`handleSettingsChange()`** — reconfigures gRPC client, refreshes cache, updates engines. No restart needed.
 
-**`handleNameChange()`** — returns `true` (no-op). Measurement names in Factry don't include the historian profile name.
+**`handleNameChange()`** — moves the profile's store and forward data to the new name, then returns `false` so Ignition restarts the profile under that name. Measurement names in Factry don't include the profile name, so Factry needs nothing. The data still buffered (pending and quarantined) sits in an engine named after the profile. As Ignition's own historians do since 8.3.6, the module sends `SinkLifecycleEvent.sinkRenamed` to the store and forward manager, which renames that engine (files, manifest and engine settings) because it is a third-party engine named after the old sink. The restarted profile finds the engine under its new name and forwards the data. The event class is new in 8.3.6, after our SDK and minimum version, so it is called by reflection. On 8.3.0 to 8.3.5 the profile still restarts under the new name, and one WARN names the old engine with its pending and quarantined counts: that data stays in the old engine, and is forwarded again only when the profile gets its old name back. On those versions, let store and forward empty before renaming a profile.
+
+Profiles create their engine as third party (`isThirdParty`, the flag Ignition sets on engines it creates for a module's sink). An engine created by an older module version is marked third party at the next profile start; only that flag changes. Ignition applies it to the running engine with `configure()`, without a restart, so its buffered data stays put. A third-party engine starts when the profile registers its sink and stops when the profile stops, so a disabled or deleted profile's engine stays on disk without forwarding, as before.
 
 **`retryQuarantinedData()`** — moves quarantined S&F records back to pending. Ignition never auto-retries quarantined data, but our failures are almost always transient connection issues.
 
