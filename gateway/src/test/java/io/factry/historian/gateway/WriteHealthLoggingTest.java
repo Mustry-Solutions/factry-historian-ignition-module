@@ -2,7 +2,6 @@ package io.factry.historian.gateway;
 
 import com.inductiveautomation.ignition.gateway.model.ProfileStatus;
 import com.inductiveautomation.ignition.gateway.storeforward.StoreAndForwardManager;
-import com.inductiveautomation.ignition.gateway.storeforward.flavor.WellDefinedSystemFlavors;
 import com.inductiveautomation.ignition.gateway.storeforward.quarantine.QuarantineInterface;
 import com.inductiveautomation.ignition.gateway.storeforward.quarantine.QuarantinedDataInfo;
 import io.grpc.Status;
@@ -127,9 +126,7 @@ class WriteHealthLoggingTest {
                 QuarantineInterface.class.getClassLoader(), new Class<?>[]{QuarantineInterface.class},
                 (proxy, method, args) -> switch (method.getName()) {
                     case "getQuarantinedCount" -> 1;
-                    case "getQuarantinedDataInfo" -> List.of(new QuarantinedDataInfo(7, 10, "batch", "refused",
-                            // Ignition 8.3.6 refuses quarantine info without a flavor
-                            WellDefinedSystemFlavors.TAG_HISTORY));
+                    case "getQuarantinedDataInfo" -> List.of(new QuarantinedDataInfo(7, 10, "batch", "refused", null));
                     case "retryQuarantined" -> null;
                     default -> throw new UnsupportedOperationException(method.getName());
                 });
