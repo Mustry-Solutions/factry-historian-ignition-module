@@ -153,6 +153,23 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
         observer.onCompleted();
     }
 
+    /** When set, GetTimeseriesDatabases lists this one database, so a cache reload also asks the REST API. */
+    volatile String database = null;
+
+    @Override
+    public void getTimeseriesDatabases(io.factry.historian.proto.GetTimeseriesDatabasesRequest request,
+                                       StreamObserver<io.factry.historian.proto.TimeseriesDatabases> observer) {
+        if (database == null) {
+            observer.onError(Status.UNIMPLEMENTED.asRuntimeException());
+            return;
+        }
+        observer.onNext(io.factry.historian.proto.TimeseriesDatabases.newBuilder()
+                .addTimeseriesDatabases(io.factry.historian.proto.TimeseriesDatabase.newBuilder()
+                        .setUuid(database).setName(database).setStatus("Active"))
+                .build());
+        observer.onCompleted();
+    }
+
     /** The connection check. */
     @Override
     public void getCollector(com.google.protobuf.Empty request, StreamObserver<io.factry.historian.proto.Collector> observer) {
