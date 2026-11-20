@@ -417,4 +417,29 @@ class SitesTest {
 
         assertEquals(9.0, read("sys:siteA:/prov:default:/tag:Pref/X"), "this collector's, not Site B's");
     }
+
+    private void addArray(String name, String uuid, String collector) {
+        factry.measurements.add(io.factry.historian.proto.Measurement.newBuilder().setName(name).setUuid(uuid)
+                .setCollectorUUID(collector).setStatus("Active").setDatatype("[]number").build());
+        factry.databaseOf.put(uuid, factry.database);
+    }
+
+    @Test
+    void arrayElementsFollowTheSameSiteRules() throws Exception {
+        addArray("default/Arr", "a-arr", FakeFactry.OWN);
+        factry.database = "db-b";
+        addArray("default/Arr", "b-arr", SITE_B);
+        addArray("default/ArrB", "b-arr-only", SITE_B);
+        factry.database = FakeFactry.DB;
+        cache.refresh(factry);
+
+        read("sys:siteA:/prov:default:/tag:Arr[1]");
+        assertEquals(List.of("a-arr"), uuidsRead(), "the own Site's array");
+        factry.queries.clear();
+        read("histprov:Factry:/tag:[site_b]default/Arr[1]");
+        assertEquals(List.of("b-arr"), uuidsRead(), "Site B's array by its database");
+        factry.queries.clear();
+        assertNull(read("sys:siteA:/prov:default:/tag:ArrB[0]"));
+        assertEquals(List.of(), uuidsRead(), "an array only Site B has does not read by path");
+    }
 }

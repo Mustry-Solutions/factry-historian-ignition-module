@@ -963,6 +963,11 @@ public class MeasurementCache {
         }
     }
 
+    /** The Active measurement a read of {@code name} uses, from the cache only. */
+    public Measurement cachedForRead(String name) {
+        return measurementForReadKey(name);
+    }
+
     private static boolean isActive(Measurement m) {
         return "active".equalsIgnoreCase(m.getStatus());
     }
