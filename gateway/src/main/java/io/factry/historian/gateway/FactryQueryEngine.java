@@ -170,6 +170,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         // used as the tag node id). The browse name is the stored measurement name
         // transformed by the configured delimiter; toStoredTagPath reverses it.
         Map<String, String> displayToBrowse = new HashMap<>();
+        Map<String, String> qualified = new HashMap<>();
         for (Measurement m : measurementCache.getAllMeasurements()) {
             // The node id is the measurement's read key, so it reads this measurement and no
             // other Site's with the same name. Not listed while the cache does not know its Site.
@@ -184,8 +185,20 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             String displayPath = collectorName != null
                     ? collectorName + "/" + browseName
                     : browseName;
-            displayToBrowse.put(displayPath, TagPathUtil.toBrowseId(readKey, delimiter));
+            String database = TagPathUtil.database(readKey);
+            if (database != null && !readKey.equals(m.getName())) {
+                qualified.put(displayPath, TagPathUtil.toBrowseId(readKey, delimiter) + "\n" + database);
+            } else {
+                displayToBrowse.put(displayPath, TagPathUtil.toBrowseId(readKey, delimiter));
+            }
         }
+        // A collector with the same name in two databases: the one the bare name does not read
+        // gets its database after its leaf name.
+        qualified.forEach((displayPath, idAndDatabase) -> {
+            String[] parts = idAndDatabase.split("\n", 2);
+            displayToBrowse.put(displayToBrowse.containsKey(displayPath)
+                    ? displayPath + " [" + parts[1] + "]" : displayPath, parts[0]);
+        });
         return displayToBrowse;
     }
 

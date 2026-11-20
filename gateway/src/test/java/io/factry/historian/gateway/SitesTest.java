@@ -64,7 +64,7 @@ class SitesTest {
 
     /** Every read answers one point per measurement it asks for, with that measurement's value. */
     private static final Map<String, Double> VALUES = Map.of(
-            "a-flow", 1.0, "opc-temp", 5.0, "b-flow", 2.0, "b-only", 22.0, "b-new", 33.0, "x-only", 9.0);
+            "a-flow", 1.0, "a-own", 3.0, "opc-temp", 5.0, "b-flow", 2.0, "b-only", 22.0, "b-new", 33.0, "x-only", 9.0);
 
     private QueryTimeseriesResponse answer(QueryTimeseriesRequest request) {
         QueryTimeseriesResponse.Builder reply = QueryTimeseriesResponse.newBuilder();
@@ -201,5 +201,87 @@ class SitesTest {
         assertEquals(Map.of("Flow", "[site_b]default/OnlyB/Flow"), siteB);
         assertTrue(browse("histprov:Factry:/folder:Measurements").keySet()
                 .containsAll(List.of("collector", "collector-b", "opc-collector")));
+    }
+
+    /** One measurement of this collector in Site B's database, say made there by hand. */
+    private void strayInSiteB() {
+        factry.database = "db-b";
+        factry.add("default/Stray/Level", "x-only");
+        factry.database = FakeFactry.DB;
+        cache.refresh(factry);
+    }
+
+    @Test
+    void aStrayMeasurementInAnotherDatabaseDoesNotMakeItsTagsReadByPath() throws Exception {
+        strayInSiteB();
+
+        assertNull(read("sys:siteA:/prov:default:/tag:OnlyB/Flow"), "not Site B's data marked Good");
+        assertEquals(1.0, read("sys:siteA:/prov:default:/tag:Pump1/Flow"));
+        assertEquals(9.0, read("sys:siteA:/prov:default:/tag:Stray/Level"), "this collector's own still reads");
+        assertEquals(List.of("a-flow", "x-only"), uuidsRead());
+    }
+
+    @Test
+    void withSeveralOwnDatabasesOtherCollectorsReadOnlyByDatabaseAndName() throws Exception {
+        strayInSiteB();
+
+        assertNull(read("sys:siteA:/prov:default:/tag:Opc/Temp"));
+        assertEquals(5.0, read("histprov:Factry:/tag:[site_a]default/Opc/Temp"));
+        assertEquals(22.0, read("histprov:Factry:/tag:[site_b]default/OnlyB/Flow"));
+        assertEquals(Map.of("Temp", "[site_a]default/Opc/Temp"),
+                browse("histprov:Factry:/folder:Measurements:/folder:opc-collector:/folder:default:/folder:Opc"));
+    }
+
+    @Test
+    void anEmptyDatabaseListKeepsEveryMeasurement() throws Exception {
+        factry.databases.clear();
+        cache.refresh(factry);
+
+        assertEquals(4, cache.getAllMeasurements().size(), "browse still lists every measurement");
+        assertEquals(1.0, read("sys:siteA:/prov:default:/tag:Pump1/Flow"));
+    }
+
+    @Test
+    void aMeasurementInADatabaseFactryDoesNotListIsKept() throws Exception {
+        factry.database = "db-hidden";
+        factry.add("default/Hidden/Flow", "x-only");
+        factry.database = FakeFactry.DB;
+        cache.refresh(factry);
+
+        assertEquals(9.0, read("sys:siteA:/prov:default:/tag:Hidden/Flow"));
+        assertEquals("x-only", cache.writeUUID("default/Hidden/Flow", FakeFactry.OWN));
+    }
+
+    @Test
+    void theSameTagOfThisCollectorInTwoDatabasesIsBrowsableAndReadableTwice() throws Exception {
+        factry.add("default/Own/Flow", "a-own");
+        factry.database = "db-b";
+        factry.add("default/Own/Flow", "x-only");
+        factry.database = FakeFactry.DB;
+        cache.refresh(factry);
+
+        QualifiedPath root = QualifiedPath.parseSafe(
+                "histprov:Factry:/folder:Measurements:/folder:collector:/folder:default:/folder:Own");
+        RootBrowsePublisher publisher = new RootBrowsePublisher(root);
+        engine.doBrowse(root, null, publisher);
+        List<String> ids = publisher.getResults().getResults().stream()
+                .map(r -> String.valueOf(r.getPath().getPathComponent("tag"))).sorted().toList();
+        assertEquals(List.of("[site_b]default/Own/Flow", "default/Own/Flow"), ids);
+        assertEquals(9.0, read("histprov:Factry:/tag:[site_b]default/Own/Flow"), "the one in site_b, not site_a's");
+        assertEquals(3.0, read("histprov:Factry:/tag:[site_a]default/Own/Flow"));
+        assertEquals(3.0, read("sys:siteA:/prov:default:/tag:Own/Flow"), "the first database's");
+    }
+
+    @Test
+    void aLookupForAnotherSitesMeasurementStopsAtTheFirstPageThatHasIt() throws Exception {
+        factry.database = "db-b";
+        factry.add("default/Late/Flow", "b-new", SITE_B, "Active");
+        for (int i = 0; i < 60; i++) {
+            factry.add("default/Late/Flow" + i, "late-" + i, SITE_B, "Active");
+        }
+        factry.lookups = 0;
+
+        assertEquals(33.0, read("histprov:Factry:/tag:[site_b]default/Late/Flow"));
+        assertEquals(1, factry.lookups, "one page, not every page up to the bound");
     }
 }
