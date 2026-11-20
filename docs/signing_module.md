@@ -135,7 +135,7 @@ Go to **Settings → Secrets and variables → Actions → New repository secret
 | `SIGNING_CERT_ALIAS` | The certificate alias (e.g., `factry-modules`) |
 | `SIGNING_CERT_PASSWORD` | The certificate password (usually same as keystore password) |
 
-The `build.yaml` workflow will decode these secrets and pass them to Gradle automatically.
+Factry's own pipeline uses these secrets to sign its releases. The Mustry-Solutions fork does not: its CI only tests and builds an unsigned module, and needs no secrets.
 
 ## Installing Signed Modules on Ignition
 
