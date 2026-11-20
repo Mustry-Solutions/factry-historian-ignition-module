@@ -10,6 +10,7 @@ import io.factry.historian.proto.CreatePointsReply;
 import io.factry.historian.proto.GetAssetPropertiesRequest;
 import io.factry.historian.proto.GetCollectorsRequest;
 import io.factry.historian.proto.GetMeasurementsByFilterRequest;
+import io.factry.historian.proto.GetTimeseriesDatabasesRequest;
 import io.factry.historian.proto.GetAssetsRequest;
 import io.factry.historian.proto.HealthUpdate;
 import io.factry.historian.proto.HealthUpdateReply;
@@ -23,6 +24,7 @@ import io.factry.historian.proto.Points;
 import io.factry.historian.proto.QueryTimeseriesRequest;
 import io.factry.historian.proto.QueryTimeseriesResponse;
 import io.factry.historian.proto.RegisterCollectorSchema;
+import io.factry.historian.proto.TimeseriesDatabases;
 import io.grpc.CallOptions;
 import io.grpc.Channel;
 import io.grpc.ClientCall;
@@ -40,7 +42,6 @@ import io.grpc.stub.MetadataUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.net.ssl.SSLException;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
@@ -334,6 +335,72 @@ public class FactryGrpcClient {
         }
     }
 
+    /**
+     * The UUID of this collector's default time-series database, from Factry's REST API (gRPC does
+     * not give it); null when Factry answers without one. Throws when Factry could not be asked
+     * (no REST port in the token, not reachable within {@link FactryRestClient#TIMEOUT}, refused).
+     */
+    public String getDefaultDatabaseUUID() {
+        RestTarget target = restTarget;
+        if (target == null) {
+            throw new IllegalStateException("no REST API settings");
+        }
+        try {
+            FactryRestClient rest = target.client();
+            if (rest == null) {
+                throw new IllegalStateException("the collector token names no REST port");
+            }
+            return rest.defaultDatabaseUUID();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted", e);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalStateException(e.toString(), e);
+        }
+    }
+
+    /** Where {@link #getDefaultDatabaseUUID} asks, and its client, built once per channel settings. */
+    private static final class RestTarget {
+        private final String host;
+        private final String token;
+        private final boolean useTls;
+        /** The gRPC channel's own trust decision, so REST checks certificates exactly as gRPC does. */
+        private final X509TrustManager trust;
+        private FactryRestClient client;
+        private boolean built;
+
+        RestTarget(String host, String token, boolean useTls, X509TrustManager trust) {
+            this.host = host;
+            this.token = token;
+            this.useTls = useTls;
+            this.trust = trust;
+        }
+
+        synchronized FactryRestClient client() throws Exception {
+            if (!built) {
+                client = FactryRestClient.forToken(host, token, useTls, trust);
+                built = true;
+            }
+            return client;
+        }
+    }
+
+    private volatile RestTarget restTarget;
+
+    public TimeseriesDatabases getTimeseriesDatabases() {
+        logger.debug("Sending GetTimeseriesDatabases");
+        channelLock.readLock().lock();
+        try {
+            return blockingStub
+                    .withDeadlineAfter(CALL_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .getTimeseriesDatabases(GetTimeseriesDatabasesRequest.getDefaultInstance());
+        } finally {
+            channelLock.readLock().unlock();
+        }
+    }
+
     public Collector registerCollector(RegisterCollectorSchema schema) {
         logger.debug("Sending RegisterCollector");
         channelLock.readLock().lock();
@@ -431,21 +498,13 @@ public class FactryGrpcClient {
                               boolean factryCertificate) {
         NettyChannelBuilder builder = NettyChannelBuilder.forAddress(host, port)
                 .maxInboundMessageSize(MAX_INBOUND_MESSAGE_BYTES);
+        X509TrustManager trust = null;
         if (!useTls) {
             builder.usePlaintext();
         } else {
             try {
-                var sslBuilder = GrpcSslContexts.forClient();
-                if (skipTlsVerification) {
-                    sslBuilder.trustManager(InsecureTrustManagerFactory.INSTANCE);
-                } else if (hasCustomCa(customCaCert) || !factryCertificate) {
-                    // A custom CA means Factry, or a proxy in front of it, has a certificate of its
-                    // own, so it is checked against the host the client connects to.
-                    sslBuilder.trustManager(buildCombinedTrustManagerFactory(null, customCaCert));
-                } else {
-                    sslBuilder.trustManager(new FactryOrSystemTrustManager(factryCa));
-                }
-                builder.sslContext(sslBuilder.build());
+                trust = trustManager(skipTlsVerification, customCaCert, factryCertificate, factryCa);
+                builder.sslContext(GrpcSslContexts.forClient().trustManager(trust).build());
             } catch (IllegalArgumentException e) {
                 throw e;
             } catch (Exception e) {
@@ -455,12 +514,39 @@ public class FactryGrpcClient {
         this.channel = builder.build();
 
         this.collectorUUID = collectorUUID;
+        this.restTarget = new RestTarget(host, token, useTls, trust);
         Metadata headers = new Metadata();
         headers.put(COLLECTOR_UUID_KEY, collectorUUID);
         headers.put(AUTHORIZATION_KEY, "Bearer " + token);
 
         this.blockingStub = HistorianGrpc.newBlockingStub(channel)
                 .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers), FRAME_LOG_GUARD);
+    }
+
+    /**
+     * The one trust decision for a TLS connection to Factry, used by the gRPC channel and by the
+     * REST call ({@link FactryRestClient}), so both check certificates the same way: none with Skip
+     * TLS Verification; the system CAs plus a custom CA against the host; with the token's
+     * built-in-certificate claim, {@link FactryOrSystemTrustManager}; else the system CAs against
+     * the host. Always an {@link javax.net.ssl.X509ExtendedTrustManager} except for Skip, so the TLS
+     * engine (Netty's, or the JDK's under HttpClient) leaves the host name check to it.
+     */
+    static X509TrustManager trustManager(boolean skipTlsVerification, String customCaCert,
+                                         boolean factryCertificate, List<X509Certificate> factryCa) throws Exception {
+        if (skipTlsVerification) {
+            return (X509TrustManager) InsecureTrustManagerFactory.INSTANCE.getTrustManagers()[0];
+        }
+        if (hasCustomCa(customCaCert) || !factryCertificate) {
+            // A custom CA means Factry, or a proxy in front of it, has a certificate of its own,
+            // so it is checked against the host the client connects to.
+            for (TrustManager tm : buildCombinedTrustManagerFactory(null, customCaCert).getTrustManagers()) {
+                if (tm instanceof X509TrustManager x509) {
+                    return x509;
+                }
+            }
+            throw new IllegalStateException("no X509TrustManager");
+        }
+        return new FactryOrSystemTrustManager(factryCa);
     }
 
     /**

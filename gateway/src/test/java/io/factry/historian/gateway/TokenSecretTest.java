@@ -230,6 +230,45 @@ class TokenSecretTest {
         assertEquals("Collector token cannot be read", provider.statusOnceStarted().getMessage().toString());
     }
 
+    /**
+     * The REST call for the default database (#78) carries the same cleaned token as gRPC, also
+     * after a reload from the secret provider, and the token never reaches the log.
+     */
+    @Test
+    void restCallUsesTheCleanTokenAlsoAfterAReload() throws Exception {
+        List<String> restAuth = new java.util.concurrent.CopyOnWriteArrayList<>();
+        // HTTPS: the REST call uses TLS as gRPC does.
+        com.sun.net.httpserver.HttpsServer rest = com.sun.net.httpserver.HttpsServer.create(
+                new java.net.InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), 0), 0);
+        rest.setHttpsConfigurator(new com.sun.net.httpserver.HttpsConfigurator(TestTls.jdkServer(TestTls.LOOPBACK)));
+        rest.createContext("/", exchange -> {
+            restAuth.add(String.valueOf(exchange.getRequestHeaders().getFirst("Authorization")));
+            byte[] answer = "{\"DefaultDatabaseUUID\":\"db-a\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, answer.length);
+            exchange.getResponseBody().write(answer);
+            exchange.close();
+        });
+        rest.start();
+        // The module's own loggers; the fake server's Netty handler logs its headers at DEBUG.
+        try (LogCapture log = new LogCapture("io.factry", Level.DEBUG)) {
+            factry.database = "db-a";
+            String first = jwt(factry.port(), rest.getAddress().getPort(), "sig-rest-one");
+            provider = start(saved("collectorToken", secrets.referenced("vault", "factry", first + "\n").toJsonTree()));
+
+            String second = jwt(factry.port(), rest.getAddress().getPort(), "sig-rest-two");
+            factry.acceptedToken = second;
+            secrets.providers.get("vault").put("factry", second);
+            restAuth.clear();
+            provider.checkConnection();
+
+            assertFalse(restAuth.isEmpty());
+            assertTrue(restAuth.stream().allMatch(("Bearer " + second)::equals), "the REST call must use the new token");
+            assertFalse(log.text().contains("sig-rest"), "the log must not contain the token");
+        } finally {
+            rest.stop(0);
+        }
+    }
+
     /** SchemaUtil warns about any field named like a secret that is not a SecretConfig. */
     @Test
     void legacyTokenFieldGivesNoSecretWarning() {
@@ -295,6 +334,16 @@ class TokenSecretTest {
         config.addProperty("delimiter", "/");
         config.addProperty("customCaCert", TestTls.caPem());
         return new FactryHistorianExtensionPoint().decode(config);
+    }
+
+    /** A collector token that also names Factry's REST port and organisation. */
+    private static String jwt(int port, int restPort, String signature) {
+        Base64.Encoder enc = Base64.getUrlEncoder().withoutPadding();
+        String header = enc.encodeToString("{\"alg\":\"HS256\",\"typ\":\"JWT\"}".getBytes(StandardCharsets.UTF_8));
+        String payload = enc.encodeToString(("{\"uuid\":\"collector\",\"name\":\"Ignition\",\"organization-uuid\":\"org-1\","
+                + "\"aud\":\"http://127.0.0.1\",\"grpc-port\":\"" + port + "\",\"rest-port\":\"" + restPort + "\"}")
+                .getBytes(StandardCharsets.UTF_8));
+        return header + "." + payload + "." + signature;
     }
 
     /** A collector token for the fake Factry; the signature is not checked. */

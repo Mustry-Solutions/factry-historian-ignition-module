@@ -30,6 +30,28 @@ final class TestTls {
         }
     }
 
+    /** The JDK's server context for {@code name}, for an HTTPS stand-in of Factry's REST API. */
+    static javax.net.ssl.SSLContext jdkServer(String name) throws Exception {
+        String keyPem;
+        java.security.cert.Certificate cert;
+        try (InputStream key = open(name + ".key"); InputStream crt = open(name + ".crt")) {
+            keyPem = new String(key.readAllBytes(), StandardCharsets.US_ASCII);
+            cert = java.security.cert.CertificateFactory.getInstance("X.509").generateCertificate(crt);
+        }
+        byte[] der = java.util.Base64.getMimeDecoder().decode(keyPem.replaceAll("-----[A-Z ]+-----", ""));
+        java.security.PrivateKey key = java.security.KeyFactory.getInstance("EC")
+                .generatePrivate(new java.security.spec.PKCS8EncodedKeySpec(der));
+        java.security.KeyStore ks = java.security.KeyStore.getInstance("PKCS12");
+        ks.load(null, null);
+        ks.setKeyEntry("server", key, "changeit".toCharArray(), new java.security.cert.Certificate[]{cert});
+        javax.net.ssl.KeyManagerFactory kmf = javax.net.ssl.KeyManagerFactory.getInstance(
+                javax.net.ssl.KeyManagerFactory.getDefaultAlgorithm());
+        kmf.init(ks, "changeit".toCharArray());
+        javax.net.ssl.SSLContext context = javax.net.ssl.SSLContext.getInstance("TLS");
+        context.init(kmf.getKeyManagers(), null, null);
+        return context;
+    }
+
     static String caPem() {
         try (InputStream in = open("test-ca.crt")) {
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
