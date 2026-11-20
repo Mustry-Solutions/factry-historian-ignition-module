@@ -109,9 +109,88 @@ class TokenSecretTest {
         assertOnlySent(rotated);
     }
 
+    /** An older profile with a blank or bad plain token still loads, and shows Errored when it starts. */
     @Test
-    void saveRefusesAMissingToken() throws Exception {
-        assertEquals(List.of("collectorToken"), fieldsInError(new JsonObject()));
+    void olderProfileWithABlankOrBadPlainTokenStillLoads() throws Exception {
+        for (String plain : new String[]{"", "not a token"}) {
+            JsonObject settings = new JsonObject();
+            settings.addProperty("token", plain);
+            assertTrue(validate(settings).isEmpty(), "'" + plain + "'");
+        }
+        assertTrue(validate(new JsonObject()).isEmpty());
+    }
+
+    /**
+     * The value in the provider is a JWT but no collector token. Before, the reload took it, failed
+     * in applyTokenDefaults with an ERROR, and skipped the status and the sink pause, every 30 s.
+     */
+    @Test
+    void reloadedValueThatIsNotACollectorTokenLeavesTheRefusalVisible() throws Exception {
+        provider = start(saved("collectorToken", secrets.referenced("vault", "factry", token).toJsonTree()));
+        factry.acceptedToken = "revoked-everything";
+        secrets.providers.get("vault").put("factry", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln");
+
+        try (LogCapture log = new LogCapture(FactryHistoryProvider.class.getName(), Level.INFO)) {
+            provider.checkConnection();
+            provider.checkConnection();
+
+            assertEquals("Factry refused the collector token", provider.statusOnceStarted().getMessage().toString());
+            assertTrue(log.events().stream().noneMatch(e -> e.getLevel() == Level.ERROR), log.text());
+            assertFalse(log.text().contains("now holds another one"), log.text());
+            assertEquals(1, log.events().stream().filter(e -> e.getFormattedMessage().contains("does not hold a usable"))
+                    .count(), log.text());
+            assertFalse(log.text().contains("c2ln"), "the log must not contain the value");
+        }
+    }
+
+    /** A rotated token that names another Factry (host or port) is followed, not the first one's. */
+    @Test
+    void reloadedTokenForAnotherPortIsFollowed() throws Exception {
+        try (FakeFactryServer other = new FakeFactryServer(TestTls.LOOPBACK)) {
+            String uuid = other.addMeasurement("default/a", "number");
+            other.addPoint(uuid, START, 1.0);
+            provider = start(saved("collectorToken", secrets.referenced("vault", "factry", token).toJsonTree()));
+            String forOther = jwt(other.port(), "sig-other");
+
+            factry.acceptedToken = forOther;
+            secrets.providers.get("vault").put("factry", forOther);
+            provider.checkConnection();
+
+            assertReads();
+            assertFalse(other.authorizations.isEmpty(), "reads must go to the Factry the new token names");
+        }
+    }
+
+    /**
+     * A provider of another module, or a remote one, may not be ready when the gateway starts the
+     * profile. Before, the constructor threw and nothing tried again.
+     */
+    @Test
+    void providerNotReadyAtStartIsReadOnALaterCheck() throws Exception {
+        provider = start(saved("collectorToken", SecretConfig.referenced("later", "factry").toJsonTree()));
+
+        provider.checkConnection();
+        var status = provider.statusOnceStarted();
+        assertEquals("Errored", status.getState().name());
+        assertEquals("Collector token cannot be read", status.getMessage().toString());
+        assertTrue(status.getErrorDetails().contains("'later'") && status.getErrorDetails().contains("'factry'"),
+                status.getErrorDetails());
+
+        secrets.referenced("later", "factry", token);
+        provider.checkConnection();
+
+        assertEquals(com.inductiveautomation.ignition.gateway.model.ProfileStatus.RUNNING, provider.statusOnceStarted());
+        assertReads();
+        assertOnlySent(token);
+    }
+
+    /** SchemaUtil warns about any field named like a secret that is not a SecretConfig. */
+    @Test
+    void legacyTokenFieldGivesNoSecretWarning() {
+        try (LogCapture log = new LogCapture("OpenAPI.SchemaUtil", Level.WARN)) {
+            new FactryHistorianExtensionPoint().settingsSchema();
+            assertFalse(log.text().contains("'token'"), log.text());
+        }
     }
 
     @Test

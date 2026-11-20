@@ -1,6 +1,7 @@
 package io.factry.historian.gateway;
 
 import com.inductiveautomation.historian.gateway.api.config.HistorianSettings;
+import com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.NonSecret;
 import com.inductiveautomation.ignition.gateway.secrets.SecretConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +35,9 @@ public class FactryHistorianSettings implements HistorianSettings {
     // The token in plain text, as profiles saved before collectorToken existed hold it. Only read
     // while collectorToken is not set; FactryHistorianExtensionPoint.encode leaves it out then, so
     // the first save with collectorToken removes the plain copy from config.json.
+    // @NonSecret: deliberately a plain string, so Ignition does not warn at every start that a
+    // field named like a secret is not a SecretConfig.
+    @NonSecret
     private String token = "";
     // Optional PEM-encoded CA certificate(s) to trust in addition to the system CAs, for a
     // Historian (or a proxy in front of it) with a certificate of its own.
