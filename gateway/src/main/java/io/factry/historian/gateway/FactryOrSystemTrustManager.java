@@ -74,13 +74,10 @@ final class FactryOrSystemTrustManager extends X509ExtendedTrustManager {
         }
     }
 
+    /** Knows no host, so it cannot make the normal check; Netty and the JDK always pass the engine. */
     @Override
     public void checkServerTrusted(X509Certificate[] chain, String authType) throws CertificateException {
-        try {
-            system.checkServerTrusted(chain, authType);
-        } catch (CertificateException e) {
-            checkFactry(chain, authType, e);
-        }
+        throw new CertificateException("Server certificate check without the host is not supported");
     }
 
     /** The Factry check; when it fails too, the error of the check that applies to this chain. */

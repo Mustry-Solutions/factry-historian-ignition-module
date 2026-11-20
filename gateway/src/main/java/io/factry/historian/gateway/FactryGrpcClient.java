@@ -580,6 +580,11 @@ public class FactryGrpcClient {
             return " The server does not answer with TLS. Factry's gRPC port always uses TLS: check Host Override"
                     + " and Port Override, or the grpc-port in the token.";
         }
+        if (causes.contains("signed by Factry's CA")) {
+            return " The certificate is signed by Factry's CA but is not Factry's built-in certificate, which names"
+                    + " only " + FACTRY_CERTIFICATE_NAME + " (the host the module connects to does not matter for"
+                    + " it). Check what serves this host and port.";
+        }
         if (causes.contains("No subject alternative") || causes.contains("No name matching")) {
             return " Factry's certificate does not name the host the module connects to. Set Host Override to a"
                     + " name in the certificate, or give Factry a certificate for this host. If Custom CA"

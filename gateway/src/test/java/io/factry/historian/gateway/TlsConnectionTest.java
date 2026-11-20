@@ -156,6 +156,33 @@ class TlsConnectionTest {
         });
     }
 
+    /**
+     * Signed by Factry's CA but not naming historian.factry.local: no host can fix that, since the
+     * Factry check accepts only that name. The hint must not send the user to Host Override.
+     */
+    @Test
+    void factrySignedCertificateForAnotherNameIsNotTheBuiltInOne() throws Exception {
+        FakeFactryServer factry = server(TestTls.LOOPBACK);
+
+        Status check = client(factry, true, null).checkConnection();
+
+        assertEquals(Status.Code.UNAVAILABLE, check.getCode());
+        String hint = FactryGrpcClient.tlsHint(check);
+        assertTrue(hint.contains("not Factry's built-in certificate"), hint);
+        assertFalse(hint.contains("Set Host Override"), hint);
+    }
+
+    /** The two-argument check knows no host, so it must never pass a certificate. */
+    @Test
+    void checkWithoutAHostIsRefused() throws Exception {
+        FactryOrSystemTrustManager tm = new FactryOrSystemTrustManager(TestTls.ca());
+        java.security.cert.X509Certificate[] chain = {(java.security.cert.X509Certificate)
+                java.security.cert.CertificateFactory.getInstance("X.509").generateCertificate(
+                        TlsConnectionTest.class.getClassLoader().getResourceAsStream("tls/test-factry-builtin.crt"))};
+
+        assertThrows(java.security.cert.CertificateException.class, () -> tm.checkServerTrusted(chain, "ECDHE_ECDSA"));
+    }
+
     /** "PKIX path validation failed ... validity check failed" is no unknown CA. */
     @Test
     void expiredCertificateSaysItExpired() throws Exception {
