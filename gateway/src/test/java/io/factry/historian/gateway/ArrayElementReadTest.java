@@ -242,6 +242,19 @@ class ArrayElementReadTest {
     }
 
     @Test
+    void anIndexTooLargeForAnInt_isNotFound_andTheOtherPensStillRead() throws Exception {
+        storeArray();
+
+        IgnitionHistoryQuery.Dataset ds = raw(-1, "Plain", "Arr[99999999999]");
+
+        assertNull(ds.error, ds::toString);
+        assertEquals(List.of(7.0), column(ds, 1), ds::toString);
+        for (QualityCode[] q : ds.qualities) {
+            assertTrue(q[2].is(QualityCode.Bad_NotFound), ds::toString);
+        }
+    }
+
+    @Test
     void anElementPastTheEndOfAStoredRow_isBad_notZeroMarkedGood() throws Exception {
         storeArray();
 
