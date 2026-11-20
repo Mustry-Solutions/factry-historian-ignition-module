@@ -101,6 +101,31 @@ public final class JwtTokenParser {
         });
     }
 
+    /**
+     * The {@code use-self-signed-certificate} claim: Factry serves its built-in certificate (its
+     * USE_SELF_SIGNED_CERTIFICATE setting). Factry v8.2.3 writes a JSON boolean; a string "true" is
+     * accepted too. Absent means false.
+     */
+    public static boolean usesFactryCertificate(JsonObject payload) {
+        return getStringField(payload, "use-self-signed-certificate").map(Boolean::parseBoolean).orElse(false);
+    }
+
+    /** Extract the REST port from the {@code rest-port} claim. */
+    public static Optional<Integer> getRestPort(JsonObject payload) {
+        return getStringField(payload, "rest-port").map(port -> {
+            try {
+                return Integer.parseInt(port);
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        });
+    }
+
+    /** Extract the organisation UUID from the {@code organization-uuid} claim. */
+    public static Optional<String> getOrganizationUUID(JsonObject payload) {
+        return getStringField(payload, "organization-uuid");
+    }
+
     private static Optional<String> getStringField(JsonObject obj, String field) {
         if (obj != null && obj.has(field) && !obj.get(field).isJsonNull()) {
             String value = obj.get(field).getAsString();

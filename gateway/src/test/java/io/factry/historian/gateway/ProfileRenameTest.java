@@ -126,7 +126,7 @@ class ProfileRenameTest {
     void aNewFactryThatCannotBeReadStillRestartsTheProfile() throws Exception {
         provider = started("factry-r");
         FactryHistorianSettings elsewhere = unreachableFactry();
-        elsewhere.setGrpcPort(2);
+        elsewhere.setPortOverride(2);
 
         assertFalse(provider.handleSettingsChange(elsewhere),
                 "the cache still holds the old Factry's measurements; a fresh start does not");
@@ -163,27 +163,52 @@ class ProfileRenameTest {
     void aNewTokenForTheSameCollectorWhileFactryIsDownIsApplied() throws Exception {
         provider = started("factry-r");
         FactryHistorianSettings newToken = unreachableFactry();
-        newToken.setToken(newToken.getToken() + "2");
+        newToken.setCollectorToken(FakeSecrets.embedded(TOKEN_2));
 
         assertTrue(provider.handleSettingsChange(newToken));
 
         assertSame(newToken, provider.getSettings());
-        assertEquals(newToken.getToken(), provider.connection().token(), "the client uses the new token");
+        assertEquals(TOKEN_2, provider.connection().token(), "the client uses the new token");
         assertEquals(ProfileStatus.State.Errored, provider.getStatus().getState(), "Factry is still down");
+    }
+
+    /** The same reference, but the secret provider now holds another token: not "unchanged". */
+    @Test
+    void aSaveAfterTheSecretChangedIsApplied() throws Exception {
+        provider = started("factry-r");
+        secrets.providers.get("vault").put("factry", TOKEN_2);
+
+        assertTrue(provider.handleSettingsChange(unreachableFactry()));
+
+        assertEquals(TOKEN_2, provider.connection().token());
     }
 
     @Test
     void aTlsChangeForTheSameCollectorWhileFactryIsDownIsApplied() throws Exception {
         provider = started("factry-r");
         FactryHistorianSettings tls = unreachableFactry();
-        tls.setUseTls(!provider.getSettings().isUseTls());
         tls.setSkipTlsVerification(true);
 
         assertTrue(provider.handleSettingsChange(tls));
 
         assertSame(tls, provider.getSettings());
-        assertEquals(tls.isUseTls(), provider.connection().useTls());
+        assertTrue(provider.connection().skipTlsVerification());
         assertEquals(ProfileStatus.State.Errored, provider.getStatus().getState());
+    }
+
+    /** The 8.3.8 order, with the token read from its secret provider as at a start. */
+    @Test
+    void aRenameSaveReadsTheTokenFromItsSecretProvider() throws Exception {
+        provider = started("factry-r");
+        secrets.providers.get("vault").put("factry", TOKEN_2);
+        FactryHistorianSettings saved = unreachableFactry();
+        saved.setDelimiter("/");
+        storedProfile("factry-r2", saved);
+
+        assertTrue(provider.handleNameChange("factry-r2"));
+
+        assertEquals("/", provider.getSettings().getDelimiter());
+        assertEquals(TOKEN_2, provider.connection().token());
     }
 
     /** A profile started the way Ignition starts it; Factry is not reachable, which is fine here. */
@@ -209,17 +234,31 @@ class ProfileRenameTest {
         profiles.put(name, builder.build());
     }
 
-    private static FactryHistorianSettings unreachableFactry() {
+    /** Collector tokens for one collector at a closed port: the second is a new one for it. */
+    private static final String TOKEN = token("sig");
+    private static final String TOKEN_2 = token("sig2");
+
+    private static String token(String signature) {
         String payload = "{\"uuid\":\"collector-uuid\",\"name\":\"Ignition\","
                 + "\"aud\":\"http://127.0.0.1\",\"grpc-port\":\"1\"}";
+        return "e30." + Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(payload.getBytes(StandardCharsets.UTF_8)) + "." + signature;
+    }
+
+    private final FakeSecrets secrets = new FakeSecrets();
+    private final com.inductiveautomation.ignition.gateway.secrets.SecretConfig vaultToken =
+            secrets.referenced("vault", "factry", TOKEN);
+
+    /** Settings as saved: the token read from a secret provider. */
+    private FactryHistorianSettings unreachableFactry() {
         FactryHistorianSettings settings = new FactryHistorianSettings();
-        settings.setToken("e30." + Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(payload.getBytes(StandardCharsets.UTF_8)) + ".sig");
+        settings.setCollectorToken(vaultToken);
         return settings;
     }
 
     private GatewayContext gatewayContext() {
         MetricRegistry registry = new MetricRegistry();
+        GatewayContext secretsContext = secrets.gatewayContext();
         StoreAndForwardManager storeAndForward = storeAndForwardManager();
         ConfigurationManager configuration = configurationManager();
         return (GatewayContext) Proxy.newProxyInstance(GatewayContext.class.getClassLoader(),
@@ -227,6 +266,8 @@ class ProfileRenameTest {
                     case "getMetricRegistry" -> registry;
                     case "getStoreAndForwardManager" -> storeAndForward;
                     case "getConfigurationManager" -> configuration;
+                    case "getSystemEncryptionService" -> secretsContext.getSystemEncryptionService();
+                    case "getSecretProviderManager" -> secretsContext.getSecretProviderManager();
                     case "hashCode" -> System.identityHashCode(proxy);
                     case "equals" -> proxy == args[0];
                     default -> throw new UnsupportedOperationException(method.getName());

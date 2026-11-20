@@ -2,6 +2,8 @@ package io.factry.historian.gateway;
 
 import org.junit.jupiter.api.Test;
 
+import com.inductiveautomation.ignition.gateway.secrets.SecretConfig;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
@@ -18,10 +20,11 @@ class SettingsSameAsTest {
     private static FactryHistorianSettings settings() {
         String payload = "{\"uuid\":\"collector-uuid\",\"name\":\"Ignition\","
                 + "\"aud\":\"http://127.0.0.1\",\"grpc-port\":\"1\"}";
+        String token = "e30." + Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(payload.getBytes(StandardCharsets.UTF_8)) + ".sig";
         FactryHistorianSettings s = new FactryHistorianSettings();
-        s.setToken("e30." + Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(payload.getBytes(StandardCharsets.UTF_8)) + ".sig");
-        s.applyTokenDefaults(s.getToken());
+        s.setCollectorToken(FakeSecrets.embedded(token));
+        s.applyTokenDefaults(token);
         return s;
     }
 
@@ -50,8 +53,12 @@ class SettingsSameAsTest {
         if (type == String.class) {
             return value + "x";
         }
-        if (type == int.class) {
-            return (Integer) value + 1;
+        if (type == int.class || type == Integer.class) {
+            // A port override of 0 or none means "not set", so change it to a set one.
+            return value == null || (Integer) value == 0 ? 1 : (Integer) value + 1;
+        }
+        if (type == SecretConfig.class) {
+            return FakeSecrets.embedded("another token");
         }
         if (type == boolean.class) {
             return !(Boolean) value;
