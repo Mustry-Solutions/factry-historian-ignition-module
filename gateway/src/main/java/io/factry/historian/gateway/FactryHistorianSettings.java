@@ -1,6 +1,7 @@
 package io.factry.historian.gateway;
 
 import com.inductiveautomation.historian.gateway.api.config.HistorianSettings;
+import com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.NonSecret;
 import com.inductiveautomation.ignition.gateway.secrets.SecretConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,6 +15,11 @@ public class FactryHistorianSettings implements HistorianSettings {
     private static final int DEFAULT_GRPC_PORT = 9876;
     private String grpcHost = DEFAULT_GRPC_HOST;
     private int grpcPort = DEFAULT_GRPC_PORT;
+    // grpcHost and grpcPort as stored, kept at the first applyTokenDefaults: that one replaces the
+    // defaults with the token's values, and a later token (from a secret provider) must start from
+    // the stored values again.
+    private transient String storedGrpcHost;
+    private transient Integer storedGrpcPort;
     private boolean debugLogging = false;
     private boolean useTls = false;
     private boolean skipTlsVerification = false;
@@ -23,6 +29,9 @@ public class FactryHistorianSettings implements HistorianSettings {
     // The token in plain text, as profiles saved before collectorToken existed hold it. Only read
     // while collectorToken is not set; FactryHistorianExtensionPoint.encode leaves it out then, so
     // the first save with collectorToken removes the plain copy from config.json.
+    // @NonSecret: deliberately a plain string, so Ignition does not warn at every start that a
+    // field named like a secret is not a SecretConfig.
+    @NonSecret
     private String token = "";
     // Optional PEM-encoded CA certificate(s) to trust in addition to the system and bundled
     // Factry CAs — for Historians fronted by an internal/enterprise CA or a self-signed cert.
@@ -139,16 +148,22 @@ public class FactryHistorianSettings implements HistorianSettings {
         this.collectorUUID = claims.collectorUUID();
         this.collectorName = claims.collectorName();
 
+        if (storedGrpcHost == null) {
+            storedGrpcHost = grpcHost;
+            storedGrpcPort = grpcPort;
+        }
         // Only apply host/port from token if config still has defaults.
-        if (DEFAULT_GRPC_HOST.equals(this.grpcHost)) {
+        if (DEFAULT_GRPC_HOST.equals(storedGrpcHost)) {
             this.grpcHost = claims.host();
         } else {
-            logger.info("Config grpcHost '{}' overrides token host '{}'", this.grpcHost, claims.host());
+            this.grpcHost = storedGrpcHost;
+            logger.info("Config grpcHost '{}' overrides token host '{}'", storedGrpcHost, claims.host());
         }
-        if (DEFAULT_GRPC_PORT == this.grpcPort) {
+        if (DEFAULT_GRPC_PORT == storedGrpcPort) {
             this.grpcPort = claims.port();
         } else {
-            logger.info("Config grpcPort '{}' overrides token port '{}'", this.grpcPort, claims.port());
+            this.grpcPort = storedGrpcPort;
+            logger.info("Config grpcPort '{}' overrides token port '{}'", storedGrpcPort, claims.port());
         }
 
         logger.info("Extracted from token: collectorName={}, collectorUUID={}, host={}, port={}",

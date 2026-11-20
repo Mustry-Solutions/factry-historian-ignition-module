@@ -135,6 +135,13 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
         observer.onCompleted();
     }
 
+    /** The connection check. */
+    @Override
+    public void getCollector(com.google.protobuf.Empty request, StreamObserver<io.factry.historian.proto.Collector> observer) {
+        observer.onNext(io.factry.historian.proto.Collector.newBuilder().setUuid("collector").build());
+        observer.onCompleted();
+    }
+
     @Override
     public void getAssets(GetAssetsRequest request, StreamObserver<Assets> observer) {
         observer.onNext(Assets.getDefaultInstance());
