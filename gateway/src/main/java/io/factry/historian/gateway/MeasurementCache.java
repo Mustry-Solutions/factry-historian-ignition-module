@@ -19,6 +19,7 @@ import io.factry.historian.proto.MetadataProperty;
 import io.factry.historian.proto.MeasurementRequest;
 import io.factry.historian.proto.Measurements;
 import io.factry.historian.proto.Pagination;
+import io.factry.historian.proto.TimeseriesDatabase;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 
 public class MeasurementCache {
@@ -64,6 +66,27 @@ public class MeasurementCache {
 
     /** Collector UUID → collector name, for grouping in the browse tree. */
     private volatile ConcurrentHashMap<String, String> collectorNames = new ConcurrentHashMap<>();
+
+    /**
+     * What reads and browse use, apart from the write path's maps above. Several Sites can share
+     * one organisation: each Site's gateway writes to its own time-series database with its own
+     * collector, and the same tag gets the same measurement name at every Site, since names are
+     * unique per database only. A read key is the measurement's name for the own Site (the
+     * databases this collector's measurements are in), and {@code [<database name>]<name>} for
+     * another Site's, so a tag's own path never reads another Site's measurement, and every
+     * measurement browse lists resolves to itself. Read key → UUID, and back.
+     */
+    private volatile ConcurrentHashMap<String, String> readKeyToUUID = new ConcurrentHashMap<>();
+    private volatile ConcurrentHashMap<String, String> uuidToReadKey = new ConcurrentHashMap<>();
+    /** Time-series database UUID → name, from the last full refresh. */
+    private volatile Map<String, String> databaseNames = Map.of();
+    /**
+     * The own Site's database UUIDs: the databases this collector has measurements in, or the
+     * only database there is. Empty when unknown, so a bare name resolves only to this collector's
+     * measurements. Null when Factry did not list its databases: every measurement is the own
+     * Site's then, as before Sites were told apart.
+     */
+    private volatile Set<String> ownDatabases = Set.of();
 
     /**
      * Metadata properties cached from doStoreMetadata, applied when creating measurements. Creating a
@@ -139,6 +162,7 @@ public class MeasurementCache {
             tagPathToUUID.remove(old.getName(), uuid);
         }
         inactiveByName.computeIfPresent(m.getName(), (name, cached) -> cached.getUuid().equals(uuid) ? null : cached);
+        forgetReadKey(uuid);
         if (isActive(m)) {
             cacheMeasurement(m, collectorUUID);
         } else {
@@ -160,6 +184,61 @@ public class MeasurementCache {
     }
 
     /**
+     * Factry's time-series databases, UUID → name, or null when Factry does not list them to this
+     * collector: then Sites are not told apart. A connection error is thrown.
+     */
+    private static Map<String, String> listDatabases(FactryGrpcClient grpcClient) {
+        try {
+            Map<String, String> databases = new LinkedHashMap<>();
+            for (TimeseriesDatabase d : grpcClient.getTimeseriesDatabases().getTimeseriesDatabasesList()) {
+                databases.put(d.getUuid(), d.getName());
+            }
+            return databases;
+        } catch (RuntimeException e) {
+            if (FactryGrpcClient.isConnectionError(e)) {
+                throw e;
+            }
+            logger.warn("Factry did not list its time-series databases ({}); reads and browse cover every"
+                    + " measurement of the organisation as one Site", e.getMessage());
+            return null;
+        }
+    }
+
+    /** Read every page of a measurement list, handing each measurement to {@code take}. */
+    private long loadAll(FactryGrpcClient grpcClient, GetMeasurementsByFilterRequest.Builder filter,
+                         Consumer<Measurement> take) {
+        long offset = 0;
+        long serverTotal = Long.MAX_VALUE;
+        while (offset < serverTotal) {
+            Measurements response = grpcClient.getMeasurementsByFilter(filter.clone()
+                    .setPagination(Pagination.newBuilder().setLimit(pageSize).setOffset(offset).build())
+                    .build());
+            if (response.getTotal() > 0) {
+                serverTotal = response.getTotal();
+            }
+            int pageCount = response.getMeasurementsCount();
+            if (pageCount == 0) {
+                break;
+            }
+            response.getMeasurementsList().forEach(take);
+            offset += pageCount;
+        }
+        return offset;
+    }
+
+    private String ownSiteDescription() {
+        Set<String> own = ownDatabases;
+        if (own == null) {
+            return "every database";
+        }
+        if (own.isEmpty()) {
+            return "this collector's measurements (no database known yet)";
+        }
+        Map<String, String> names = databaseNames;
+        return own.stream().map(uuid -> names.getOrDefault(uuid, uuid)).sorted().toList().toString();
+    }
+
+    /**
      * Reload every measurement of the organisation, the collectors and the assets. Runs at
      * startup, on a settings change and every {@code measurement.cache.full.refresh.seconds}
      * from {@link #sync}.
@@ -167,44 +246,56 @@ public class MeasurementCache {
     public synchronized void refresh(FactryGrpcClient grpcClient) {
         try {
             String ownCollectorUUID = grpcClient.getCollectorUUID();
-            Timestamp freshSince = null;
-            // Fetch all measurements using pagination
             Map<String, Measurement> freshByName = new HashMap<>();
             Map<String, Measurement> freshMeasurements = new HashMap<>();
             Map<String, Measurement> freshInactive = new HashMap<>();
-            long offset = 0;
-            long serverTotal = Long.MAX_VALUE;
-
-            while (offset < serverTotal) {
-                GetMeasurementsByFilterRequest request = GetMeasurementsByFilterRequest.newBuilder()
-                        .setPagination(Pagination.newBuilder()
-                                .setLimit(pageSize)
-                                .setOffset(offset)
-                                .build())
-                        .build();
-                Measurements response = grpcClient.getMeasurementsByFilter(request);
-
-                if (response.getTotal() > 0) {
-                    serverTotal = response.getTotal();
+            Timestamp[] freshSince = {null};
+            Consumer<Measurement> take = m -> {
+                if (m.getCollectorUUID().equalsIgnoreCase(ownCollectorUUID)) {
+                    freshSince[0] = later(freshSince[0], m);
                 }
-
-                int pageCount = response.getMeasurementsCount();
-                if (pageCount == 0) {
-                    break;
+                if (isActive(m)) {
+                    putPreferringOwn(freshByName, m, ownCollectorUUID);
+                    freshMeasurements.put(m.getUuid(), m);
+                } else {
+                    putInactive(freshInactive, m, ownCollectorUUID);
                 }
+            };
 
-                for (Measurement m : response.getMeasurementsList()) {
-                    if (m.getCollectorUUID().equalsIgnoreCase(ownCollectorUUID)) {
-                        freshSince = later(freshSince, m);
-                    }
-                    if ("active".equalsIgnoreCase(m.getStatus())) {
-                        putPreferringOwn(freshByName, m, ownCollectorUUID);
-                        freshMeasurements.put(m.getUuid(), m);
-                    } else {
-                        putInactive(freshInactive, m, ownCollectorUUID);
-                    }
+            // Measurement has no database field, so load database by database to learn which
+            // Site each one is in. Discovered measurements are in no database yet.
+            Map<String, String> freshDatabases = listDatabases(grpcClient);
+            Map<String, String> databaseOf = new HashMap<>();
+            Set<String> freshOwnDatabases = null;
+            long total;
+            if (freshDatabases == null) {
+                total = loadAll(grpcClient, GetMeasurementsByFilterRequest.newBuilder(), take);
+            } else {
+                freshOwnDatabases = new HashSet<>();
+                total = 0;
+                boolean anyCollector = ownCollectorUUID == null || ownCollectorUUID.isEmpty();
+                for (String database : freshDatabases.keySet()) {
+                    Set<String> own = freshOwnDatabases;
+                    total += loadAll(grpcClient, GetMeasurementsByFilterRequest.newBuilder().addDatabaseUUIDs(database),
+                            m -> {
+                                databaseOf.put(m.getUuid(), database);
+                                // Not isOwnedBy: a measurement without a collector (a
+                                // calculation, a manual entry) says nothing about the Site.
+                                if (anyCollector || m.getCollectorUUID().equalsIgnoreCase(ownCollectorUUID)) {
+                                    own.add(database);
+                                }
+                                take.accept(m);
+                            });
                 }
-                offset += pageCount;
+                total += loadAll(grpcClient, GetMeasurementsByFilterRequest.newBuilder().addStatuses("Discovered"),
+                        m -> {
+                            if (!databaseOf.containsKey(m.getUuid())) {
+                                take.accept(m);
+                            }
+                        });
+                if (freshOwnDatabases.isEmpty() && freshDatabases.size() == 1) {
+                    freshOwnDatabases.addAll(freshDatabases.keySet());
+                }
             }
 
             Map<String, String> freshPaths = new HashMap<>();
@@ -212,17 +303,39 @@ public class MeasurementCache {
                 freshPaths.put(m.getName(), m.getUuid());
             }
 
+            Map<String, String> freshReadKeys = new HashMap<>();
+            for (Measurement m : freshMeasurements.values()) {
+                String database = databaseOf.get(m.getUuid());
+                boolean ownSite = freshOwnDatabases == null
+                        || (database != null ? freshOwnDatabases.contains(database) : isOwnedBy(m, ownCollectorUUID));
+                if (ownSite) {
+                    String current = freshReadKeys.get(m.getName());
+                    if (current == null || !isOwnedBy(freshMeasurements.get(current), ownCollectorUUID)
+                            || isOwnedBy(m, ownCollectorUUID)) {
+                        freshReadKeys.put(m.getName(), m.getUuid());
+                    }
+                } else if (database != null) {
+                    freshReadKeys.putIfAbsent(TagPathUtil.qualify(freshDatabases.get(database), m.getName()), m.getUuid());
+                }
+            }
+            Map<String, String> freshKeyOf = new HashMap<>();
+            freshReadKeys.forEach((key, uuid) -> freshKeyOf.put(uuid, key));
+
             // Swap in freshly-built maps by reference so deleted measurements don't linger and
             // concurrent readers never observe a half-filled map. The UUID map goes first, so a
             // name found in the new path map always has its measurement.
             uuidToMeasurement = new ConcurrentHashMap<>(freshMeasurements);
             tagPathToUUID = new ConcurrentHashMap<>(freshPaths);
             inactiveByName = new ConcurrentHashMap<>(freshInactive);
-            ownChangesSince = freshSince;
+            uuidToReadKey = new ConcurrentHashMap<>(freshKeyOf);
+            readKeyToUUID = new ConcurrentHashMap<>(freshReadKeys);
+            databaseNames = freshDatabases != null ? Map.copyOf(freshDatabases) : Map.of();
+            ownDatabases = freshOwnDatabases != null ? Set.copyOf(freshOwnDatabases) : null;
+            ownChangesSince = freshSince[0];
             lastFullRefresh = now.getAsLong();
             loaded = true;
-            logger.info("Measurement cache refreshed, {} active of {} total from Factry",
-                    freshPaths.size(), serverTotal == Long.MAX_VALUE ? offset : serverTotal);
+            logger.info("Measurement cache refreshed, {} active of {} total from Factry, own Site: {}",
+                    freshPaths.size(), total, ownSiteDescription());
 
             // Collector names, for the browse folders
             try {
@@ -531,12 +644,18 @@ public class MeasurementCache {
      * ends the lookup with the matches so far, so the measurement is created as before.
      */
     private List<Measurement> lookUpByName(String tagPath, FactryGrpcClient grpcClient) {
+        return lookUpByName(tagPath, grpcClient, GetMeasurementsByFilterRequest.newBuilder());
+    }
+
+    /** {@link #lookUpByName(String, FactryGrpcClient)} within the databases or collectors of {@code scope}. */
+    private List<Measurement> lookUpByName(String tagPath, FactryGrpcClient grpcClient,
+                                           GetMeasurementsByFilterRequest.Builder scope) {
         String collectorUUID = grpcClient.getCollectorUUID();
         List<Measurement> matches = new ArrayList<>();
         try {
             long offset = 0;
             for (int page = 1; ; page++) {
-                GetMeasurementsByFilterRequest request = GetMeasurementsByFilterRequest.newBuilder()
+                GetMeasurementsByFilterRequest request = scope.clone()
                         .setKeyword(tagPath)
                         .setPagination(Pagination.newBuilder().setLimit(LOOKUP_PAGE_SIZE).setOffset(offset).build())
                         .build();
@@ -584,32 +703,112 @@ public class MeasurementCache {
     private final long readMissMillis = ModuleProperties.getMeasurementLookupMissSeconds() * 1000;
 
     /**
-     * The Active measurement a read of {@code name} uses. Not in the cache and not an asset's
-     * name: one exact-name lookup in Factry, so a measurement created by hand or by another
-     * collector reads at once, without waiting for the next refresh. A name Factry does not have
-     * is not asked for again for {@code measurement.lookup.miss.seconds}, so a trend with a
-     * misspelt or deleted tag does not cost a lookup on every poll. A connection error is thrown.
+     * The Active measurement a read of {@code key} uses: a measurement name, which means the own
+     * Site's, or {@code [<database name>]<name>} for another Site's (see {@link #readKeyToUUID}).
+     * Not in the cache and not an asset's name: one exact-name lookup in Factry, within the own
+     * Site's databases or the named one, so a measurement created by hand or by another collector
+     * reads at once, without waiting for the next refresh. A name Factry does not have is not
+     * asked for again for {@code measurement.lookup.miss.seconds}, so a trend with a misspelt or
+     * deleted tag does not cost a lookup on every poll. A connection error is thrown.
      */
-    public Measurement findForRead(String name, FactryGrpcClient grpcClient) {
-        Measurement m = getMeasurementByName(name);
-        if (m != null || assetNameToUUID.containsKey(name)) {
+    public Measurement findForRead(String key, FactryGrpcClient grpcClient) {
+        String readKey = ownSiteKey(key);
+        Measurement m = measurementForReadKey(readKey);
+        if (m != null || assetNameToUUID.containsKey(key)) {
             return m;
         }
         long time = now.getAsLong();
-        Long missed = readMisses.get(name);
+        Long missed = readMisses.get(readKey);
         if (missed != null && time - missed < readMissMillis) {
             return null;
         }
         String collectorUUID = grpcClient.getCollectorUUID();
-        lookUpByName(name, grpcClient).forEach(found -> cacheMeasurement(found, collectorUUID));
-        m = getMeasurementByName(name);
+        String name = databaseUUID(readKey) != null ? TagPathUtil.withoutDatabase(readKey) : readKey;
+        for (Measurement found : lookUpByName(name, grpcClient, lookupScope(readKey, collectorUUID))) {
+            if (isActive(found)) {
+                uuidToMeasurement.put(found.getUuid(), found);
+                putReadKey(readKey, found, collectorUUID);
+            }
+        }
+        m = measurementForReadKey(readKey);
         if (m == null) {
             readMisses.values().removeIf(t -> time - t >= readMissMillis);
-            readMisses.put(name, time);
+            readMisses.put(readKey, time);
         } else {
-            readMisses.remove(name);
+            readMisses.remove(readKey);
         }
         return m;
+    }
+
+    /** The read key of a cached measurement, or null when the cache does not know its Site. */
+    public String getReadKey(String measurementUUID) {
+        return uuidToReadKey.get(measurementUUID);
+    }
+
+    private Measurement measurementForReadKey(String readKey) {
+        String uuid = readKeyToUUID.get(readKey);
+        return uuid != null ? uuidToMeasurement.get(uuid) : null;
+    }
+
+    /** The database UUID a known database name in a read key names, or null. */
+    private String databaseUUID(String readKey) {
+        String name = TagPathUtil.database(readKey);
+        if (name == null) {
+            return null;
+        }
+        for (Map.Entry<String, String> e : databaseNames.entrySet()) {
+            if (e.getValue().equals(name)) {
+                return e.getKey();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * {@code key} as the cache keeps it: a name of the own Site's database stays bare, whether
+     * the reader wrote the database or not. A bracketed prefix that names no database is part of
+     * the name.
+     */
+    private String ownSiteKey(String key) {
+        String database = databaseUUID(key);
+        Set<String> own = ownDatabases;
+        return database != null && (own == null || own.contains(database)) ? TagPathUtil.withoutDatabase(key) : key;
+    }
+
+    /** Where a lookup for {@code readKey} may look. */
+    private GetMeasurementsByFilterRequest.Builder lookupScope(String readKey, String collectorUUID) {
+        GetMeasurementsByFilterRequest.Builder scope = GetMeasurementsByFilterRequest.newBuilder();
+        String database = databaseUUID(readKey);
+        Set<String> own = ownDatabases;
+        if (database != null) {
+            return scope.addDatabaseUUIDs(database);
+        }
+        if (own == null || collectorUUID == null || collectorUUID.isEmpty()) {
+            return scope;
+        }
+        return own.isEmpty() ? scope.addCollectorUUIDs(collectorUUID) : scope.addAllDatabaseUUIDs(own);
+    }
+
+    /** Make {@code key} read {@code m}, unless this collector's measurement has it. */
+    private void putReadKey(String key, Measurement m, String collectorUUID) {
+        String current = readKeyToUUID.get(key);
+        Measurement cached = current != null ? uuidToMeasurement.get(current) : null;
+        if (cached == null || !isOwnedBy(cached, collectorUUID) || isOwnedBy(m, collectorUUID)) {
+            forgetReadKey(m.getUuid());
+            if (current != null) {
+                // The one it replaces is no longer browsable by this key, which now reads m.
+                uuidToReadKey.remove(current, key);
+            }
+            readKeyToUUID.put(key, m.getUuid());
+            uuidToReadKey.put(m.getUuid(), key);
+        }
+    }
+
+    private void forgetReadKey(String uuid) {
+        String key = uuidToReadKey.remove(uuid);
+        if (key != null) {
+            readKeyToUUID.remove(key, uuid);
+        }
     }
 
     private static boolean isActive(Measurement m) {
@@ -627,6 +826,11 @@ public class MeasurementCache {
             Measurement cached = getMeasurementByName(m.getName());
             if (cached == null || !isOwnedBy(cached, collectorUUID) || isOwnedBy(m, collectorUUID)) {
                 tagPathToUUID.put(m.getName(), m.getUuid());
+            }
+            // This collector's measurements are the own Site's by definition; another
+            // collector's, found by name for the write path, may be another Site's.
+            if (m.getCollectorUUID().equalsIgnoreCase(collectorUUID)) {
+                putReadKey(m.getName(), m, collectorUUID);
             }
         } else {
             putInactive(inactiveByName, m, collectorUUID);
@@ -789,6 +993,7 @@ public class MeasurementCache {
     public void evictByUUID(String uuid) {
         uuidToMeasurement.remove(uuid);
         tagPathToUUID.entrySet().removeIf(e -> e.getValue().equals(uuid));
+        forgetReadKey(uuid);
         logger.info("Evicted measurement UUID '{}' from cache", uuid);
     }
 

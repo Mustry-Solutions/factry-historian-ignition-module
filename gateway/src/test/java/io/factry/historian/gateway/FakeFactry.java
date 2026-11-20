@@ -17,11 +17,16 @@ import io.factry.historian.proto.Measurements;
 import io.factry.historian.proto.Points;
 import io.factry.historian.proto.QueryTimeseriesRequest;
 import io.factry.historian.proto.QueryTimeseriesResponse;
+import io.factry.historian.proto.TimeseriesDatabase;
+import io.factry.historian.proto.TimeseriesDatabases;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Stands in for Factry in unit tests: the gRPC channel is never used, because the calls the
@@ -30,11 +35,26 @@ import java.util.List;
  * exists does not return the existing measurement: it adds a Discovered duplicate, or, when the
  * existing one is in another time-series database, an Active measurement. Every change stamps the
  * measurement's updatedAt, one second later each time. Deleted measurements are only listed by
- * GetMeasurements, as in Factry. Call {@link #shutdown()} after the test.
+ * GetMeasurements, as in Factry. Every measurement but a Discovered one is in a time-series
+ * database, {@link #DB} unless the test says otherwise, and the list call filters on database,
+ * collector and status like Factry. Call {@link #shutdown()} after the test.
  */
 class FakeFactry extends FactryGrpcClient {
     static final String OWN = "collector";
     static final String OTHER = "other-collector";
+    /** The database the module's collector writes to. */
+    static final String DB = "db-a";
+
+    /** Time-series database UUID to name. */
+    final Map<String, String> databases = new LinkedHashMap<>(Map.of(DB, "site_a"));
+    /** Measurement UUID to the UUID of its database. */
+    final Map<String, String> databaseOf = new HashMap<>();
+    /** The database of measurements added or created from now on. */
+    String database = DB;
+    /** Every list request, in order. */
+    final List<GetMeasurementsByFilterRequest> filterRequests = new ArrayList<>();
+    /** Every history query, in order. */
+    final List<QueryTimeseriesRequest> queries = new ArrayList<>();
 
     final List<Measurement> measurements = new ArrayList<>();
     final List<String> createdNames = new ArrayList<>();
@@ -67,6 +87,8 @@ class FakeFactry extends FactryGrpcClient {
     Status assetPropertiesFailure = null;
     /** The answer to every history query. */
     QueryTimeseriesResponse queryResponse = QueryTimeseriesResponse.getDefaultInstance();
+    /** When set, answers each history query instead of {@link #queryResponse}. */
+    java.util.function.Function<QueryTimeseriesRequest, QueryTimeseriesResponse> respond = null;
     /** How many of the next history queries fail with {@link #queryFailure}. */
     int queryFailures = 0;
     Status queryFailure = Status.UNAVAILABLE;
@@ -86,6 +108,9 @@ class FakeFactry extends FactryGrpcClient {
     void add(String name, String uuid, String collectorUUID, String status) {
         measurements.add(Measurement.newBuilder().setName(name).setUuid(uuid)
                 .setCollectorUUID(collectorUUID).setStatus(status).setUpdatedAt(tick()).build());
+        if (!"Discovered".equalsIgnoreCase(status)) {
+            databaseOf.put(uuid, database);
+        }
     }
 
     void setStatus(String uuid, String status) {
@@ -128,12 +153,19 @@ class FakeFactry extends FactryGrpcClient {
 
     @Override
     public Measurements getMeasurementsByFilter(GetMeasurementsByFilterRequest request) {
+        filterRequests.add(request);
         if (!request.hasKeyword()) {
             fullLoads++;
         }
         List<Measurement> found = new ArrayList<>();
         for (Measurement m : measurements) {
-            if (!isDeleted(m) && (!request.hasKeyword() || m.getName().contains(request.getKeyword()))) {
+            if (!isDeleted(m) && (!request.hasKeyword() || m.getName().contains(request.getKeyword()))
+                    && (request.getDatabaseUUIDsCount() == 0
+                        || request.getDatabaseUUIDsList().contains(databaseOf.get(m.getUuid())))
+                    && (request.getCollectorUUIDsCount() == 0
+                        || request.getCollectorUUIDsList().contains(m.getCollectorUUID()))
+                    && (request.getStatusesCount() == 0 || request.getStatusesList().stream()
+                        .anyMatch(st -> st.equalsIgnoreCase(m.getStatus())))) {
                 found.add(m);
             }
         }
@@ -175,16 +207,25 @@ class FakeFactry extends FactryGrpcClient {
 
     @Override
     public QueryTimeseriesResponse queryTimeseries(QueryTimeseriesRequest request) {
+        queries.add(request);
         if (queryFailures > 0) {
             queryFailures--;
             throw new StatusRuntimeException(queryFailure);
         }
-        return queryResponse;
+        return respond != null ? respond.apply(request) : queryResponse;
     }
 
     @Override
     public Collectors getCollectors() {
         return Collectors.getDefaultInstance();
+    }
+
+    @Override
+    public TimeseriesDatabases getTimeseriesDatabases() {
+        TimeseriesDatabases.Builder reply = TimeseriesDatabases.newBuilder();
+        databases.forEach((uuid, name) -> reply.addTimeseriesDatabases(
+                TimeseriesDatabase.newBuilder().setUuid(uuid).setName(name).setStatus("Active")));
+        return reply.build();
     }
 
     @Override

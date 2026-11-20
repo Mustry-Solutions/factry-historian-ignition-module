@@ -10,6 +10,7 @@ import io.factry.historian.proto.CreatePointsReply;
 import io.factry.historian.proto.GetAssetPropertiesRequest;
 import io.factry.historian.proto.GetCollectorsRequest;
 import io.factry.historian.proto.GetMeasurementsByFilterRequest;
+import io.factry.historian.proto.GetTimeseriesDatabasesRequest;
 import io.factry.historian.proto.GetAssetsRequest;
 import io.factry.historian.proto.HealthUpdate;
 import io.factry.historian.proto.HealthUpdateReply;
@@ -23,6 +24,7 @@ import io.factry.historian.proto.Points;
 import io.factry.historian.proto.QueryTimeseriesRequest;
 import io.factry.historian.proto.QueryTimeseriesResponse;
 import io.factry.historian.proto.RegisterCollectorSchema;
+import io.factry.historian.proto.TimeseriesDatabases;
 import io.grpc.CallOptions;
 import io.grpc.Channel;
 import io.grpc.ClientCall;
@@ -285,6 +287,18 @@ public class FactryGrpcClient {
             return blockingStub
                     .withDeadlineAfter(CALL_DEADLINE_SECONDS, TimeUnit.SECONDS)
                     .getCollectors(GetCollectorsRequest.newBuilder().build());
+        } finally {
+            channelLock.readLock().unlock();
+        }
+    }
+
+    public TimeseriesDatabases getTimeseriesDatabases() {
+        logger.debug("Sending GetTimeseriesDatabases");
+        channelLock.readLock().lock();
+        try {
+            return blockingStub
+                    .withDeadlineAfter(CALL_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .getTimeseriesDatabases(GetTimeseriesDatabasesRequest.getDefaultInstance());
         } finally {
             channelLock.readLock().unlock();
         }
