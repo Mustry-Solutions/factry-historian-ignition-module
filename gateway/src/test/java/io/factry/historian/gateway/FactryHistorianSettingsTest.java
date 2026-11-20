@@ -108,6 +108,21 @@ class FactryHistorianSettingsTest {
     }
 
     @Test
+    void storedZeroPortOverrideIsShownAsEmpty() {
+        FactryHistorianSettings stored = new com.google.gson.Gson().fromJson("{\"portOverride\":0}",
+                FactryHistorianSettings.class);
+        assertNull(FactryHistorianConfig.fromSettings(stored).portOverride());
+    }
+
+    @Test
+    void portOverrideCanBeClearedInTheForm() throws Exception {
+        // Ignition's form schema reads this FIELD-target annotation from the record's field.
+        var nullable = FactryHistorianConfig.class.getDeclaredField("portOverride").getAnnotation(
+                com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.IsNullable.class);
+        assertTrue(nullable != null && nullable.value());
+    }
+
+    @Test
     void emptyPortOverrideMeansTheTokensPort() {
         assertEquals(8001, withPortOverride(null).getPort());
         assertEquals(8001, withPortOverride(0).getPort());

@@ -4,6 +4,9 @@ import com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.D
 import com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.Description;
 import com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.FormCategory;
 import com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.FormField;
+import com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.IsNullable;
+import com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.Maximum;
+import com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.Minimum;
 import com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.Label;
 import com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.NonSecret;
 import com.inductiveautomation.ignition.gateway.dataroutes.openapi.annotations.Required;
@@ -32,6 +35,10 @@ public record FactryHistorianConfig(
         @FormCategory("Connection")
         @Label("Port Override")
         @FormField(FormFieldType.NUMBER)
+        // Without IsNullable the form refuses a cleared field ("Field must be of type: number").
+        @IsNullable(true)
+        @Minimum("1")
+        @Maximum("65535")
         @Description("Optional. Factry Historian's gRPC port as the gateway reaches it, when that is not the "
                 + "grpc-port in the token. Leave empty to use the token's port. A new token does not change this value.")
         Integer portOverride,

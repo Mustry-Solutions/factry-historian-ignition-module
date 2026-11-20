@@ -76,7 +76,8 @@ public class FactryHistorianSettings implements HistorianSettings {
     }
 
     public Integer getPortOverride() {
-        return portOverride;
+        // A profile saved before the fix below may still hold 0.
+        return isSet(portOverride) ? portOverride : null;
     }
 
     public void setPortOverride(Integer portOverride) {
