@@ -147,6 +147,24 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
         observer.onCompleted();
     }
 
+    /** RegisterCollector calls, then the "status" of every UpdateCollectorState, in order. */
+    final List<String> registrations = new CopyOnWriteArrayList<>();
+
+    @Override
+    public void registerCollector(io.factry.historian.proto.RegisterCollectorSchema request,
+                                  StreamObserver<io.factry.historian.proto.Collector> observer) {
+        registrations.add("register");
+        observer.onNext(io.factry.historian.proto.Collector.newBuilder().setUuid("collector").build());
+        observer.onCompleted();
+    }
+
+    @Override
+    public void updateCollectorState(Struct request, StreamObserver<com.google.protobuf.Empty> observer) {
+        registrations.add(request.getFieldsOrDefault("status", Value.getDefaultInstance()).getStringValue());
+        observer.onNext(com.google.protobuf.Empty.getDefaultInstance());
+        observer.onCompleted();
+    }
+
     /** The connection check. */
     @Override
     public void getCollector(com.google.protobuf.Empty request, StreamObserver<io.factry.historian.proto.Collector> observer) {

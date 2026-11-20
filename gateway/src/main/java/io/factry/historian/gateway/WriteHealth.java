@@ -230,10 +230,14 @@ final class WriteHealth {
         }
 
         String details(Status status) {
-            return (details == null ? status.getDescription() + ". The module reads it again with every connection check."
+            return (details == null ? sentence(status.getDescription()) + " The module reads it again with every connection check."
                     : String.format(details, describe(status)) + FactryGrpcClient.tlsHint(status))
                     + " Store and forward keeps the data until it can be stored.";
         }
+    }
+
+    private static String sentence(String text) {
+        return text == null || text.endsWith(".") ? String.valueOf(text) : text + ".";
     }
 
     static CheckFailure checkFailure(Status status) {

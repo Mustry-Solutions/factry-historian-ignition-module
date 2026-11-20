@@ -184,6 +184,52 @@ class TokenSecretTest {
         assertOnlySent(token);
     }
 
+    /** A late provider that holds no collector token: one WARN, not one per 30 s check. */
+    @Test
+    void lateProviderWithAValueThatIsNotACollectorTokenWarnsOnce() throws Exception {
+        provider = start(saved("collectorToken", SecretConfig.referenced("later", "factry").toJsonTree()));
+        secrets.referenced("later", "factry", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln");
+
+        try (LogCapture log = new LogCapture(FactryHistoryProvider.class.getName(), Level.INFO)) {
+            for (int i = 0; i < 5; i++) {
+                provider.checkConnection();
+            }
+            assertEquals(1, log.events().stream().filter(e -> e.getLevel() == Level.WARN).count(), log.text());
+        }
+        String details = provider.statusOnceStarted().getErrorDetails();
+        assertTrue(details.contains("not usable"), details);
+        assertFalse(details.contains(".."), details);
+    }
+
+    /** onStartup skips the registration while the token cannot be read; the first read does it. */
+    @Test
+    void lateReadRegistersTheCollector() throws Exception {
+        provider = start(saved("collectorToken", SecretConfig.referenced("later", "factry").toJsonTree()));
+        provider.checkConnection();
+        assertTrue(factry.registrations.isEmpty());
+
+        secrets.referenced("later", "factry", token);
+        provider.checkConnection();
+
+        assertEquals(List.of("register", "Active"), factry.registrations);
+    }
+
+    /** Saving a token that cannot be read must not keep reading the previous Factry with the previous token. */
+    @Test
+    void saveWithAnUnreadableTokenStopsUsingThePreviousOne() throws Exception {
+        provider = start(saved("collectorToken", FakeSecrets.embedded(token).toJsonTree()));
+        assertReads();
+
+        assertTrue(provider.handleSettingsChange(saved("collectorToken",
+                SecretConfig.referenced("gone", "factry").toJsonTree())));
+        factry.authorizations.clear();
+
+        Dataset ds = IgnitionHistoryQuery.wide(provider.getQueryEngine().orElseThrow(), START, START + 1_000, -1, null,
+                "default/a");
+        assertTrue(factry.authorizations.isEmpty(), "nothing may reach Factry without a token");
+        assertEquals("Collector token cannot be read", provider.statusOnceStarted().getMessage().toString());
+    }
+
     /** SchemaUtil warns about any field named like a secret that is not a SecretConfig. */
     @Test
     void legacyTokenFieldGivesNoSecretWarning() {
