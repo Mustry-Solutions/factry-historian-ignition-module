@@ -70,6 +70,7 @@ class TlsConnectionTest {
 
         assertEquals(Status.Code.UNAVAILABLE, check.getCode());
         assertTrue(FactryGrpcClient.tlsHint(check).contains("does not name the host"), FactryGrpcClient.tlsHint(check));
+        assertTrue(FactryGrpcClient.tlsHint(check).contains("clear it"), FactryGrpcClient.tlsHint(check));
     }
 
     @Test
@@ -128,6 +129,86 @@ class TlsConnectionTest {
                 .withCause(new RuntimeException("x".repeat(5_000)));
 
         assertTrue(WriteHealth.describe(status).length() <= 250, WriteHealth.describe(status));
+    }
+
+    /**
+     * A proxy with a certificate from a CA the system trusts (Let's Encrypt, an enterprise CA) in
+     * front of a Factry that still serves its built-in certificate: the token carries the claim, and
+     * the normal check must still pass. Before, only Factry's CA was trusted then.
+     */
+    @Test
+    void proxyWithACertificateTheSystemTrustsStillPassesWithTheClaim() throws Exception {
+        FakeFactryServer proxy = server(TestTls.LOOPBACK);
+        withTestCaAsSystemCa(() -> {
+            Status check = clientWithRealFactryCa(proxy, true).checkConnection();
+            assertTrue(check.isOk(), check.toString());
+        });
+    }
+
+    /** That normal check still compares the host: a system-trusted certificate for another name fails. */
+    @Test
+    void withTheClaimASystemTrustedCertificateMustStillNameTheHost() throws Exception {
+        FakeFactryServer other = server(TestTls.FACTRY_BUILT_IN);
+        withTestCaAsSystemCa(() -> {
+            Status check = clientWithRealFactryCa(other, true).checkConnection();
+            assertEquals(Status.Code.UNAVAILABLE, check.getCode());
+            assertTrue(FactryGrpcClient.tlsHint(check).contains("does not name the host"), FactryGrpcClient.tlsHint(check));
+        });
+    }
+
+    /** "PKIX path validation failed ... validity check failed" is no unknown CA. */
+    @Test
+    void expiredCertificateSaysItExpired() throws Exception {
+        FakeFactryServer factry = server("test-server-expired");
+
+        Status check = client(factry, false, TestTls.caPem()).checkConnection();
+
+        assertEquals(Status.Code.UNAVAILABLE, check.getCode());
+        String hint = FactryGrpcClient.tlsHint(check);
+        assertTrue(hint.contains("expired"), hint);
+        assertFalse(hint.contains("not signed by a CA"), hint);
+    }
+
+    private FactryGrpcClient clientWithRealFactryCa(FakeFactryServer server, boolean factryCertificate) {
+        FactryGrpcClient client = new FactryGrpcClient(LOOPBACK, server.port(), "collector", "token", true, false,
+                null, factryCertificate, FactryGrpcClient.bundledFactryCa());
+        open.add(0, client::shutdown);
+        return client;
+    }
+
+    interface Body {
+        void run() throws Exception;
+    }
+
+    /** Runs {@code body} with the test CA as the JVM's only system CA (javax.net.ssl.trustStore). */
+    private static void withTestCaAsSystemCa(Body body) throws Exception {
+        java.nio.file.Path store = java.nio.file.Files.createTempFile("test-ca", ".p12");
+        java.security.KeyStore ks = java.security.KeyStore.getInstance("PKCS12");
+        ks.load(null, null);
+        ks.setCertificateEntry("test-ca", TestTls.ca().get(0));
+        try (var out = java.nio.file.Files.newOutputStream(store)) {
+            ks.store(out, "changeit".toCharArray());
+        }
+        String[] keys = {"javax.net.ssl.trustStore", "javax.net.ssl.trustStoreType", "javax.net.ssl.trustStorePassword"};
+        String[] old = new String[keys.length];
+        for (int i = 0; i < keys.length; i++) {
+            old[i] = System.getProperty(keys[i]);
+        }
+        System.setProperty(keys[0], store.toString());
+        System.setProperty(keys[1], "PKCS12");
+        System.setProperty(keys[2], "changeit");
+        try {
+            body.run();
+        } finally {
+            for (int i = 0; i < keys.length; i++) {
+                if (old[i] == null) {
+                    System.clearProperty(keys[i]);
+                } else {
+                    System.setProperty(keys[i], old[i]);
+                }
+            }
+            java.nio.file.Files.deleteIfExists(store);
+        }
     }
 
     private FakeFactryServer server(String certificate) throws Exception {

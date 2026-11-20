@@ -116,8 +116,9 @@ public class FactryGrpcClient {
     /**
      * @param factryCertificate the token says Factry uses its built-in certificate
      *                          ({@code use-self-signed-certificate}); then, without a custom CA,
-     *                          the certificate is checked against Factry's CA and its name
-     *                          {@value #FACTRY_CERTIFICATE_NAME}, whatever host the client connects to
+     *                          the certificate passes the normal check (system CAs, the host) or
+     *                          Factry's CA with the name {@value #FACTRY_CERTIFICATE_NAME}, see
+     *                          {@link FactryOrSystemTrustManager}
      */
     public FactryGrpcClient(String host, int port, String collectorUUID, String token,
                             boolean useTls, boolean skipTlsVerification, String customCaCert,
@@ -442,8 +443,7 @@ public class FactryGrpcClient {
                     // own, so it is checked against the host the client connects to.
                     sslBuilder.trustManager(buildCombinedTrustManagerFactory(null, customCaCert));
                 } else {
-                    sslBuilder.trustManager(factryCa.toArray(new X509Certificate[0]));
-                    builder.overrideAuthority(FACTRY_CERTIFICATE_NAME);
+                    sslBuilder.trustManager(new FactryOrSystemTrustManager(factryCa));
                 }
                 builder.sslContext(sslBuilder.build());
             } catch (IllegalArgumentException e) {
@@ -565,8 +565,8 @@ public class FactryGrpcClient {
         if (!useTls) return "plaintext";
         if (skipTlsVerification) return "TLS, certificate not checked";
         if (hasCustomCa(customCaCert)) return "TLS, certificate checked against the system CAs and the custom CA";
-        if (factryCertificate) return "TLS, Factry's built-in certificate checked against Factry's CA as "
-                + FACTRY_CERTIFICATE_NAME;
+        if (factryCertificate) return "TLS, certificate checked against the system CAs, or as Factry's built-in"
+                + " certificate (the same on every Factry) against Factry's CA as " + FACTRY_CERTIFICATE_NAME;
         return "TLS, certificate checked against the system CAs";
     }
 
@@ -582,9 +582,16 @@ public class FactryGrpcClient {
         }
         if (causes.contains("No subject alternative") || causes.contains("No name matching")) {
             return " Factry's certificate does not name the host the module connects to. Set Host Override to a"
-                    + " name in the certificate, or give Factry a certificate for this host.";
+                    + " name in the certificate, or give Factry a certificate for this host. If Custom CA"
+                    + " Certificate holds Factry's own CA, clear it: Factry's built-in certificate is checked"
+                    + " without it.";
         }
-        if (causes.contains("PKIX path") || causes.contains("unable to find valid certification path")) {
+        if (causes.contains("CertificateExpiredException") || causes.contains("CertificateNotYetValidException")
+                || causes.contains("validity check failed")) {
+            return " Factry's certificate has expired or is not valid yet. Renew the certificate of Factry (or of"
+                    + " the proxy in front of it), and check the gateway's clock.";
+        }
+        if (causes.contains("PKIX path building failed") || causes.contains("unable to find valid certification path")) {
             return " Factry's certificate is not signed by a CA the module trusts. If Factry, or a proxy in front"
                     + " of it, has a certificate of its own, paste the CA that signed it in Custom CA Certificate.";
         }
