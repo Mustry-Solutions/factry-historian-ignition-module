@@ -59,8 +59,12 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
      * start after this profile).
      */
     private volatile String tokenUnreadable;
-    /** A value a secret provider held that is not a collector token; warned about once. */
+    /** Why a value a secret provider held is not a collector token; warned about once. */
     private volatile String rejectedToken;
+    /** Whether Factry has this collector registered as Active; tried again on the next connect. */
+    private volatile boolean registered;
+    /** Where the client points while it has no token: ".invalid" never resolves, nothing is sent. */
+    private static final String NO_TOKEN_HOST = "collector-token-unread.invalid";
 
     /** The profile status, from the connection check (on the scheduler) and the writes. */
     private final WriteHealth writeHealth;
@@ -85,7 +89,7 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
 
         // Without a token the client points nowhere (".invalid" never resolves) until it is read.
         this.grpcClient = new FactryGrpcClient(
-                tokenUnreadable == null ? settings.getGrpcHost() : "collector-token-unread.invalid",
+                tokenUnreadable == null ? settings.getGrpcHost() : NO_TOKEN_HOST,
                 tokenUnreadable == null ? settings.getGrpcPort() : 1,
                 settings.getCollectorUUID(),
                 token,
@@ -113,28 +117,8 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         logger.debug("Name: {}", historianName);
         logger.debug("Settings: {}", settings);
 
-        // Register this collector with Factry so it shows as active
-        if (tokenUnreadable == null) try {
-            var schema = io.factry.historian.proto.RegisterCollectorSchema.newBuilder()
-                    .setCollectorType("ignition")
-                    .setBuildVersion(FactryHistorianModule.MODULE_VERSION)
-                    .setBuildOs(System.getProperty("os.name", "unknown"))
-                    .setBuildArch(System.getProperty("os.arch", "unknown"))
-                    .build();
-            var collector = grpcClient.registerCollector(schema);
-            logger.info("Collector registered with Factry: uuid={}, type={}, status={}",
-                    collector.getUuid(), collector.getType(), collector.getStatus());
-
-            // Set collector state to active/collecting
-            var state = com.google.protobuf.Struct.newBuilder()
-                    .putFields("status", com.google.protobuf.Value.newBuilder()
-                            .setStringValue("Active").build())
-                    .putFields("health", com.google.protobuf.Value.newBuilder()
-                            .setStringValue("Collecting").build())
-                    .build();
-            grpcClient.updateCollectorState(state);
-        } catch (Exception e) {
-            logger.warn("Failed to register collector with Factry: " + e.getMessage());
+        if (tokenUnreadable == null) {
+            registerCollector();
         }
 
         if (tokenUnreadable == null) try {
@@ -224,6 +208,14 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
 
         if (scheduledExecutor != null) {
             scheduledExecutor.shutdownNow();
+            // A check inside connect() could otherwise build a channel after the client's shutdown.
+            try {
+                if (!scheduledExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    logger.warn("Historian '{}': scheduler still running after 5 s", historianName);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
             scheduledExecutor = null;
         }
 
@@ -278,6 +270,9 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
                 rawToken = resolveToken(context, historianName, newSettings);
             } catch (TokenUnreadableException e) {
                 tokenUnreadable = e.getMessage();
+                // Not the previous Factry with the previous token while the status says Errored.
+                grpcClient.reconfigure(NO_TOKEN_HOST, 1, newSettings.getCollectorUUID(), "", false, false, null);
+                activeToken = "";
                 queryEngine.updateSettings(newSettings);
                 storageEngine.updateSettings(newSettings);
                 this.settings = newSettings;
@@ -330,6 +325,9 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         storageEngine.updateSettings(newSettings);
         this.settings = newSettings;
 
+        if (!registered) {
+            registerCollector();
+        }
         // Refresh measurement cache from the new endpoint
         measurementCache.refresh(grpcClient);
     }
@@ -415,6 +413,33 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         return token;
     }
 
+    /** Register this collector with Factry so it shows as Active and Collecting. */
+    private void registerCollector() {
+        try {
+            var schema = io.factry.historian.proto.RegisterCollectorSchema.newBuilder()
+                    .setCollectorType("ignition")
+                    .setBuildVersion(FactryHistorianModule.MODULE_VERSION)
+                    .setBuildOs(System.getProperty("os.name", "unknown"))
+                    .setBuildArch(System.getProperty("os.arch", "unknown"))
+                    .build();
+            var collector = grpcClient.registerCollector(schema);
+            logger.info("Collector registered with Factry: uuid={}, type={}, status={}",
+                    collector.getUuid(), collector.getType(), collector.getStatus());
+
+            // Set collector state to active/collecting
+            var state = com.google.protobuf.Struct.newBuilder()
+                    .putFields("status", com.google.protobuf.Value.newBuilder()
+                            .setStringValue("Active").build())
+                    .putFields("health", com.google.protobuf.Value.newBuilder()
+                            .setStringValue("Collecting").build())
+                    .build();
+            grpcClient.updateCollectorState(state);
+            registered = true;
+        } catch (Exception e) {
+            logger.warn("Failed to register collector with Factry: " + e.getMessage());
+        }
+    }
+
     void checkConnection() {
         try {
             refreshConnectionStatus();
@@ -439,9 +464,17 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         } else {
             check = grpcClient.checkConnection();
             String rotated = rotatedToken(check, current);
-            if (rotated != null && reconnect(current, rotated)) {
+            Reconnect r = rotated == null ? Reconnect.FAILED : reconnect(current, rotated);
+            if (r == Reconnect.STALE) {
+                return;
+            }
+            if (r == Reconnect.CONNECTED) {
                 check = grpcClient.checkConnection();
             }
+        }
+        if (check == null) {
+            // A save replaced the settings meanwhile; its own check records the status.
+            return;
         }
         writeHealth.connectionChecked(check);
         boolean connected = check.isOk();
@@ -473,7 +506,10 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         }
     }
 
-    /** The check while the token's secret could not be read: read it again, and connect once it can. */
+    /**
+     * The check while the token's secret could not be read: read it again, and connect once it can.
+     * Null when a save replaced the settings meanwhile.
+     */
     private Status readTokenAgain(FactryHistorianSettings current) {
         String rawToken;
         try {
@@ -482,34 +518,43 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
             tokenUnreadable = e.getMessage();
             return WriteHealth.tokenUnreadable(e.getMessage());
         }
-        if (!reconnect(current, rawToken)) {
+        Reconnect r = reconnect(current, rawToken);
+        if (r == Reconnect.STALE) {
+            return null;
+        }
+        if (r == Reconnect.FAILED) {
             return WriteHealth.tokenUnreadable(tokenUnreadable);
         }
         logger.info("Historian '{}': read the collector token; connecting to Factry", historianName);
         return grpcClient.checkConnection();
     }
 
-    /** {@link #connect} unless a save replaced the settings meanwhile; false when it failed. */
-    private boolean reconnect(FactryHistorianSettings current, String rawToken) {
+    private enum Reconnect { CONNECTED, FAILED, STALE }
+
+    /** {@link #connect}, unless a save replaced the settings meanwhile (STALE). */
+    private Reconnect reconnect(FactryHistorianSettings current, String rawToken) {
         synchronized (this) {
             if (current != settings) {
-                return false;
+                return Reconnect.STALE;
             }
             try {
                 connect(current, rawToken);
-                return true;
+                return Reconnect.CONNECTED;
             } catch (IllegalArgumentException e) {
+                String why = "The collector token from the secret provider is not usable: " + e.getMessage();
                 if (tokenUnreadable != null) {
-                    tokenUnreadable = "The collector token from the secret provider is not usable: " + e.getMessage();
+                    tokenUnreadable = why;
                 }
-                logger.warn("Historian '{}': the collector token from the secret provider is not usable: {}",
-                        historianName, e.getMessage());
-                return false;
+                if (!why.equals(rejectedToken)) {
+                    rejectedToken = why;
+                    logger.warn("Historian '{}': {}", historianName, why);
+                }
+                return Reconnect.FAILED;
             } catch (Exception e) {
                 // Connected; only the cache refresh failed. Its scheduled refresh tries again.
                 logger.warn("Historian '{}': measurement cache refresh failed after connecting: {}", historianName,
                         e.getMessage());
-                return true;
+                return Reconnect.CONNECTED;
             }
         }
     }
