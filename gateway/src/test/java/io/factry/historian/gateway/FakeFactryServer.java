@@ -147,10 +147,23 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
 
     /** Changes a measurement's settings as an operator in Factry would: its updatedAt moves. */
     void editSettings(String uuid, Struct settings) {
+        servedByGetMeasurements.remove(uuid);
         Measurement m = measurements.get(uuid);
         measurements.put(uuid, m.toBuilder().setSettings(settings)
                 .setUpdatedAt(com.google.protobuf.util.Timestamps.fromMillis(System.currentTimeMillis())).build());
     }
+
+    /** When set, GetMeasurementsByFilter with a keyword fails with this status. */
+    volatile Status filterFailure = null;
+
+    /** Every GetMeasurementsByFilter call, in order. */
+    final List<GetMeasurementsByFilterRequest> filterRequests = new CopyOnWriteArrayList<>();
+
+    /**
+     * Per measurement, the settings GetMeasurements serves: those from before the first
+     * MigrateSettings, as Factry v8.3.1 does (checked live); an operator's edit replaces them.
+     */
+    private final Map<String, Struct> servedByGetMeasurements = new java.util.concurrent.ConcurrentHashMap<>();
 
     /** Every GetMeasurements call, in order. */
     final List<io.factry.historian.proto.MeasurementRequest> measurementRequests = new CopyOnWriteArrayList<>();
@@ -171,7 +184,8 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
             boolean changed = !request.hasSince() || (m.hasUpdatedAt()
                     && com.google.protobuf.util.Timestamps.compare(m.getUpdatedAt(), request.getSince()) > 0);
             if (m.getCollectorUUID().equals(request.getCollectorUUID()) && changed) {
-                out.addMeasurements(m);
+                Struct served = servedByGetMeasurements.get(m.getUuid());
+                out.addMeasurements(served == null ? m : m.toBuilder().setSettings(served).build());
             }
         }
         observer.onNext(out.setTotal(out.getMeasurementsCount()).build());
@@ -216,6 +230,7 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
         for (var change : request.getMeasurementSettingsList()) {
             Measurement m = measurements.get(change.getMeasurementUUID());
             if (m != null) {
+                servedByGetMeasurements.putIfAbsent(m.getUuid(), m.getSettings());
                 measurements.put(m.getUuid(), m.toBuilder().setSettings(change.getSettings()).build());
             }
         }
@@ -234,7 +249,19 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
     @Override
     public void getMeasurementsByFilter(GetMeasurementsByFilterRequest request,
                                         StreamObserver<Measurements> observer) {
-        List<Measurement> all = new ArrayList<>(measurements.values());
+        filterRequests.add(request);
+        if (filterFailure != null && request.hasKeyword()) {
+            observer.onError(filterFailure.asRuntimeException());
+            return;
+        }
+        // As Factry 8.3.1 matches it (checked live): a full UUID exactly, else a name ignoring case.
+        String keyword = request.hasKeyword() ? request.getKeyword().toLowerCase(java.util.Locale.ROOT) : null;
+        List<Measurement> all = new ArrayList<>(measurements.values().stream()
+                .filter(m -> keyword == null || m.getUuid().equalsIgnoreCase(keyword)
+                        || m.getName().toLowerCase(java.util.Locale.ROOT).contains(keyword))
+                .filter(m -> request.getCollectorUUIDsCount() == 0
+                        || request.getCollectorUUIDsList().contains(m.getCollectorUUID()))
+                .toList());
         int from = (int) Math.min(all.size(), request.getPagination().getOffset());
         int to = (int) Math.min(all.size(), from + request.getPagination().getLimit());
         observer.onNext(Measurements.newBuilder().addAllMeasurements(all.subList(from, to))

@@ -181,6 +181,12 @@ public class MeasurementCache {
     /** Put a changed measurement of this collector in the cache the way a full refresh would. */
     private void applyChange(Measurement m, String collectorUUID) {
         String uuid = m.getUuid();
+        // GetMeasurements keeps serving a measurement's settings from before MigrateSettings
+        // (Factry v8.3.1, checked live): the settings this module sent are the real ones.
+        SentSettings sent = settingsSent.get(uuid);
+        if (sent != null) {
+            m = m.toBuilder().setSettings(sent.settings()).build();
+        }
         Measurement old = uuidToMeasurement.get(uuid);
         if (old != null && !old.getName().equals(m.getName())) {
             tagPathToUUID.remove(old.getName(), uuid);
@@ -330,6 +336,7 @@ public class MeasurementCache {
      * from {@link #sync}.
      */
     public synchronized void refresh(FactryGrpcClient grpcClient) {
+        long refreshStarted = now.getAsLong();
         try {
             String ownCollectorUUID = grpcClient.getCollectorUUID();
             Map<String, Measurement> freshByName = new HashMap<>();
@@ -466,6 +473,10 @@ public class MeasurementCache {
             uuidToMeasurement = new ConcurrentHashMap<>(freshMeasurements);
             tagPathToUUID = new ConcurrentHashMap<>(freshPaths);
             inactiveByName = new ConcurrentHashMap<>(freshInactive);
+            // GetMeasurementsByFilter shows MigrateSettings; a call made while this listing was
+            // read may not be in it yet, so its settings go over the listed copy.
+            settingsSent.entrySet().removeIf(e -> e.getValue().sentAt() < refreshStarted);
+            settingsSent.forEach(this::putSettings);
             uuidToReadKey = new ConcurrentHashMap<>(freshKeyOf);
             readKeyToUUID = new ConcurrentHashMap<>(freshReadKeys);
             uuidToDatabase = new ConcurrentHashMap<>(databaseOf);
@@ -1512,8 +1523,11 @@ public class MeasurementCache {
         }
     }
 
-    /** Most measurements in one MigrateSettings call. */
-    static final int MIGRATE_BATCH = 500;
+    /**
+     * Most measurements in one MigrateSettings call. Each is read again first, one request each
+     * (Factry has no gRPC read of several measurements by UUID), so this bounds those reads too.
+     */
+    static final int MIGRATE_BATCH = 100;
 
     /**
      * The gRPC status codes of failed MigrateSettings calls already logged: once per code per
@@ -1626,21 +1640,29 @@ public class MeasurementCache {
             // store and forward. The rest stay pending for the next run.
             int end = Math.min(uuids.size(), MIGRATE_BATCHES_PER_RUN * MIGRATE_BATCH);
             for (int from = 0; from < end; from += MIGRATE_BATCH) {
-                // Read again right before each call, so each entry is built from a fresh copy.
-                try {
-                    applyOwnChanges(grpcClient);
-                } catch (RuntimeException e) {
-                    if (!freshReadFailureLogged) {
-                        freshReadFailureLogged = true;
-                        logger.info("Could not read this collector's measurements again before storing the settings"
-                                + " derived from the tags ({}); tried again later. Logged once.", e.getMessage());
-                    }
-                    return;
-                }
                 List<MigrateMeasurementSettings> request = new ArrayList<>();
                 Map<String, Struct> sent = new LinkedHashMap<>();
                 for (String uuid : uuids.subList(from, Math.min(end, from + MIGRATE_BATCH))) {
-                    Measurement m = cachedCopy(uuid, names.get(uuid));
+                    // Read again right before the call, so the entry is built from a fresh copy.
+                    // GetMeasurementsByFilter shows MigrateSettings; GetMeasurements does not.
+                    Measurement m;
+                    try {
+                        m = freshCopy(uuid, collectorUUID, grpcClient);
+                    } catch (RuntimeException e) {
+                        if (!freshReadFailureLogged) {
+                            freshReadFailureLogged = true;
+                            logger.info("Could not read a measurement again before storing the settings derived"
+                                    + " from the tags ({}); tried again later. Logged once.", e.getMessage());
+                        }
+                        return;
+                    }
+                    if (m != null) {
+                        // The truth: into the cache as it is, status and settings.
+                        synchronized (this) {
+                            settingsSent.remove(uuid);
+                            applyChange(m, collectorUUID);
+                        }
+                    }
                     Struct settings = m == null ? null : withDerived(m.getSettings(), derivedByUuid.get(uuid));
                     if (m == null || !(isActive(m) || "paused".equalsIgnoreCase(m.getStatus()))
                             || !collectorUUID.equalsIgnoreCase(m.getCollectorUUID())
@@ -1670,11 +1692,13 @@ public class MeasurementCache {
                     }
                     return;
                 }
+                long sentAt = now.getAsLong();
                 sent.forEach((uuid, settings) -> {
-                    // Into the copy cached now, which a sync may have changed during the call.
-                    uuidToMeasurement.computeIfPresent(uuid, (k, cur) -> cur.toBuilder().setSettings(settings).build());
-                    inactiveByName.computeIfPresent(names.get(uuid), (k, cur) ->
-                            cur.getUuid().equals(uuid) ? cur.toBuilder().setSettings(settings).build() : cur);
+                    // Into the copy cached now, which a sync may have changed during the call, and
+                    // kept over what GetMeasurements serves until a full refresh lists it.
+                    SentSettings record = new SentSettings(settings, sentAt);
+                    settingsSent.put(uuid, record);
+                    putSettings(uuid, record);
                     for (String path : pathsByUuid.get(uuid)) {
                         // Unless new metadata came in during the call.
                         if (derivedByUuid.get(uuid).equals(derivedSettings(tagMetadata.get(path)))) {
@@ -1697,22 +1721,39 @@ public class MeasurementCache {
         return m;
     }
 
+    /** Settings this module sent with MigrateSettings, and when (by {@link #now}). */
+    private record SentSettings(Struct settings, long sentAt) {}
+
     /**
-     * Applies this collector's changes since the cache's watermark, minus a second for a change
-     * in the same second (all of its measurements when there is none yet), as {@link #sync} does.
+     * Per measurement UUID, the settings this module sent since the last full refresh listed it.
+     * Factry's GetMeasurements keeps serving the settings from before a MigrateSettings call
+     * (v8.3.1, checked live), so {@link #sync} must not put those back.
      */
-    private synchronized void applyOwnChanges(FactryGrpcClient grpcClient) {
-        String collectorUUID = grpcClient.getCollectorUUID();
-        MeasurementRequest.Builder request = MeasurementRequest.newBuilder().setCollectorUUID(collectorUUID);
-        Timestamp newest = ownChangesSince;
-        if (newest != null) {
-            request.setSince(Timestamps.subtract(newest, com.google.protobuf.util.Durations.fromSeconds(1)));
+    private final ConcurrentHashMap<String, SentSettings> settingsSent = new ConcurrentHashMap<>();
+
+    /** Writes {@code sent}'s settings into the cached copy of {@code uuid}, keeping its status. */
+    private void putSettings(String uuid, SentSettings sent) {
+        uuidToMeasurement.computeIfPresent(uuid, (k, cur) -> cur.toBuilder().setSettings(sent.settings()).build());
+        inactiveByName.replaceAll((name, cur) ->
+                cur.getUuid().equals(uuid) ? cur.toBuilder().setSettings(sent.settings()).build() : cur);
+    }
+
+    /**
+     * One measurement of this collector as Factry has it now, or null when it has none with that
+     * UUID: GetMeasurementsByFilter with the full UUID as keyword, which matches exactly that
+     * measurement (checked live) and, unlike GetMeasurements, shows MigrateSettings.
+     */
+    private Measurement freshCopy(String uuid, String collectorUUID, FactryGrpcClient grpcClient) {
+        Measurements found = grpcClient.getMeasurementsByFilter(GetMeasurementsByFilterRequest.newBuilder()
+                .setKeyword(uuid)
+                .setPagination(Pagination.newBuilder().setLimit(LOOKUP_PAGE_SIZE).setOffset(0).build())
+                .build());
+        for (Measurement m : found.getMeasurementsList()) {
+            if (m.getUuid().equals(uuid)) {
+                return m;
+            }
         }
-        for (Measurement m : grpcClient.getMeasurements(request.build()).getMeasurementsList()) {
-            applyChange(m, collectorUUID);
-            newest = later(newest, m);
-        }
-        ownChangesSince = newest;
+        return null;
     }
 
     /**
