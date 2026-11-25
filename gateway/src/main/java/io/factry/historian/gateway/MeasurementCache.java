@@ -1553,6 +1553,9 @@ public class MeasurementCache {
     /** Tags whose derived settings may differ from their own measurement's; see {@link #syncTagSettings}. */
     private final Set<String> settingsPending = ConcurrentHashMap.newKeySet();
 
+    /** Most MigrateSettings calls per {@link #syncTagSettings}. */
+    static final int MIGRATE_BATCHES_PER_RUN = 2;
+
     /** Runs one {@link #syncTagSettings} at a time. */
     private final Object settingsLock = new Object();
 
@@ -1596,8 +1599,9 @@ public class MeasurementCache {
     void syncTagSettings(FactryGrpcClient grpcClient) {
         synchronized (settingsLock) {
             String collectorUUID = grpcClient.getCollectorUUID();
-            if (settingsPending.isEmpty() || migrateRefused != null
-                    || collectorUUID == null || collectorUUID.isEmpty()) {
+            // Not loaded: writeTarget knows no measurement yet, and the pending tags would be dropped.
+            if (settingsPending.isEmpty() || migrateRefused != null || !loaded
+                    || collectorUUID == null || collectorUUID.isEmpty() || !migrationSupported(grpcClient)) {
                 return;
             }
             // Measurement UUID to its name, the derived settings and the tags they come from.
@@ -1617,24 +1621,25 @@ public class MeasurementCache {
                 derivedByUuid.put(m.getUuid(), derived);
                 pathsByUuid.computeIfAbsent(m.getUuid(), u -> new ArrayList<>()).add(path);
             }
-            if (derivedByUuid.isEmpty() || !migrationSupported(grpcClient)) {
-                return;
-            }
-            try {
-                applyOwnChanges(grpcClient);
-            } catch (RuntimeException e) {
-                if (!freshReadFailureLogged) {
-                    freshReadFailureLogged = true;
-                    logger.info("Could not read this collector's measurements again before storing the settings"
-                            + " derived from the tags ({}); tried again later. Logged once.", e.getMessage());
-                }
-                return;
-            }
             List<String> uuids = new ArrayList<>(derivedByUuid.keySet());
-            for (int from = 0; from < uuids.size(); from += MIGRATE_BATCH) {
+            // A few batches per run: the scheduler thread also checks the connection and resumes
+            // store and forward. The rest stay pending for the next run.
+            int end = Math.min(uuids.size(), MIGRATE_BATCHES_PER_RUN * MIGRATE_BATCH);
+            for (int from = 0; from < end; from += MIGRATE_BATCH) {
+                // Read again right before each call, so each entry is built from a fresh copy.
+                try {
+                    applyOwnChanges(grpcClient);
+                } catch (RuntimeException e) {
+                    if (!freshReadFailureLogged) {
+                        freshReadFailureLogged = true;
+                        logger.info("Could not read this collector's measurements again before storing the settings"
+                                + " derived from the tags ({}); tried again later. Logged once.", e.getMessage());
+                    }
+                    return;
+                }
                 List<MigrateMeasurementSettings> request = new ArrayList<>();
                 Map<String, Struct> sent = new LinkedHashMap<>();
-                for (String uuid : uuids.subList(from, Math.min(uuids.size(), from + MIGRATE_BATCH))) {
+                for (String uuid : uuids.subList(from, Math.min(end, from + MIGRATE_BATCH))) {
                     Measurement m = cachedCopy(uuid, names.get(uuid));
                     Struct settings = m == null ? null : withDerived(m.getSettings(), derivedByUuid.get(uuid));
                     if (m == null || !(isActive(m) || "paused".equalsIgnoreCase(m.getStatus()))
@@ -1720,16 +1725,36 @@ public class MeasurementCache {
             try {
                 version = grpcClient.getInfo().getVersion();
             } catch (RuntimeException e) {
-                return false; // asked again at the next run
+                if (!versionReadFailureLogged) {
+                    versionReadFailureLogged = true;
+                    logger.info("Could not read Factry's version ({}), so the settings derived from the tags are not"
+                            + " stored yet; asked again at every run. Logged once.", e.getMessage());
+                }
+                return false;
             }
             versionRefusal = checkedVersion(version) ? "" : version;
-            if (!versionRefusal.isEmpty()) {
+            if (!versionRefusal.isEmpty() && !version.equals(versionRefusalLogged)) {
+                versionRefusalLogged = version;
                 logger.info("Factry {} is not a version MigrateSettings was checked on (v8.2.3 to v8.3.x), so the"
                         + " settings derived from the tags are not stored on existing measurements. Trends on this"
                         + " gateway still follow the tags.", version);
             }
         }
         return versionRefusal.isEmpty();
+    }
+
+    /** Logged once: GetInfo failed. */
+    private volatile boolean versionReadFailureLogged;
+
+    /** The unchecked version last logged, so a version is logged once. */
+    private volatile String versionRefusalLogged;
+
+    /**
+     * Forgets Factry's version, to read it again at the next {@link #syncTagSettings}: after a
+     * failed connection check or a reconnect, Factry may have been upgraded underneath.
+     */
+    void forgetFactryVersion() {
+        versionRefusal = null;
     }
 
     /** True for v8.2.3 and later v8.2 versions, and every v8.3 version. */

@@ -1603,7 +1603,19 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      */
     private static final Set<String> INTERPOLATED = Set.of("min", "max", "mean", "last");
 
-    /** Most runs of empty buckets per analog pen whose neighbouring samples are read; the rest hold. Tests lower it. */
+    /**
+     * Up to this many runs of empty buckets, each gets two one-sample reads; with more, the span
+     * from the first run to the last is read raw once. Tests change it.
+     */
+    int linearEdgeReadRuns = 4;
+
+    /**
+     * Most samples per status in that one raw read; a span holding more (a dense tag with a few
+     * gaps) falls back to the one-sample reads, capped by {@link #linearRunsPerPen}. Tests lower it.
+     */
+    int linearRawLimit = 10_000;
+
+    /** Most runs read with one-sample reads per analog pen; the rest hold. Tests lower it. */
     int linearRunsPerPen = 10;
 
     /** Whether a failed read around empty buckets was logged; it only costs the line. */
@@ -1613,13 +1625,19 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      * Gives each empty bucket of an analog tag one value, for every function alike (a minimum,
      * maximum, mean or last value of an empty bucket are all the same), on the straight line
      * from the last sample before its run of empty buckets to the first sample after it, each at
-     * its own time, as Ignition's own historians interpolate an analog tag. Per run two small
-     * reads: the last sample before it (descending, limit 1 per status) and the first sample after
-     * it (ascending, limit 1 per status); the first run reuses the sample before the range when
-     * already read, and after a past range the first sample after it is read up to now. The line
-     * needs the latest sample on each side to be Good (else Bad time), and a sample after the run:
-     * toward now nothing is extrapolated. A run without that, past {@link #linearRunsPerPen}, or
-     * whose read fails keeps the value it had (held): the line is never worth failing a pen.
+     * its own time, as Ignition's own historians interpolate an analog tag.
+     *
+     * <p>Those samples: with up to {@link #linearEdgeReadRuns} runs, two small reads per run, the
+     * last sample before it (descending, limit 1 per status) and the first after it (ascending,
+     * limit 1 per status). With more (a tag stored once a minute in a chart of 300 points has a
+     * run between every two samples), one raw read from the bucket before the first run to the
+     * bucket after the last, limit {@link #linearRawLimit} per status; when it reaches the limit,
+     * the small reads again, for at most {@link #linearRunsPerPen} runs. The first run reuses the
+     * sample before the range when already read, and after a past range the first sample after
+     * it is read up to now. The line needs the latest sample on each side to be Good (else Bad
+     * time), and a sample after the run: toward now nothing is extrapolated. A run without that,
+     * past the cap, or whose read fails keeps the value it had (held): the line is never worth
+     * failing a pen.
      *
      * @param at      per bucket, the time whose value on the line it gets
      * @param empty   per bucket, whether it has no samples and holds a Good value
@@ -1633,43 +1651,49 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         }
         long nowMs = now.getAsLong();
         long endMs = Math.min(rangeEndMs, nowMs);
-        int runs = 0;
+        List<int[]> runs = new ArrayList<>();
         for (int i = 0; i < empty.length; i++) {
-            if (!empty[i]) {
-                continue;
-            }
-            int j = i;
-            while (j + 1 < empty.length && empty[j + 1]) {
-                j++;
-            }
-            int first = i;
-            int last = j;
-            i = j;
-            if (runs++ >= linearRunsPerPen) {
-                continue;
-            }
-            long runStart = startMs + first * periodMs;
-            long runEnd = Math.min(startMs + (last + 1) * periodMs, endMs);
-            // The first sample after the run: in the bucket after it, or after a past range.
-            long afterEnd = last + 1 < empty.length ? Math.min(runEnd + periodMs, endMs)
-                    : rangeEndMs < nowMs ? nowMs : runEnd;
-            BucketFill.Sample a;
-            BucketFill.Sample b;
-            try {
-                // The bucket before a run has samples; before the range, the last one may be old.
-                a = latest(first > 0 ? edgeSamples(uuid, element, runStart - periodMs, runStart, true)
-                        : before != null ? before : samplesBefore(uuid, element, runStart));
-                b = afterEnd > runEnd ? earliest(edgeSamples(uuid, element, runEnd, afterEnd, false)) : null;
-            } catch (RuntimeException e) {
-                if (!linearReadFailureLogged) {
-                    linearReadFailureLogged = true;
-                    logger.debug("Could not read the samples around empty buckets of " + uuid
-                            + "; they hold their value instead (logged once)", e);
+            if (empty[i]) {
+                int j = i;
+                while (j + 1 < empty.length && empty[j + 1]) {
+                    j++;
                 }
+                runs.add(new int[]{i, j});
+                i = j;
+            }
+        }
+        if (runs.isEmpty()) {
+            return;
+        }
+        // The samples on each side of each run, as [before, after]; null where not read.
+        List<BucketFill.Sample[]> sides;
+        try {
+            sides = runs.size() > linearEdgeReadRuns
+                    ? spanSides(uuid, element, runs, empty.length, startMs, rangeEndMs, periodMs, before)
+                    : null;
+            if (sides == null) {
+                sides = new ArrayList<>();
+                for (int r = 0; r < runs.size(); r++) {
+                    sides.add(r < linearRunsPerPen
+                            ? edgeSides(uuid, element, runs.get(r), empty.length, startMs, rangeEndMs, periodMs, before)
+                            : null);
+                }
+            }
+        } catch (RuntimeException e) {
+            if (!linearReadFailureLogged) {
+                linearReadFailureLogged = true;
+                logger.debug("Could not read the samples around empty buckets of " + uuid
+                        + "; they hold their value instead (logged once)", e);
+            }
+            return;
+        }
+        for (int r = 0; r < runs.size(); r++) {
+            BucketFill.Sample[] side = sides.get(r);
+            if (side == null) {
                 continue;
             }
-            for (int k = first; k <= last; k++) {
-                Double v = lineAt(at[k], a, b);
+            for (int k = runs.get(r)[0]; k <= runs.get(r)[1]; k++) {
+                Double v = lineAt(at[k], side[0], side[1]);
                 if (v != null) {
                     for (Object[] column : columns) {
                         column[k] = v;
@@ -1677,6 +1701,81 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 }
             }
         }
+    }
+
+    /** Where the samples after a run are looked for: up to this time (the run's end when none). */
+    private static long afterEnd(int last, int buckets, long runEnd, long periodMs, long endMs, long rangeEndMs,
+                                 long nowMs) {
+        return last + 1 < buckets ? Math.min(runEnd + periodMs, endMs) : rangeEndMs < nowMs ? nowMs : runEnd;
+    }
+
+    /** The samples on each side of one run, from two one-sample reads. */
+    private BucketFill.Sample[] edgeSides(String uuid, int element, int[] run, int buckets, long startMs,
+                                          long rangeEndMs, long periodMs, List<BucketFill.Sample> before) {
+        long nowMs = now.getAsLong();
+        long endMs = Math.min(rangeEndMs, nowMs);
+        long runStart = startMs + run[0] * periodMs;
+        long runEnd = Math.min(startMs + (run[1] + 1) * periodMs, endMs);
+        long afterEnd = afterEnd(run[1], buckets, runEnd, periodMs, endMs, rangeEndMs, nowMs);
+        // The bucket before a run has samples; before the range, the last one may be old.
+        BucketFill.Sample a = latest(run[0] > 0 ? edgeSamples(uuid, element, runStart - periodMs, runStart, true)
+                : before != null ? before : samplesBefore(uuid, element, runStart));
+        BucketFill.Sample b = afterEnd > runEnd ? earliest(edgeSamples(uuid, element, runEnd, afterEnd, false)) : null;
+        return new BucketFill.Sample[]{a, b};
+    }
+
+    /**
+     * The samples on each side of every run, from one raw read of the span they cover; null when
+     * the span holds more than {@link #linearRawLimit} samples of one status.
+     */
+    private List<BucketFill.Sample[]> spanSides(String uuid, int element, List<int[]> runs, int buckets,
+                                                long startMs, long rangeEndMs, long periodMs,
+                                                List<BucketFill.Sample> before) {
+        long nowMs = now.getAsLong();
+        long endMs = Math.min(rangeEndMs, nowMs);
+        int[] firstRun = runs.get(0);
+        int[] lastRun = runs.get(runs.size() - 1);
+        long from = startMs + Math.max(0, firstRun[0] - 1) * periodMs;
+        long lastEnd = Math.min(startMs + (lastRun[1] + 1) * periodMs, endMs);
+        long to = Math.min(lastEnd + periodMs, endMs);
+        List<BucketFill.Sample> samples = new ArrayList<>();
+        if (to > from) {
+            QueryTimeseriesResponse reply = grpcClient.queryTimeseries(withRange(QueryTimeseriesRequest.newBuilder()
+                    .addMeasurementUUIDs(uuid).addGroupBy("status").setLimit(linearRawLimit), from, to).build());
+            for (Series series : reply.getSeriesList()) {
+                if (series.getDataPointsCount() >= linearRawLimit) {
+                    return null;
+                }
+                boolean isGood = isGoodStatus(seriesStatus(series));
+                for (SeriesPoint pt : series.getDataPointsList()) {
+                    samples.add(new BucketFill.Sample(pt.getTimestamp(), storedValue(pt.getValue(), element), isGood));
+                }
+            }
+        }
+        if (firstRun[0] == 0) {
+            samples.addAll(before != null ? before : samplesBefore(uuid, element, startMs));
+        }
+        if (lastRun[1] == buckets - 1 && rangeEndMs < nowMs) {
+            samples.addAll(edgeSamples(uuid, element, rangeEndMs, nowMs, false));
+        }
+        samples.sort(Comparator.comparingLong(BucketFill.Sample::ts));
+        List<BucketFill.Sample[]> out = new ArrayList<>();
+        int next = 0;
+        for (int[] run : runs) {
+            long runStart = startMs + run[0] * periodMs;
+            long runEnd = Math.min(startMs + (run[1] + 1) * periodMs, endMs);
+            while (next < samples.size() && samples.get(next).ts() < runStart) {
+                next++;
+            }
+            BucketFill.Sample a = next > 0 ? samples.get(next - 1) : null;
+            // The run has no samples, so the first at or after its start is the first after it,
+            // unless toward now (nothing after a range that ends at or after now).
+            BucketFill.Sample b = next < samples.size()
+                    && afterEnd(run[1], buckets, runEnd, periodMs, endMs, rangeEndMs, nowMs) > runEnd
+                    ? samples.get(next) : null;
+            out.add(new BucketFill.Sample[]{a, b});
+        }
+        return out;
     }
 
     /** The last ({@code desc}) or first sample of each status in [from, to). */

@@ -964,4 +964,149 @@ class AnalogFillTest {
             }
         }
     }
+
+    // Re-review of eb3a2b6: issue #83's own case.
+
+    /** A ramp stored once a minute for an hour (value = minutes), read as LastValue in 300 points. */
+    private List<Double> oneHourOfAMinuteTag(FactryQueryEngine engine) throws Exception {
+        engine.now = () -> T0 + 3_700_000;
+        AverageHistoryQuery.Dataset ds = AverageHistoryQuery.wide(engine, T0, T0 + HOUR, 300,
+                AggregationMode.LastValue, FillMode.DERIVED, "out");
+        assertNull(ds.error, ds::toString);
+        List<Double> out = new ArrayList<>();
+        for (Object[] row : ds.rows) {
+            out.add(((Number) row[1]).doubleValue());
+        }
+        return out;
+    }
+
+    private void minuteRamp() {
+        String u = factry.addMeasurement("default/out", "number", "Float8");
+        for (int m = 0; m <= 60; m++) {
+            factry.add(u, T0 + m * 60_000L, m, "Good");
+        }
+    }
+
+    /** Rows of 12 s buckets that are not on the ramp: a bucket with a sample has that sample, an empty one the ramp at its end. */
+    private static List<Integer> offTheLine(List<Double> values) {
+        List<Integer> off = new ArrayList<>();
+        for (int r = 0; r < values.size(); r++) {
+            double expected = r % 5 == 0 ? r / 5 : (r + 1) / 5.0;
+            if (Math.abs(values.get(r) - expected) > 1e-9) {
+                off.add(r);
+            }
+        }
+        return off;
+    }
+
+    @Test
+    void anHourOfAMinuteTagIn300Points_isOnTheLineThroughout() throws Exception {
+        minuteRamp();
+        List<Double> values = oneHourOfAMinuteTag(engine());
+        assertEquals(300, values.size());
+        // 60 runs of four empty buckets: every one on the line, read in one raw request.
+        assertEquals(List.of(), offTheLine(values), values::toString);
+        assertEquals(List.of(0.4, 0.6, 0.8, 1.0, 1.0), values.subList(1, 6));
+        assertEquals(List.of(10.4, 10.6, 10.8, 11.0, 11.0), values.subList(51, 56));
+        assertEquals(1, factry.queries.stream().filter(q -> !q.hasAggregation() && q.getLimit() > 1).count());
+        assertEquals(List.of(), edgeReads().stream().filter(r -> r.get(0) == 1L).toList());
+    }
+
+    @Test
+    void aSpanOverTheLimit_fallsBackToOneSampleReads_capped() throws Exception {
+        minuteRamp();
+        FactryQueryEngine engine = engine();
+        engine.linearRawLimit = 2;
+        engine.linearRunsPerPen = 1000;
+        assertEquals(List.of(), offTheLine(oneHourOfAMinuteTag(engine)));
+
+        engine = engine();
+        engine.linearRawLimit = 2;
+        List<Double> values = oneHourOfAMinuteTag(engine);
+        // The default cap: the first 10 runs on the line, the rest held.
+        assertEquals(List.of(), offTheLine(values.subList(0, 50)));
+        assertEquals(List.of(10.0, 10.0, 10.0, 10.0, 10.0, 11.0), values.subList(50, 56));
+    }
+
+    @Test
+    void beforeTheCacheIsLoaded_tagsStayPending() throws Exception {
+        try (FakeFactryServer server = new FakeFactryServer()) {
+            String own = server.addMeasurement("default/out", "number", "collector", Struct.getDefaultInstance());
+            FactryGrpcClient client = server.client();
+            try {
+                MeasurementCache cache = new MeasurementCache();
+                // The startup refresh has not worked yet.
+                storage(client, cache).doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
+                cache.syncTagSettings(client);
+                assertEquals(0, server.migrations.size());
+                cache.refresh(client);
+                cache.syncTagSettings(client);
+                assertEquals(settings(MeasurementCache.DEADBAND_STYLE_SETTING, "Discrete"),
+                        server.measurement(own).getSettings());
+            } finally {
+                client.shutdown();
+            }
+        }
+    }
+
+    @Test
+    void theVersion_isReadAgainAfterAReconnect_andAFailedReadIsLoggedOnce() throws Exception {
+        try (FakeFactryServer server = new FakeFactryServer()) {
+            server.addMeasurement("default/out", "number", "collector", Struct.getDefaultInstance());
+            FactryGrpcClient client = server.client();
+            try (LogCapture log = new LogCapture(MeasurementCache.class.getName(), Level.INFO)) {
+                MeasurementCache cache = cacheWithPending(server, client);
+                int reads = server.measurementRequests.size();
+                server.getInfoFailure = Status.UNAVAILABLE;
+                cache.syncTagSettings(client);
+                cache.syncTagSettings(client);
+                assertEquals(1, log.events().stream()
+                        .filter(e -> e.getFormattedMessage().contains("Could not read Factry's version")).count(), log::text);
+                server.getInfoFailure = null;
+                server.version = "v8.4.0";
+                cache.syncTagSettings(client);
+                assertEquals(0, server.migrations.size());
+                // The gate comes first: nothing else was asked.
+                assertEquals(reads, server.measurementRequests.size());
+                // Factry changed version underneath: read again only after a failed check or a reconnect.
+                server.version = "v8.3.1";
+                cache.syncTagSettings(client);
+                assertEquals(0, server.migrations.size());
+                cache.forgetFactryVersion();
+                cache.syncTagSettings(client);
+                assertEquals(1, server.migrations.size());
+            } finally {
+                client.shutdown();
+            }
+        }
+    }
+
+    @Test
+    void aFewBatchesPerRun_eachReadFreshFirst() throws Exception {
+        try (FakeFactryServer server = new FakeFactryServer()) {
+            List<MetadataPoint> points = new ArrayList<>();
+            int count = 2 * MeasurementCache.MIGRATE_BATCH + 1;
+            for (int i = 0; i < count; i++) {
+                server.addMeasurement("default/t" + i, "number", "collector", Struct.getDefaultInstance());
+                points.add(metadata("t" + i, InterpolationMode.Discrete));
+            }
+            FactryGrpcClient client = server.client();
+            try {
+                MeasurementCache cache = new MeasurementCache();
+                cache.refresh(client);
+                storage(client, cache).doStoreMetadata(points);
+                int reads = server.measurementRequests.size();
+                cache.syncTagSettings(client);
+                // Two calls this run, each after its own fresh read; the rest waits for the next run.
+                assertEquals(List.of(MeasurementCache.MIGRATE_BATCH, MeasurementCache.MIGRATE_BATCH),
+                        server.migrations.stream().map(r -> r.getMeasurementSettingsCount()).toList());
+                assertEquals(reads + 2, server.measurementRequests.size());
+                cache.syncTagSettings(client);
+                assertEquals(3, server.migrations.size());
+                assertEquals(1, server.migrations.get(2).getMeasurementSettingsCount());
+            } finally {
+                client.shutdown();
+            }
+        }
+    }
 }

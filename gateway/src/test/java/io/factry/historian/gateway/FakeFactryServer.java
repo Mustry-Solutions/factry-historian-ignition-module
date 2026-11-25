@@ -178,11 +178,18 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
         observer.onCompleted();
     }
 
+    /** When set, GetInfo fails with this status. */
+    volatile Status getInfoFailure = null;
+
     /** The version GetInfo reports. */
     volatile String version = "v8.3.1";
 
     @Override
     public void getInfo(com.google.protobuf.Empty request, StreamObserver<io.factry.historian.proto.HistorianInfo> observer) {
+        if (getInfoFailure != null) {
+            observer.onError(getInfoFailure.asRuntimeException());
+            return;
+        }
         observer.onNext(io.factry.historian.proto.HistorianInfo.newBuilder().setVersion(version).setApiVersion("1.1.0").build());
         observer.onCompleted();
     }
