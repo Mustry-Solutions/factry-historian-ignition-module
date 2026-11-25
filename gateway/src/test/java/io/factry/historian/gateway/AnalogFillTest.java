@@ -95,11 +95,13 @@ class AnalogFillTest {
     }
 
     private static final List<Object> LINE = List.of(0.0, 12.0, 24.0, 36.0, 48.0, 60.0);
+    /** The line averaged over each empty bucket: its value at the bucket middle. */
+    private static final List<Object> LINE_AVERAGE = List.of(0.0, 18.0, 30.0, 42.0, 54.0, 60.0);
     private static final List<Object> HELD = List.of(0.0, 0.0, 0.0, 0.0, 0.0, 60.0);
 
     private void assertDrawn(List<Object> expected) throws Exception {
         assertEquals(expected, column(AggregationMode.LastValue), "LastValue");
-        assertEquals(expected, column(AggregationMode.Average), "Average");
+        assertEquals(expected == LINE ? LINE_AVERAGE : expected, column(AggregationMode.Average), "Average");
         assertEquals(expected, column(AggregationMode.SimpleAverage), "SimpleAverage");
         List<Object> pairs = new ArrayList<>();
         expected.forEach(v -> pairs.addAll(List.of(v, v)));
@@ -247,6 +249,59 @@ class AnalogFillTest {
         // sample, since nothing follows the range.
         assertEquals(Arrays.asList(5 + 2 * 30.0 / 43, 7.0, "Bad", "Bad", 9.0, 9.0),
                 lastValues(T0 + 72_000, T0 + 3_600_000));
+    }
+
+    /** Hourly Average from T0 to {@code end}, as the engine hands it to Ignition. */
+    private List<Object> hourlyAverage(long end) {
+        FactryQueryEngineAverageTest.Recorder rec = new FactryQueryEngineAverageTest.Recorder();
+        FactryQueryEngine engine = engine();
+        engine.now = () -> T0 + 24 * HOUR;
+        engine.query(AggregatedQueryOptions.builder()
+                .startTime(T0).endTime(end)
+                .withTimeWindow(TimeWindow.ofMinutes(60))
+                .addQueryKey(AggregatedQueryKey.of(QualifiedPath.parseSafe(PATH),
+                        LegacyAggregateAdapter.of(AggregationMode.Average), FillMode.DERIVED))
+                .build(), rec);
+        assertNull(rec.error);
+        List<Object> out = new ArrayList<>();
+        for (var p : rec.points) {
+            assertTrue(p.quality().isGood());
+            out.add(((Number) p.value()).doubleValue());
+        }
+        return out;
+    }
+
+    private static final long HOUR = 3_600_000;
+
+    @Test
+    void theAverageOfAnEmptyBucket_isTheLineAtItsMiddle() {
+        String u = factry.addMeasurement("default/out", "number");
+        factry.add(u, T0, 0, "Good");
+        factry.add(u, T0 + 4 * HOUR, 400, "Good");
+        // A ramp from 0 to 400 over 4 h averages 150 in its second hour, not the 100 at its start.
+        assertEquals(List.of(0.0, 150.0, 250.0, 350.0), hourlyAverage(T0 + 4 * HOUR));
+        // A last bucket cut short by the range end averages the line up to that end.
+        assertEquals(List.of(0.0, 150.0, 250.0, 325.0), hourlyAverage(T0 + 3 * HOUR + HOUR / 2));
+    }
+
+    @Test
+    void theSampleBeforeTheRange_isReadOnce() throws Exception {
+        String u = factry.addMeasurement("default/out", "number");
+        factry.add(u, T0 - 24_000, 0, "Good");
+        factry.add(u, T0 + 36_000, 60, "Good");
+        lastValues(T0 + 72_000, T0 + 3_600_000);
+        assertEquals(1, factry.queries.stream().filter(q -> q.getDesc()).count(), factry.queries::toString);
+        factry.queries.clear();
+        hourlyAverage(T0 + 4 * HOUR);
+        assertEquals(1, factry.queries.stream().filter(q -> q.getDesc()).count(), factry.queries::toString);
+    }
+
+    @Test
+    void autoOnAFloatArray_isStoredAsAnalog() {
+        // Ignition picks the style by the element type: a Float8Array's own type class is DataSet.
+        assertEquals("Analog_Compressed", MeasurementCache.concreteStyle("Auto", "Float8Array"));
+        assertEquals("Discrete", MeasurementCache.concreteStyle("Auto", "Int4Array"));
+        assertEquals("Analog_Compressed", MeasurementCache.concreteStyle("Auto", "Float8"));
     }
 
     // The write side: the style is stored on the measurement and kept up to date.

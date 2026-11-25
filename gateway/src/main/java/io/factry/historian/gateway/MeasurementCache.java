@@ -1495,7 +1495,9 @@ public class MeasurementCache {
             InterpolationMode mode = InterpolationMode.valueOf(style);
             DataTypeClass typeClass = null;
             if (ignitionDataType != null) {
-                typeClass = DataType.valueOf(ignitionDataType).getTypeClass();
+                // The element type for an array, as Ignition picks the style for one
+                // (AtomicHistoryActor.configure): Float8Array's own class is DataSet.
+                typeClass = DataType.valueOf(ignitionDataType).getComponentDataType().getTypeClass();
             }
             if (mode == InterpolationMode.Auto && typeClass == null) {
                 return style;

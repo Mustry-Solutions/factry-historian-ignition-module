@@ -1198,8 +1198,10 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         long startMs = options.getTimeRange().get().startTime().toEpochMilli();
         long rangeEndMs = options.getTimeRange().get().endTime().toEpochMilli();
         Set<Long> withSamples = new HashSet<>();
+        java.util.concurrent.atomic.AtomicReference<List<BucketFill.Sample>> before =
+                new java.util.concurrent.atomic.AtomicReference<>();
         Map<Long, GoodTimeAverage.Result> values =
-                timeWeightedAverage(uuid, period, periodMs, isBoolean, startMs, rangeEndMs, withSamples);
+                timeWeightedAverage(uuid, period, periodMs, isBoolean, startMs, rangeEndMs, withSamples, before);
 
         List<Long> starts = new ArrayList<>();
         for (long b = startMs; b < rangeEndMs; b += periodMs) {
@@ -1214,8 +1216,15 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         }
         if (linear) {
             // Factry's twa holds the last value through buckets without samples; an analog tag
-            // gets the straight line between its samples instead.
-            fillLinear(uuid, -1, starts, empty, startMs, rangeEndMs, new Object[][]{linearValues});
+            // gets the straight line between its samples instead. The average of a line over a
+            // bucket is its value at the middle of the part averaged: up to the range end or now.
+            long endMs = Math.min(rangeEndMs, now.getAsLong());
+            long[] at = new long[starts.size()];
+            for (int i = 0; i < at.length; i++) {
+                long b = starts.get(i);
+                at[i] = b + (Math.min(b + periodMs, endMs) - b) / 2;
+            }
+            fillLinear(uuid, -1, at, empty, startMs, rangeEndMs, before.get(), new Object[][]{linearValues});
         }
 
         // Every bucket gets a point. Ignition fills a bucket without one with a neighbouring
@@ -1251,7 +1260,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     /** The average per bucket start; buckets without Good time are Bad or absent. */
     private Map<Long, GoodTimeAverage.Result> timeWeightedAverage(
             String uuid, String period, long periodMs, boolean isBoolean, long startMs, long rangeEndMs,
-            Set<Long> withSamples) {
+            Set<Long> withSamples, java.util.concurrent.atomic.AtomicReference<List<BucketFill.Sample>> before) {
         // Stop at now. Fill "previous" would carry the last value into future buckets and weight
         // it up to the bucket end, while Ignition's own Average has no value after now (its
         // interpolator returns nothing past the current time). Factry weights the last bucket
@@ -1310,6 +1319,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         }
 
         GoodTimeAverage.Sample seed = sampleBefore(uuid, startMs);
+        // Read once: the line through the first empty buckets starts here too.
+        before.set(seed == null ? List.of() : List.of(new BucketFill.Sample(seed.ts(), seed.value(), seed.good())));
 
         GoodTimeAverage.Source factry = new GoodTimeAverage.Source() {
             @Override
@@ -1517,8 +1528,15 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             }
         }
 
-        List<BucketFill.Bucket> buckets = BucketFill.fill(startMs, rangeEndMs, periodMs, nowMs, statuses,
-                ts -> samplesBefore(uuid, element, ts), RAW_BUDGET.seedReadsPerPen(), functions.contains("last"));
+        // The samples before the range, kept for the line through the first empty buckets.
+        List<List<BucketFill.Sample>> beforeRange = new ArrayList<>();
+        List<BucketFill.Bucket> buckets = BucketFill.fill(startMs, rangeEndMs, periodMs, nowMs, statuses, ts -> {
+            List<BucketFill.Sample> before = samplesBefore(uuid, element, ts);
+            if (ts == startMs) {
+                beforeRange.add(before);
+            }
+            return before;
+        }, RAW_BUDGET.seedReadsPerPen(), functions.contains("last"));
         Object[][] values = new Object[functions.size()][buckets.size()];
         for (int f = 0; f < functions.size(); f++) {
             String function = functions.get(f);
@@ -1532,10 +1550,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             }
         }
         if (linear) {
-            List<Long> starts = new ArrayList<>();
+            // Stamped at the bucket start, so the value there; one value for every function, as
+            // an empty block of an analog tag has in the SQL historian.
+            long[] at = new long[buckets.size()];
             boolean[] empty = new boolean[buckets.size()];
             for (int i = 0; i < buckets.size(); i++) {
-                starts.add(buckets.get(i).start());
+                at[i] = buckets.get(i).start();
                 empty[i] = buckets.get(i).kind() == BucketFill.Kind.HELD;
             }
             List<Object[]> interpolated = new ArrayList<>();
@@ -1544,7 +1564,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     interpolated.add(values[f]);
                 }
             }
-            fillLinear(uuid, element, starts, empty, startMs, rangeEndMs, interpolated.toArray(new Object[0][]));
+            fillLinear(uuid, element, at, empty, startMs, rangeEndMs,
+                    beforeRange.isEmpty() ? null : beforeRange.get(0), interpolated.toArray(new Object[0][]));
         }
         int count = 0;
         for (int i = 0; i < buckets.size(); i++) {
@@ -1585,19 +1606,19 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      * Gives each empty bucket of an analog tag one value, for every function alike (a minimum,
      * maximum, mean or last value of an empty bucket are all the same), on the straight line
      * from the last Good sample before it to the first Good sample after it, each at its own
-     * time, as Ignition's own historians interpolate an analog tag. The value is the line's at
-     * the bucket start, where the point is stamped. The samples come from one raw read of the
-     * range, the sample before the range (for the empty buckets it starts with) and, when the
-     * range ends before now, the first sample after it. A bucket whose neighbouring sample is not
-     * Good (Bad time), with no sample after it (toward now), or of a pen with more raw samples
-     * than {@link #LINEAR_RAW_LIMIT} keeps the value it had (held).
+     * time, as Ignition's own historians interpolate an analog tag. The samples come from one raw
+     * read of the range, the sample before the range (for the empty buckets it starts with) and,
+     * when the range ends before now, the first sample after it. A bucket whose neighbouring
+     * sample is not Good (Bad time), with no sample after it (toward now), or of a pen with more
+     * raw samples than {@link #LINEAR_RAW_LIMIT} keeps the value it had (held).
      *
-     * @param starts  the bucket starts
+     * @param at      per bucket, the time whose value on the line it gets; in time order
      * @param empty   per bucket, whether it has no samples and holds a Good value
+     * @param before  the samples before the range when already read, else null
      * @param columns per function to fill, its value per bucket; replaced in place
      */
-    private void fillLinear(String uuid, int element, List<Long> starts, boolean[] empty, long startMs,
-                            long rangeEndMs, Object[][] columns) {
+    private void fillLinear(String uuid, int element, long[] at, boolean[] empty, long startMs,
+                            long rangeEndMs, List<BucketFill.Sample> before, Object[][] columns) {
         int first = -1;
         for (int i = 0; i < empty.length && first < 0; i++) {
             if (empty[i]) {
@@ -1607,15 +1628,20 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         if (first < 0 || columns.length == 0) {
             return;
         }
-        List<BucketFill.Sample> samples = samplesAround(uuid, element, startMs, rangeEndMs, first == 0);
+        List<BucketFill.Sample> samples = samplesAround(uuid, element, startMs, rangeEndMs, first == 0, before);
         if (samples == null) {
             return;
         }
+        // The times only grow, so the first sample at or after each one only moves forward.
+        int next = 0;
         for (int i = 0; i < empty.length; i++) {
             if (!empty[i]) {
                 continue;
             }
-            Double v = lineAt(starts.get(i), samples);
+            while (next < samples.size() && samples.get(next).ts() < at[i]) {
+                next++;
+            }
+            Double v = lineAt(at[i], samples, next);
             if (v != null) {
                 for (Object[] column : columns) {
                     column[i] = v;
@@ -1630,12 +1656,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      * null when the range holds more than {@link #LINEAR_RAW_LIMIT} samples of one status.
      */
     private List<BucketFill.Sample> samplesAround(String uuid, int element, long startMs, long rangeEndMs,
-                                                  boolean withBefore) {
+                                                  boolean withBefore, List<BucketFill.Sample> before) {
         long nowMs = now.getAsLong();
         long endMs = Math.min(rangeEndMs, nowMs);
         List<BucketFill.Sample> out = new ArrayList<>();
         if (withBefore) {
-            out.addAll(samplesBefore(uuid, element, startMs));
+            out.addAll(before != null ? before : samplesBefore(uuid, element, startMs));
         }
         QueryTimeseriesResponse reply = grpcClient.queryTimeseries(withRange(QueryTimeseriesRequest.newBuilder()
                 .addMeasurementUUIDs(uuid).addGroupBy("status").setLimit(LINEAR_RAW_LIMIT), startMs, endMs).build());
@@ -1666,13 +1692,9 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
     /**
      * The value at {@code ts} on the line from the last sample before it to the first sample at
-     * or after it, or null when either is missing, not Good or not a number.
+     * or after it, {@code samples.get(next)}; null when either is missing, not Good or not a number.
      */
-    static Double lineAt(long ts, List<BucketFill.Sample> samples) {
-        int next = 0;
-        while (next < samples.size() && samples.get(next).ts() < ts) {
-            next++;
-        }
+    static Double lineAt(long ts, List<BucketFill.Sample> samples, int next) {
         if (next == 0 || next == samples.size()) {
             return null;
         }
