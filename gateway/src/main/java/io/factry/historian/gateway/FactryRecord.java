@@ -74,14 +74,16 @@ public class FactryRecord implements HistoricalNode {
     /**
      * How empty buckets of this tag are filled when the query leaves it to the historian
      * (FillMode.DERIVED), as Ignition's own historians do (QueryUtils.ColumnMapping.getFillMode):
-     * LINEAR for an analog tag, PREV (hold) for a discrete one. String and Boolean tags hold; else
+     * LINEAR for an analog tag, PREV (hold) for a discrete one. String, Boolean and DateTime tags hold; else
      * the Deadband Style decides, and Auto or an unknown style goes by the tag's Ignition type: a
      * Float (or Float array) is analog. With neither known (another collector's measurement, an
      * asset property, a measurement older than the settings) the tag holds, as before the line:
      * only a tag known to be analog is drawn as one.
      */
     public FillMode derivedFill() {
-        if (dataType == DataType.Boolean || dataType == DataType.String) {
+        // Not a number: the SQL historian never interpolates one (createInterpolator), whatever
+        // its Deadband Style.
+        if (dataType == DataType.Boolean || dataType == DataType.String || dataType == DataType.DateTime) {
             return FillMode.PREV;
         }
         if (deadbandStyle != null && deadbandStyle != InterpolationMode.Auto) {

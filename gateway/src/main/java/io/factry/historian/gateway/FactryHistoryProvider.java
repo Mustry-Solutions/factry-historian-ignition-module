@@ -824,6 +824,11 @@ public class FactryHistoryProvider extends AbstractHistorian<FactryHistorianSett
         } catch (Exception e) {
             logger.warn("Failed to refresh measurement cache: " + e.getMessage());
         }
+        try {
+            measurementCache.syncTagSettings(grpcClient);
+        } catch (Exception e) {
+            logger.warn("Failed to store the settings derived from the tags: " + e.getMessage());
+        }
     }
 
     @Override

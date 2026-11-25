@@ -135,6 +135,16 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
         return measurements.get(uuid);
     }
 
+    /** Sets a measurement's status and updatedAt, as a change in Factry does. */
+    void change(String uuid, String status, long updatedAtMs) {
+        Measurement m = measurements.get(uuid);
+        measurements.put(uuid, m.toBuilder().setStatus(status)
+                .setUpdatedAt(com.google.protobuf.util.Timestamps.fromMillis(updatedAtMs)).build());
+    }
+
+    /** Runs inside every MigrateSettings call, before it answers; tests race the cache with it. */
+    volatile Runnable onMigrate = null;
+
     /** Changes a measurement's settings as an operator in Factry would: its updatedAt moves. */
     void editSettings(String uuid, Struct settings) {
         Measurement m = measurements.get(uuid);
@@ -168,6 +178,15 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
         observer.onCompleted();
     }
 
+    /** The version GetInfo reports. */
+    volatile String version = "v8.3.1";
+
+    @Override
+    public void getInfo(com.google.protobuf.Empty request, StreamObserver<io.factry.historian.proto.HistorianInfo> observer) {
+        observer.onNext(io.factry.historian.proto.HistorianInfo.newBuilder().setVersion(version).setApiVersion("1.1.0").build());
+        observer.onCompleted();
+    }
+
     /** Every MigrateSettings call, in order. */
     final List<io.factry.historian.proto.MigrationRequest> migrations = new CopyOnWriteArrayList<>();
     /** When set, MigrateSettings fails with this status, as a proxy that refuses it does. */
@@ -177,6 +196,9 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
     public void migrateSettings(io.factry.historian.proto.MigrationRequest request,
                                 StreamObserver<com.google.protobuf.Empty> observer) {
         migrations.add(request);
+        if (onMigrate != null) {
+            onMigrate.run();
+        }
         if (migrateFailure != null) {
             observer.onError(migrateFailure.asRuntimeException());
             return;

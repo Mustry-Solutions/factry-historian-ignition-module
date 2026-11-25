@@ -19,7 +19,6 @@ import java.util.Map;
 
 public class FactryStorageEngine extends AbstractStorageEngine {
     private volatile FactryHistorianSettings settings;
-    private final FactryGrpcClient grpcClient;
     private final MeasurementCache measurementCache;
     private final HistorianMetrics metrics;
     private final PointWriter pointWriter;
@@ -47,7 +46,6 @@ public class FactryStorageEngine extends AbstractStorageEngine {
         super(context, historianName, LoggerEx.newBuilder().build(FactryStorageEngine.class),
                 QualifiedPathAdapter.DEFAULT, ImmediateStorageStrategy.create(historianName));
         this.settings = settings;
-        this.grpcClient = grpcClient;
         this.measurementCache = measurementCache;
         this.metrics = metrics;
         this.pointWriter = new PointWriter(grpcClient, measurementCache, metrics, writeHealth);
@@ -112,9 +110,9 @@ public class FactryStorageEngine extends AbstractStorageEngine {
                 }
             }
         }
-        if (!stored.isEmpty()) {
-            measurementCache.storeTagSettings(stored, grpcClient);
-        }
+        // Factry is asked nothing here, on the store-and-forward thread: the scheduler stores the
+        // settings derived from the metadata (MeasurementCache.syncTagSettings).
+        measurementCache.markSettingsPending(stored);
         return StorageResult.success(metadataPoints);
     }
 

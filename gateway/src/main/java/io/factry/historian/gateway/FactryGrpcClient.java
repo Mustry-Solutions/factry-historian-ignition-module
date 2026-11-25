@@ -467,6 +467,18 @@ public class FactryGrpcClient {
         }
     }
 
+    public io.factry.historian.proto.HistorianInfo getInfo() {
+        logger.debug("Sending GetInfo");
+        channelLock.readLock().lock();
+        try {
+            return blockingStub
+                    .withDeadlineAfter(CALL_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .getInfo(Empty.getDefaultInstance());
+        } finally {
+            channelLock.readLock().unlock();
+        }
+    }
+
     public CreateMeasurementsReply createMeasurements(CreateMeasurementsRequest request) {
         logger.debug("Sending CreateMeasurements with {} measurements", request.getMeasurementsCount());
         channelLock.readLock().lock();

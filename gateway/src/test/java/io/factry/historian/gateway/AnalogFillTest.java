@@ -339,10 +339,10 @@ class AnalogFillTest {
         factry.add(u, T0 - 24_000, 0, "Good");
         factry.add(u, T0 + 36_000, 60, "Good");
         lastValues(T0 + 72_000, T0 + 3_600_000);
-        assertEquals(1, factry.queries.stream().filter(q -> q.getDesc()).count(), factry.queries::toString);
+        assertEquals(1, factry.queries.stream().filter(q -> q.getDesc() && q.getStart().getSeconds() == 0).count(), factry.queries::toString);
         factry.queries.clear();
         hourlyAverage(T0 + 4 * HOUR);
-        assertEquals(1, factry.queries.stream().filter(q -> q.getDesc()).count(), factry.queries::toString);
+        assertEquals(1, factry.queries.stream().filter(q -> q.getDesc() && q.getStart().getSeconds() == 0).count(), factry.queries::toString);
     }
 
     @Test
@@ -353,23 +353,25 @@ class AnalogFillTest {
         assertEquals("Analog_Compressed", MeasurementCache.concreteStyle("Auto", "Float8"));
     }
 
-    /** The raw reads around empty buckets, as [start, end) in seconds from T0. */
-    private List<List<Long>> windowReads() {
+    /** The reads of the samples around empty buckets: [1 for the last before, 0 for the first after, start, end) in s. */
+    private List<List<Long>> edgeReads() {
         return factry.queries.stream()
-                .filter(q -> !q.hasAggregation() && !q.getDesc() && q.getLimit() > 1)
-                .map(q -> List.of((com.google.protobuf.util.Timestamps.toMillis(q.getStart()) - T0) / 1000,
+                .filter(AnalogFillTest::isEdgeRead)
+                .map(q -> List.of(q.getDesc() ? 1L : 0L,
+                        (com.google.protobuf.util.Timestamps.toMillis(q.getStart()) - T0) / 1000,
                         (com.google.protobuf.util.Timestamps.toMillis(q.getEnd()) - T0) / 1000))
                 .toList();
     }
 
-    private static boolean isWindowRead(io.factry.historian.proto.QueryTimeseriesRequest q) {
-        return !q.hasAggregation() && !q.getDesc() && q.getLimit() > 1;
+    /** A read of one sample per status around a run of empty buckets (not the one before the range). */
+    private static boolean isEdgeRead(io.factry.historian.proto.QueryTimeseriesRequest q) {
+        return !q.hasAggregation() && q.getLimit() == 1 && com.google.protobuf.util.Timestamps.toMillis(q.getStart()) > 0;
     }
 
     @Test
     void aFailedReadAroundEmptyBuckets_holdsInstead() throws Exception {
         minuteTag("number", "Float8");
-        factry.failWhen = AnalogFillTest::isWindowRead;
+        factry.failWhen = AnalogFillTest::isEdgeRead;
         for (Status status : List.of(Status.UNKNOWN, Status.DEADLINE_EXCEEDED)) {
             factry.failWith = status;
             // The pen draws as before the line, not Bad and not a failed query.
@@ -379,7 +381,7 @@ class AnalogFillTest {
     }
 
     @Test
-    void aLongRangeWithOneShortGap_readsOnlyAroundTheGap() throws Exception {
+    void aLongRangeWithOneShortGap_readsOnlyOneSampleOnEachSide() throws Exception {
         String u = factry.addMeasurement("default/out", "number", "Float8");
         for (int t = 0; t <= 300; t += 6) {
             if (t < 120 || t > 144) {
@@ -390,34 +392,41 @@ class AnalogFillTest {
         AverageHistoryQuery.Dataset ds = AverageHistoryQuery.wide(engine, T0, T0 + 300_000, 25,
                 AggregationMode.LastValue, FillMode.DERIVED, "out");
         assertNull(ds.error, ds::toString);
-        // Buckets 120 s and 132 s are empty: one read from the bucket before (108 s) to the one after (156 s).
-        assertEquals(List.of(List.of(108L, 156L)), windowReads());
+        // Buckets 120 s and 132 s are empty: the last sample of the bucket before (108 s to 120 s)
+        // and the first of the bucket after (144 s to 156 s), one per status each.
+        assertEquals(List.of(List.of(1L, 108L, 120L), List.of(0L, 144L, 156L)), edgeReads());
         // On the line from 114 at 114 s to 150 at 150 s, at each bucket's end.
         assertEquals(132.0, ((Number) ds.rows.get(10)[1]).doubleValue(), ds::toString);
         assertEquals(144.0, ((Number) ds.rows.get(11)[1]).doubleValue(), ds::toString);
     }
 
     @Test
-    void aReadThatReachesTheLimit_orPastTheCap_holds() throws Exception {
+    void runsPastTheCap_hold() throws Exception {
         String u = factry.addMeasurement("default/out", "number", "Float8");
-        // Empty buckets at 12 s and 60 s: two runs, read in two windows, 0 to 36 s and 48 to 84 s.
+        // Empty buckets at 12 s and 60 s: two runs.
         for (int t : new int[]{0, 24, 36, 48, 72, 84}) {
             factry.add(u, T0 + t * 1000L, t, "Good");
         }
         assertEquals(List.of(0.0, 24.0, 24.0, 36.0, 48.0, 72.0, 72.0, 84.0), eightBuckets(engine()));
-        assertEquals(List.of(List.of(0L, 36L), List.of(48L, 84L)), windowReads());
+        assertEquals(4, edgeReads().size());
 
-        // Past the cap of reads per pen, the second run holds.
         factry.queries.clear();
         FactryQueryEngine engine = engine();
-        engine.linearReadsPerPen = 1;
+        engine.linearRunsPerPen = 1;
         assertEquals(List.of(0.0, 24.0, 24.0, 36.0, 48.0, 48.0, 72.0, 84.0), eightBuckets(engine));
-        assertEquals(1, windowReads().size());
+        assertEquals(2, edgeReads().size());
+    }
 
-        // A read that reaches the limit may be cut short: its runs hold.
-        engine = engine();
-        engine.linearRawLimit = 2;
-        assertEquals(List.of(0.0, 0.0, 24.0, 36.0, 48.0, 48.0, 72.0, 84.0), eightBuckets(engine));
+    @Test
+    void theLatestSampleOnEachSide_counts() throws Exception {
+        String u = factry.addMeasurement("default/out", "number", "Float8");
+        // Before the run a Bad sample, then a Good one: the line starts at the Good one.
+        factry.add(u, T0 + 2_000, 99, "Bad");
+        factry.add(u, T0 + 6_000, 6, "Good");
+        // After the run a Bad sample first: Bad time follows, so the run holds.
+        factry.add(u, T0 + 60_000, 99, "Bad");
+        factry.add(u, T0 + 61_000, 61, "Good");
+        assertEquals(List.of(6.0, 6.0, 6.0, 6.0, 6.0, 61.0), column(AggregationMode.LastValue));
     }
 
     private List<Object> eightBuckets(FactryQueryEngine engine) throws Exception {
@@ -535,6 +544,7 @@ class AnalogFillTest {
                         metadata("out", InterpolationMode.Discrete),
                         metadata("same", InterpolationMode.Discrete),
                         metadata("other", InterpolationMode.Discrete)));
+                cache.syncTagSettings(client);
 
                 // One call, only for the own measurement whose style changed.
                 assertEquals(1, server.migrations.size());
@@ -554,6 +564,7 @@ class AnalogFillTest {
 
                 // The cache has the new setting, so the same metadata again sends nothing.
                 storage(client, cache).doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
+                cache.syncTagSettings(client);
                 assertEquals(1, server.migrations.size());
             } finally {
                 client.shutdown();
@@ -574,7 +585,9 @@ class AnalogFillTest {
                 cache.refresh(client);
                 FactryStorageEngine storage = storage(client, cache);
                 var result = storage.doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
+                cache.syncTagSettings(client);
                 storage.doStoreMetadata(List.of(metadata("out", InterpolationMode.Analog_Compressed)));
+                cache.syncTagSettings(client);
 
                 assertTrue(result.error().isEmpty(), result::toString);
                 assertEquals(1, log.events().stream()
@@ -599,6 +612,7 @@ class AnalogFillTest {
                 MeasurementCache cache = new MeasurementCache();
                 cache.refresh(client);
                 storage(client, cache).doStoreMetadata(List.of(metadata("count", InterpolationMode.Auto, DataType.Int4)));
+                cache.syncTagSettings(client);
                 assertEquals(settings("other", "x", MeasurementCache.DEADBAND_STYLE_SETTING, "Discrete",
                         MeasurementCache.IGNITION_DATA_TYPE_SETTING, "Int4"), server.measurement(own).getSettings());
             } finally {
@@ -616,6 +630,7 @@ class AnalogFillTest {
                 MeasurementCache cache = new MeasurementCache();
                 cache.refresh(client);
                 storage(client, cache).doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
+                cache.syncTagSettings(client);
                 assertEquals(settings(MeasurementCache.DEADBAND_STYLE_SETTING, "Discrete"),
                         server.measurement(own).getSettings());
             } finally {
@@ -637,6 +652,7 @@ class AnalogFillTest {
                 MeasurementCache cache = new MeasurementCache();
                 cache.refresh(client);
                 storage(client, cache).doStoreMetadata(points);
+                cache.syncTagSettings(client);
                 assertEquals(List.of(MeasurementCache.MIGRATE_BATCH, 1), server.migrations.stream()
                         .map(r -> r.getMeasurementSettingsCount()).toList());
             } finally {
@@ -658,12 +674,16 @@ class AnalogFillTest {
                     // Another failure: logged once per code, tried again with the next metadata.
                     server.migrateFailure = Status.INTERNAL.withDescription("hiccup");
                     storage.doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
+                    cache.syncTagSettings(client);
                     storage.doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
+                    cache.syncTagSettings(client);
                     assertEquals(2, server.migrations.size());
                     // A refusal: no more calls this session, logged once.
                     server.migrateFailure = refusal.withDescription("refused on purpose");
                     storage.doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
+                    cache.syncTagSettings(client);
                     storage.doStoreMetadata(List.of(metadata("out", InterpolationMode.Analog_Compressed)));
+                    cache.syncTagSettings(client);
                     assertEquals(3, server.migrations.size(), refusal.toString());
                     assertEquals(1, log.events().stream()
                             .filter(e -> e.getFormattedMessage().contains("hiccup")).count(), log::text);
@@ -687,6 +707,7 @@ class AnalogFillTest {
                 MeasurementCache cache = new MeasurementCache();
                 cache.refresh(client);
                 storage(client, cache).doStoreMetadata(List.of(metadata("out", InterpolationMode.Auto, DataType.Int4)));
+                cache.syncTagSettings(client);
                 assertEquals(settings(MeasurementCache.IGNITION_DATA_TYPE_SETTING, "Int4",
                         MeasurementCache.DEADBAND_STYLE_SETTING, "Discrete"), server.measurement(own).getSettings());
             } finally {
@@ -707,6 +728,7 @@ class AnalogFillTest {
                 // An operator adds a setting in Factry; the cache has not synced since.
                 server.editSettings(own, settings(MeasurementCache.IGNITION_DATA_TYPE_SETTING, "Float8", "operator", "x"));
                 storage(client, cache).doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
+                cache.syncTagSettings(client);
                 assertEquals(settings(MeasurementCache.IGNITION_DATA_TYPE_SETTING, "Float8", "operator", "x",
                         MeasurementCache.DEADBAND_STYLE_SETTING, "Discrete"), server.measurement(own).getSettings());
                 assertEquals(1, server.measurementRequests.size());
@@ -726,9 +748,217 @@ class AnalogFillTest {
                 cache.refresh(client);
                 server.getMeasurementsFailure = Status.UNAVAILABLE;
                 var result = storage(client, cache).doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
+                cache.syncTagSettings(client);
                 assertTrue(result.error().isEmpty(), result::toString);
                 assertEquals(0, server.migrations.size());
                 assertEquals(Struct.getDefaultInstance(), server.measurement(own).getSettings());
+            } finally {
+                client.shutdown();
+            }
+        }
+    }
+
+    // Review of 0d03364.
+
+    /** LastValue in 12 s buckets from T0 to {@code end}, with the given fill, as handed to Ignition. */
+    private List<Object> lastValuesWith(FillMode fill, AggregationMode mode, long end) {
+        FactryQueryEngineAverageTest.Recorder rec = new FactryQueryEngineAverageTest.Recorder();
+        engine().query(AggregatedQueryOptions.builder()
+                .startTime(T0).endTime(end)
+                .withTimeWindow(TimeWindow.ofMillis(12_000))
+                .addQueryKey(AggregatedQueryKey.of(QualifiedPath.parseSafe(PATH), LegacyAggregateAdapter.of(mode), fill))
+                .build(), rec);
+        assertNull(rec.error);
+        List<Object> out = new ArrayList<>();
+        for (var p : rec.points) {
+            assertTrue(p.quality().isGood());
+            out.add(p.value() instanceof java.util.Date d ? d.getTime() - T0 : ((Number) p.value()).doubleValue());
+        }
+        return out;
+    }
+
+    @Test
+    void anExplicitFillMode_wins() {
+        minuteTag("number", null);
+        // Asked LINEAR: a line, though nothing says the tag is analog.
+        assertEquals(LINE, lastValuesWith(FillMode.LINEAR, AggregationMode.LastValue, T0 + 72_000));
+        // Asked PREV: held, though the tag is analog.
+        cache.storeMetadata("default/out", Map.of(MeasurementCache.DEADBAND_STYLE, "Analog_Compressed",
+                MeasurementCache.IGNITION_DATA_TYPE, "Float8"));
+        assertEquals(HELD, lastValuesWith(FillMode.PREV, AggregationMode.LastValue, T0 + 72_000));
+    }
+
+    @Test
+    void aDateTimeTagWithAnAnalogStyle_holds() {
+        String u = factry.addDateTimeMeasurement("default/out");
+        factry.setSetting(u, MeasurementCache.DEADBAND_STYLE_SETTING, "Analog_Compressed");
+        factry.add(u, T0, T0, "Good");
+        factry.add(u, T0 + 60_000, T0 + 60_000, "Good");
+        // The SQL historian never interpolates a value that is not a number.
+        assertEquals(List.of(0L, 0L, 0L, 0L, 0L, 60_000L),
+                lastValuesWith(FillMode.DERIVED, AggregationMode.LastValue, T0 + 72_000));
+    }
+
+    @Test
+    void aRangeThatIsNotAWholeNumberOfBuckets_endsOnTheLine() {
+        String u = factry.addMeasurement("default/out", "number", "Float8");
+        factry.add(u, T0, 0, "Good");
+        factry.add(u, T0 + 120_000, 120, "Good");
+        // The last bucket is 60 s to 66 s: its LastValue is the line at 66 s, its Average at 63 s.
+        assertEquals(List.of(0.0, 24.0, 36.0, 48.0, 60.0, 66.0),
+                lastValuesWith(FillMode.DERIVED, AggregationMode.LastValue, T0 + 66_000));
+        assertEquals(List.of(0.0, 18.0, 30.0, 42.0, 54.0, 63.0),
+                lastValuesWith(FillMode.DERIVED, AggregationMode.Average, T0 + 66_000));
+    }
+
+    /** A cache over {@code server}, its metadata for "out" stored as Discrete. */
+    private static MeasurementCache cacheWithPending(FakeFactryServer server, FactryGrpcClient client) {
+        MeasurementCache cache = new MeasurementCache();
+        cache.refresh(client);
+        storage(client, cache).doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
+        return cache;
+    }
+
+    @Test
+    void theFreshRead_asksForChangesSinceTheCachesWatermark() throws Exception {
+        try (FakeFactryServer server = new FakeFactryServer()) {
+            String own = server.addMeasurement("default/out", "number", "collector", Struct.getDefaultInstance());
+            server.change(own, "active", T0);
+            String other = server.addMeasurement("default/old", "number", "collector", Struct.getDefaultInstance());
+            server.change(other, "active", T0 - 30L * 24 * HOUR);
+            FactryGrpcClient client = server.client();
+            try {
+                MeasurementCache cache = cacheWithPending(server, client);
+                cache.syncTagSettings(client);
+                // The newest change the cache has seen, minus a second: not since the oldest measurement.
+                var request = server.measurementRequests.get(server.measurementRequests.size() - 1);
+                assertEquals(T0 - 1_000, com.google.protobuf.util.Timestamps.toMillis(request.getSince()));
+                assertEquals(1, server.migrations.size());
+            } finally {
+                client.shutdown();
+            }
+        }
+    }
+
+    @Test
+    void aMeasurementDeletedInFactry_isNotSent() throws Exception {
+        try (FakeFactryServer server = new FakeFactryServer()) {
+            String own = server.addMeasurement("default/out", "number", "collector", Struct.getDefaultInstance());
+            server.change(own, "active", T0);
+            FactryGrpcClient client = server.client();
+            try {
+                MeasurementCache cache = cacheWithPending(server, client);
+                server.change(own, "Deleted", T0 + 60_000);
+                cache.syncTagSettings(client);
+                cache.syncTagSettings(client);
+                assertEquals(0, server.migrations.size());
+            } finally {
+                client.shutdown();
+            }
+        }
+    }
+
+    @Test
+    void aMeasurementPausedInFactry_isSent_andStaysPaused() throws Exception {
+        try (FakeFactryServer server = new FakeFactryServer()) {
+            String own = server.addMeasurement("default/out", "number", "collector", Struct.getDefaultInstance());
+            server.change(own, "active", T0);
+            FactryGrpcClient client = server.client();
+            try {
+                MeasurementCache cache = cacheWithPending(server, client);
+                server.change(own, "Paused", T0 + 60_000);
+                cache.syncTagSettings(client);
+                assertEquals(1, server.migrations.size());
+                var cached = cache.writeTarget("default/out", "collector");
+                assertEquals("Paused", cached.getStatus());
+                assertEquals(settings(MeasurementCache.DEADBAND_STYLE_SETTING, "Discrete"), cached.getSettings());
+            } finally {
+                client.shutdown();
+            }
+        }
+    }
+
+    @Test
+    void aSyncDuringTheCall_keepsItsStatus() throws Exception {
+        try (FakeFactryServer server = new FakeFactryServer()) {
+            String own = server.addMeasurement("default/out", "number", "collector", Struct.getDefaultInstance());
+            server.change(own, "active", T0);
+            FactryGrpcClient client = server.client();
+            try {
+                MeasurementCache cache = cacheWithPending(server, client);
+                // Paused in Factry and synced while MigrateSettings is under way.
+                server.onMigrate = () -> {
+                    server.change(own, "Paused", T0 + 60_000);
+                    cache.sync(client);
+                };
+                cache.syncTagSettings(client);
+                var cached = cache.writeTarget("default/out", "collector");
+                assertEquals("Paused", cached.getStatus());
+                assertEquals(settings(MeasurementCache.DEADBAND_STYLE_SETTING, "Discrete"), cached.getSettings());
+            } finally {
+                client.shutdown();
+            }
+        }
+    }
+
+    @Test
+    void anUncheckedFactryVersion_isNotCalled() throws Exception {
+        for (String version : List.of("v8.1.0", "v8.2.2", "v8.4.0", "v9.0.0", "dev")) {
+            try (FakeFactryServer server = new FakeFactryServer()) {
+                server.version = version;
+                server.addMeasurement("default/out", "number", "collector", Struct.getDefaultInstance());
+                FactryGrpcClient client = server.client();
+                try (LogCapture log = new LogCapture(MeasurementCache.class.getName(), Level.INFO)) {
+                    MeasurementCache cache = cacheWithPending(server, client);
+                    cache.syncTagSettings(client);
+                    cache.syncTagSettings(client);
+                    assertEquals(0, server.migrations.size(), version);
+                    assertEquals(1, log.events().stream()
+                            .filter(e -> e.getFormattedMessage().contains("not a version MigrateSettings")).count(),
+                            log::text);
+                } finally {
+                    client.shutdown();
+                }
+            }
+        }
+        assertTrue(MeasurementCache.checkedVersion("v8.2.3"));
+        assertTrue(MeasurementCache.checkedVersion("v8.3.1"));
+        assertTrue(MeasurementCache.checkedVersion("8.3.12"));
+    }
+
+    @Test
+    void aFailedMigration_isTriedAgainWithoutNewMetadata() throws Exception {
+        try (FakeFactryServer server = new FakeFactryServer()) {
+            String own = server.addMeasurement("default/out", "number", "collector", Struct.getDefaultInstance());
+            FactryGrpcClient client = server.client();
+            try {
+                MeasurementCache cache = cacheWithPending(server, client);
+                server.migrateFailure = Status.UNAVAILABLE;
+                cache.syncTagSettings(client);
+                server.migrateFailure = null;
+                cache.syncTagSettings(client);
+                cache.syncTagSettings(client);
+                assertEquals(2, server.migrations.size());
+                assertEquals(settings(MeasurementCache.DEADBAND_STYLE_SETTING, "Discrete"),
+                        server.measurement(own).getSettings());
+            } finally {
+                client.shutdown();
+            }
+        }
+    }
+
+    @Test
+    void storingMetadata_asksFactryNothing() throws Exception {
+        try (FakeFactryServer server = new FakeFactryServer()) {
+            server.addMeasurement("default/out", "number", "collector", Struct.getDefaultInstance());
+            FactryGrpcClient client = server.client();
+            try {
+                MeasurementCache cache = new MeasurementCache();
+                cache.refresh(client);
+                int before = server.measurementRequests.size();
+                storage(client, cache).doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
+                assertEquals(before, server.measurementRequests.size());
+                assertEquals(0, server.migrations.size());
             } finally {
                 client.shutdown();
             }
