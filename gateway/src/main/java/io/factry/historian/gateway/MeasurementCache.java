@@ -4,6 +4,9 @@ import com.google.protobuf.Struct;
 import com.google.protobuf.Timestamp;
 import com.google.protobuf.Value;
 import com.google.protobuf.util.Timestamps;
+import com.inductiveautomation.ignition.common.sqltags.history.InterpolationMode;
+import com.inductiveautomation.ignition.common.sqltags.model.types.DataType;
+import com.inductiveautomation.ignition.common.sqltags.model.types.DataTypeClass;
 import io.factry.historian.proto.Asset;
 import io.factry.historian.proto.AssetProperties;
 import io.factry.historian.proto.AssetProperty;
@@ -17,7 +20,6 @@ import io.factry.historian.proto.GetMeasurementsByFilterRequest;
 import io.factry.historian.proto.Measurement;
 import io.factry.historian.proto.MetadataProperty;
 import io.factry.historian.proto.MigrateMeasurementSettings;
-import io.factry.historian.proto.MigrationRequest;
 import io.factry.historian.proto.MeasurementRequest;
 import io.factry.historian.proto.Measurements;
 import io.factry.historian.proto.Pagination;
@@ -1459,70 +1461,119 @@ public class MeasurementCache {
     }
 
     /**
-     * The tag property {@code property} of the tag behind {@code m}: from the metadata Ignition
-     * sent this gateway, when {@code m} is this collector's measurement for that tag, else from
-     * the measurement setting {@code setting}. Null when neither has it.
+     * The tag property {@code property} of the tag {@code tagPath} that reads {@code m}: from the
+     * metadata Ignition sent this gateway when {@code m} is the measurement this collector writes
+     * that tag to ({@code writePath}: the tag itself, or the array an element is stored in), else
+     * from the measurement setting {@code setting}. Null when neither has it.
      */
-    String tagProperty(Measurement m, String collectorUUID, String property, String setting) {
-        // Only this collector's measurement: another collector's with the same name may be
-        // another Site's tag, configured differently.
-        if (m.getCollectorUUID().equalsIgnoreCase(collectorUUID)) {
-            Map<String, String> metadata = tagMetadata.get(m.getName());
-            if (metadata != null && metadata.get(property) != null) {
+    String tagProperty(String tagPath, String writePath, Measurement m, String collectorUUID, String property,
+                       String setting) {
+        // Only the measurement this collector writes the tag to, which may differ in letter case
+        // after a rename: another collector's with the same name may be another Site's tag,
+        // configured differently.
+        Map<String, String> metadata = tagMetadata.get(tagPath);
+        if (metadata != null && metadata.get(property) != null && collectorUUID != null
+                && collectorUUID.equalsIgnoreCase(m.getCollectorUUID())) {
+            Measurement target = writeTarget(writePath, collectorUUID);
+            if (target != null && target.getUuid().equals(m.getUuid())) {
                 return metadata.get(property);
             }
         }
         return stringSetting(m, setting);
     }
 
-    /** Logged once per profile: a proxy in front of Factry may refuse MigrateSettings on purpose. */
-    private final java.util.concurrent.atomic.AtomicBoolean migrateRefusalLogged =
-            new java.util.concurrent.atomic.AtomicBoolean();
+    /**
+     * The Deadband Style to store for a tag: the concrete mode, as the SQL historian stores it
+     * (InterpolationMode.getConcreteMode), so that another gateway, which may not know the tag's
+     * data type, still holds an integer tag with Auto. Auto stays Auto when the type is unknown.
+     */
+    static String concreteStyle(String style, String ignitionDataType) {
+        if (style == null) {
+            return null;
+        }
+        try {
+            InterpolationMode mode = InterpolationMode.valueOf(style);
+            DataTypeClass typeClass = null;
+            if (ignitionDataType != null) {
+                typeClass = DataType.valueOf(ignitionDataType).getTypeClass();
+            }
+            if (mode == InterpolationMode.Auto && typeClass == null) {
+                return style;
+            }
+            return mode.getConcreteMode(typeClass).name();
+        } catch (IllegalArgumentException e) {
+            return style;
+        }
+    }
+
+    /** Most measurements in one MigrateSettings call. */
+    static final int MIGRATE_BATCH = 500;
 
     /**
-     * Writes the Deadband Style Ignition sent for these tags into their measurements' settings,
-     * where it differs, with one MigrateSettings call. Only this collector's measurements: the
-     * module never changes another collector's. MigrateSettings replaces the whole settings
-     * Struct, so every other setting is sent along unchanged. A failure is logged once and
-     * changes nothing: queries on this gateway still read the style from the metadata.
-     *
-     * @param styles tag path to Deadband Style name
+     * The gRPC status codes of failed MigrateSettings calls already logged: once per code per
+     * profile, since a proxy in front of Factry may refuse the call on purpose.
      */
-    void storeDeadbandStyles(Map<String, String> styles, FactryGrpcClient grpcClient) {
+    private final Set<io.grpc.Status.Code> migrateFailuresLogged = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Writes the Deadband Style Ignition sent for these tags into their measurements' settings
+     * (as {@link #concreteStyle}), where it differs, in MigrateSettings calls of at most
+     * {@link #MIGRATE_BATCH}; also the Ignition data type when the setting lacks it. Only the
+     * measurement this collector writes each tag to: the module never changes another
+     * collector's. MigrateSettings replaces the whole settings Struct, so every other setting is
+     * sent along unchanged. A failure is logged once per status code and changes nothing:
+     * queries on this gateway still read the style from the metadata.
+     *
+     * @param tagPaths tags whose metadata (with the style) was just stored
+     */
+    void storeDeadbandStyles(Collection<String> tagPaths, FactryGrpcClient grpcClient) {
         String collectorUUID = grpcClient.getCollectorUUID();
         if (collectorUUID == null || collectorUUID.isEmpty()) {
             return;
         }
         Map<String, Measurement> updated = new LinkedHashMap<>();
-        MigrationRequest.Builder request = MigrationRequest.newBuilder();
-        styles.forEach((path, style) -> {
-            Measurement m = writeTarget(path, collectorUUID);
-            if (m == null || !collectorUUID.equalsIgnoreCase(m.getCollectorUUID())
-                    || !m.getName().equals(path) || style.equals(stringSetting(m, DEADBAND_STYLE_SETTING))) {
+        for (String path : tagPaths) {
+            Map<String, String> metadata = tagMetadata.get(path);
+            String style = metadata == null ? null
+                    : concreteStyle(metadata.get(DEADBAND_STYLE), metadata.get(IGNITION_DATA_TYPE));
+            Measurement m = style == null ? null : writeTarget(path, collectorUUID);
+            if (m == null || !collectorUUID.equalsIgnoreCase(m.getCollectorUUID()) || updated.containsKey(m.getUuid())) {
+                continue;
+            }
+            Struct.Builder settings = m.getSettings().toBuilder();
+            if (!style.equals(stringSetting(m, DEADBAND_STYLE_SETTING))) {
+                settings.putFields(DEADBAND_STYLE_SETTING, Value.newBuilder().setStringValue(style).build());
+            }
+            String type = metadata.get(IGNITION_DATA_TYPE);
+            if (type != null && stringSetting(m, IGNITION_DATA_TYPE_SETTING) == null) {
+                settings.putFields(IGNITION_DATA_TYPE_SETTING, Value.newBuilder().setStringValue(type).build());
+            }
+            if (!settings.build().equals(m.getSettings())) {
+                updated.put(m.getUuid(), m.toBuilder().setSettings(settings).build());
+            }
+        }
+        List<Measurement> all = new ArrayList<>(updated.values());
+        for (int from = 0; from < all.size(); from += MIGRATE_BATCH) {
+            List<Measurement> batch = all.subList(from, Math.min(all.size(), from + MIGRATE_BATCH));
+            List<MigrateMeasurementSettings> request = new ArrayList<>();
+            for (Measurement m : batch) {
+                request.add(MigrateMeasurementSettings.newBuilder()
+                        .setMeasurementUUID(m.getUuid()).setSettings(m.getSettings()).build());
+            }
+            try {
+                grpcClient.migrateMeasurementSettings(request);
+            } catch (RuntimeException e) {
+                io.grpc.Status.Code code = io.grpc.Status.fromThrowable(e).getCode();
+                if (migrateFailuresLogged.add(code)) {
+                    logger.info("Factry did not store the Deadband Style of {} measurement(s) ({}). Trends on this"
+                            + " gateway still follow it; other gateways draw these tags by their data type."
+                            + " Logged once per answer.", batch.size(), e.getMessage());
+                }
                 return;
             }
-            Struct settings = m.getSettings().toBuilder()
-                    .putFields(DEADBAND_STYLE_SETTING, Value.newBuilder().setStringValue(style).build())
-                    .build();
-            request.addMeasurementSettings(MigrateMeasurementSettings.newBuilder()
-                    .setMeasurementUUID(m.getUuid()).setSettings(settings));
-            updated.put(m.getUuid(), m.toBuilder().setSettings(settings).build());
-        });
-        if (updated.isEmpty()) {
-            return;
+            batch.forEach(m -> cacheMeasurement(m, collectorUUID));
+            logger.debug("Stored the Deadband Style of {} measurement(s)", batch.size());
         }
-        try {
-            grpcClient.migrateSettings(request.build());
-        } catch (RuntimeException e) {
-            if (migrateRefusalLogged.compareAndSet(false, true)) {
-                logger.info("Factry did not store the Deadband Style of {} measurement(s) ({}). Trends on this"
-                        + " gateway still follow it; other gateways draw these tags by their data type."
-                        + " Logged once.", updated.size(), e.getMessage());
-            }
-            return;
-        }
-        updated.values().forEach(m -> cacheMeasurement(m, collectorUUID));
-        logger.debug("Stored the Deadband Style of {} measurement(s)", updated.size());
     }
 
     /** Factry derives EngineeringSpecs from a nested "Config" attribute group with these keys. */
@@ -1571,7 +1622,7 @@ public class MeasurementCache {
         if (ignitionType != null) {
             settings.putFields(IGNITION_DATA_TYPE_SETTING, Value.newBuilder().setStringValue(ignitionType).build());
         }
-        String deadbandStyle = metadata.get(DEADBAND_STYLE);
+        String deadbandStyle = concreteStyle(metadata.get(DEADBAND_STYLE), ignitionType);
         if (deadbandStyle != null) {
             settings.putFields(DEADBAND_STYLE_SETTING, Value.newBuilder().setStringValue(deadbandStyle).build());
         }

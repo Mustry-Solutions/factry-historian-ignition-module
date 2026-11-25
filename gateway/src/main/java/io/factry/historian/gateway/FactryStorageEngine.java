@@ -12,6 +12,7 @@ import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 
 import io.grpc.StatusRuntimeException;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -86,7 +87,7 @@ public class FactryStorageEngine extends AbstractStorageEngine {
         // first created via MeasurementCache.getOrCreateUUID(). Only the Deadband Style is kept
         // up to date on existing measurements, as a setting, since trends draw by it.
         logger.debug("doStoreMetadata called with " + metadataPoints.size() + " points");
-        Map<String, String> deadbandStyles = new HashMap<>();
+        List<String> withStyle = new ArrayList<>();
         for (MetadataPoint point : metadataPoints) {
             String tagPath = TagPathUtil.storagePathToStoredPath(point.source().toString());
             com.inductiveautomation.ignition.common.config.PropertySet ps = point.value();
@@ -101,14 +102,13 @@ public class FactryStorageEngine extends AbstractStorageEngine {
                 if (!properties.isEmpty()) {
                     measurementCache.storeMetadata(tagPath, properties);
                 }
-                String style = properties.get(MeasurementCache.DEADBAND_STYLE);
-                if (style != null) {
-                    deadbandStyles.put(tagPath, style);
+                if (properties.containsKey(MeasurementCache.DEADBAND_STYLE)) {
+                    withStyle.add(tagPath);
                 }
             }
         }
-        if (!deadbandStyles.isEmpty()) {
-            measurementCache.storeDeadbandStyles(deadbandStyles, grpcClient);
+        if (!withStyle.isEmpty()) {
+            measurementCache.storeDeadbandStyles(withStyle, grpcClient);
         }
         return StorageResult.success(metadataPoints);
     }

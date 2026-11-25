@@ -1205,20 +1205,17 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         for (long b = startMs; b < rangeEndMs; b += periodMs) {
             starts.add(b);
         }
-        Object[] linearValues = null;
+        Object[] linearValues = new Object[starts.size()];
+        boolean[] empty = new boolean[starts.size()];
+        for (int i = 0; i < starts.size(); i++) {
+            GoodTimeAverage.Result r = values.getOrDefault(starts.get(i), GoodTimeAverage.Result.BAD);
+            linearValues[i] = r.isBad() ? null : r.value();
+            empty[i] = !r.isBad() && !withSamples.contains(starts.get(i));
+        }
         if (linear) {
             // Factry's twa holds the last value through buckets without samples; an analog tag
-            // gets the straight line between its neighbours instead.
-            linearValues = new Object[starts.size()];
-            boolean[] empty = new boolean[starts.size()];
-            boolean[] anchor = new boolean[starts.size()];
-            for (int i = 0; i < starts.size(); i++) {
-                GoodTimeAverage.Result r = values.getOrDefault(starts.get(i), GoodTimeAverage.Result.BAD);
-                linearValues[i] = r.isBad() ? null : r.value();
-                anchor[i] = !r.isBad() && withSamples.contains(starts.get(i));
-                empty[i] = !r.isBad() && !withSamples.contains(starts.get(i));
-            }
-            interpolate(linearValues, empty, anchor);
+            // gets the straight line between its samples instead.
+            fillLinear(uuid, -1, starts, empty, startMs, rangeEndMs, new Object[][]{linearValues});
         }
 
         // Every bucket gets a point. Ignition fills a bucket without one with a neighbouring
@@ -1229,7 +1226,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
         for (int i = 0; i < starts.size(); i++) {
             long b = starts.get(i);
             GoodTimeAverage.Result r = values.getOrDefault(b, GoodTimeAverage.Result.BAD);
-            Object value = linearValues != null ? linearValues[i] : r.isBad() ? null : r.value();
+            Object value = linearValues[i];
             out.add(
                     AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
                             // A DateTime tag is stored as epoch ms; its average is a date too.
@@ -1533,15 +1530,21 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     case BAD -> null;
                 };
             }
-            if (linear && INTERPOLATED.contains(function)) {
-                boolean[] empty = new boolean[buckets.size()];
-                boolean[] anchor = new boolean[buckets.size()];
-                for (int i = 0; i < buckets.size(); i++) {
-                    empty[i] = buckets.get(i).kind() == BucketFill.Kind.HELD;
-                    anchor[i] = buckets.get(i).kind() == BucketFill.Kind.GOOD_SAMPLES;
-                }
-                interpolate(values[f], empty, anchor);
+        }
+        if (linear) {
+            List<Long> starts = new ArrayList<>();
+            boolean[] empty = new boolean[buckets.size()];
+            for (int i = 0; i < buckets.size(); i++) {
+                starts.add(buckets.get(i).start());
+                empty[i] = buckets.get(i).kind() == BucketFill.Kind.HELD;
             }
+            List<Object[]> interpolated = new ArrayList<>();
+            for (int f = 0; f < functions.size(); f++) {
+                if (INTERPOLATED.contains(functions.get(f))) {
+                    interpolated.add(values[f]);
+                }
+            }
+            fillLinear(uuid, element, starts, empty, startMs, rangeEndMs, interpolated.toArray(new Object[0][]));
         }
         int count = 0;
         for (int i = 0; i < buckets.size(); i++) {
@@ -1575,32 +1578,112 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      */
     private static final Set<String> INTERPOLATED = Set.of("min", "max", "mean", "last");
 
+    /** Most raw samples per status one analog pen reads to find the samples around its empty buckets. */
+    static final int LINEAR_RAW_LIMIT = 50_000;
+
     /**
-     * Fills each run of empty buckets that lies between two buckets with Good samples on the
-     * straight line between those two buckets' values, as Ignition's own historians fill an
-     * analog tag (Core's FILL(LINEAR)). Empty buckets before the first such bucket, after the last
-     * one, or next to a Bad bucket keep their value.
+     * Gives each empty bucket of an analog tag one value, for every function alike (a minimum,
+     * maximum, mean or last value of an empty bucket are all the same), on the straight line
+     * from the last Good sample before it to the first Good sample after it, each at its own
+     * time, as Ignition's own historians interpolate an analog tag. The value is the line's at
+     * the bucket start, where the point is stamped. The samples come from one raw read of the
+     * range, the sample before the range (for the empty buckets it starts with) and, when the
+     * range ends before now, the first sample after it. A bucket whose neighbouring sample is not
+     * Good (Bad time), with no sample after it (toward now), or of a pen with more raw samples
+     * than {@link #LINEAR_RAW_LIMIT} keeps the value it had (held).
      *
-     * @param values per bucket, its value; replaced in place
-     * @param empty  per bucket, whether it has no samples and holds a Good value
-     * @param anchor per bucket, whether it has Good samples
+     * @param starts  the bucket starts
+     * @param empty   per bucket, whether it has no samples and holds a Good value
+     * @param columns per function to fill, its value per bucket; replaced in place
      */
-    static void interpolate(Object[] values, boolean[] empty, boolean[] anchor) {
-        int from = -1;
-        for (int i = 0; i < values.length; i++) {
-            if (anchor[i] && values[i] instanceof Number to) {
-                if (from >= 0 && i - from > 1 && values[from] instanceof Number start) {
-                    double a = start.doubleValue();
-                    double b = to.doubleValue();
-                    for (int k = from + 1; k < i; k++) {
-                        values[k] = a + (b - a) * (k - from) / (i - from);
-                    }
-                }
-                from = i;
-            } else if (!empty[i]) {
-                from = -1;
+    private void fillLinear(String uuid, int element, List<Long> starts, boolean[] empty, long startMs,
+                            long rangeEndMs, Object[][] columns) {
+        int first = -1;
+        for (int i = 0; i < empty.length && first < 0; i++) {
+            if (empty[i]) {
+                first = i;
             }
         }
+        if (first < 0 || columns.length == 0) {
+            return;
+        }
+        List<BucketFill.Sample> samples = samplesAround(uuid, element, startMs, rangeEndMs, first == 0);
+        if (samples == null) {
+            return;
+        }
+        for (int i = 0; i < empty.length; i++) {
+            if (!empty[i]) {
+                continue;
+            }
+            Double v = lineAt(starts.get(i), samples);
+            if (v != null) {
+                for (Object[] column : columns) {
+                    column[i] = v;
+                }
+            }
+        }
+    }
+
+    /**
+     * The raw samples of a range in time order, of every status, with the last sample before
+     * it when {@code withBefore} and the first sample after it when the range ends before now;
+     * null when the range holds more than {@link #LINEAR_RAW_LIMIT} samples of one status.
+     */
+    private List<BucketFill.Sample> samplesAround(String uuid, int element, long startMs, long rangeEndMs,
+                                                  boolean withBefore) {
+        long nowMs = now.getAsLong();
+        long endMs = Math.min(rangeEndMs, nowMs);
+        List<BucketFill.Sample> out = new ArrayList<>();
+        if (withBefore) {
+            out.addAll(samplesBefore(uuid, element, startMs));
+        }
+        QueryTimeseriesResponse reply = grpcClient.queryTimeseries(withRange(QueryTimeseriesRequest.newBuilder()
+                .addMeasurementUUIDs(uuid).addGroupBy("status").setLimit(LINEAR_RAW_LIMIT), startMs, endMs).build());
+        for (Series series : reply.getSeriesList()) {
+            if (series.getDataPointsCount() >= LINEAR_RAW_LIMIT) {
+                return null;
+            }
+            boolean isGood = isGoodStatus(seriesStatus(series));
+            for (SeriesPoint pt : series.getDataPointsList()) {
+                out.add(new BucketFill.Sample(pt.getTimestamp(), storedValue(pt.getValue(), element), isGood));
+            }
+        }
+        if (rangeEndMs < nowMs) {
+            // A past range: the line runs on to the first sample after it. Toward now there is
+            // nothing to draw to, so the last value holds, as Ignition's own historians do.
+            for (Series series : grpcClient.queryTimeseries(withRange(QueryTimeseriesRequest.newBuilder()
+                    .addMeasurementUUIDs(uuid).addGroupBy("status").setLimit(1), rangeEndMs, nowMs).build())
+                    .getSeriesList()) {
+                boolean isGood = isGoodStatus(seriesStatus(series));
+                for (SeriesPoint pt : series.getDataPointsList()) {
+                    out.add(new BucketFill.Sample(pt.getTimestamp(), storedValue(pt.getValue(), element), isGood));
+                }
+            }
+        }
+        out.sort(Comparator.comparingLong(BucketFill.Sample::ts));
+        return out;
+    }
+
+    /**
+     * The value at {@code ts} on the line from the last sample before it to the first sample at
+     * or after it, or null when either is missing, not Good or not a number.
+     */
+    static Double lineAt(long ts, List<BucketFill.Sample> samples) {
+        int next = 0;
+        while (next < samples.size() && samples.get(next).ts() < ts) {
+            next++;
+        }
+        if (next == 0 || next == samples.size()) {
+            return null;
+        }
+        BucketFill.Sample a = samples.get(next - 1);
+        BucketFill.Sample b = samples.get(next);
+        if (!a.good() || !b.good() || !(a.value() instanceof Number va) || !(b.value() instanceof Number vb)
+                || b.ts() <= a.ts()) {
+            return null;
+        }
+        double from = va.doubleValue();
+        return from + (vb.doubleValue() - from) * (ts - a.ts()) / (b.ts() - a.ts());
     }
 
     /**
@@ -1878,25 +1961,25 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     private Optional<FactryRecord> measurementNode(String tagPath, QualifiedPath path, boolean lookUp) {
         Measurement m = lookUp ? measurementCache.findForRead(tagPath, grpcClient) : measurementCache.cachedForRead(tagPath);
         if (m != null) {
-            return Optional.of(new FactryRecord(m.getUuid(), -1, path, m.getDatatype(), ignitionDataType(m),
-                    deadbandStyle(m), createdTime(m)));
+            return Optional.of(new FactryRecord(m.getUuid(), -1, path, m.getDatatype(),
+                    ignitionDataType(tagPath, tagPath, m), deadbandStyle(tagPath, tagPath, m), createdTime(m)));
         }
         ArrayPointMerger.ArrayRef ref = ArrayPointMerger.parseArrayPath(tagPath);
         Measurement base = ref == null ? null : lookUp
                 ? measurementCache.findForRead(ref.basePath, grpcClient)
                 : measurementCache.cachedForRead(ref.basePath);
         if (base != null && base.getDatatype().startsWith("[]")) {
-            String ignitionType = ignitionDataType(base);
+            String ignitionType = ignitionDataType(tagPath, ref.basePath, base);
             return Optional.of(new FactryRecord(base.getUuid(), ref.index, path, base.getDatatype().substring(2),
-                    ignitionType != null ? ignitionType.replaceFirst("Array$", "") : null, deadbandStyle(base),
-                    createdTime(base)));
+                    ignitionType != null ? ignitionType.replaceFirst("Array$", "") : null,
+                    deadbandStyle(tagPath, ref.basePath, base), createdTime(base)));
         }
         return Optional.empty();
     }
 
     /** The tag's Ignition data type: from the metadata this gateway has, else the measurement's setting. */
-    private String ignitionDataType(Measurement m) {
-        return measurementCache.tagProperty(m, grpcClient.getCollectorUUID(),
+    private String ignitionDataType(String tagPath, String writePath, Measurement m) {
+        return measurementCache.tagProperty(tagPath, writePath, m, grpcClient.getCollectorUUID(),
                 MeasurementCache.IGNITION_DATA_TYPE, MeasurementCache.IGNITION_DATA_TYPE_SETTING);
     }
 
@@ -1905,8 +1988,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      * historizes the tag, else the measurement's setting, for other gateways and before the
      * metadata arrives.
      */
-    private String deadbandStyle(Measurement m) {
-        return measurementCache.tagProperty(m, grpcClient.getCollectorUUID(),
+    private String deadbandStyle(String tagPath, String writePath, Measurement m) {
+        return measurementCache.tagProperty(tagPath, writePath, m, grpcClient.getCollectorUUID(),
                 MeasurementCache.DEADBAND_STYLE, MeasurementCache.DEADBAND_STYLE_SETTING);
     }
 

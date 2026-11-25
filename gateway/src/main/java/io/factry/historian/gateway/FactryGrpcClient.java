@@ -437,14 +437,31 @@ public class FactryGrpcClient {
         }
     }
 
-    /** Replaces the settings of the measurements in {@code request}, each with the whole Struct given. */
-    public void migrateSettings(io.factry.historian.proto.MigrationRequest request) {
-        logger.debug("Sending MigrateSettings for {} measurements", request.getMeasurementSettingsCount());
+    /**
+     * Replaces the settings of these measurements, each with the whole Struct given, with
+     * MigrateSettings. That call also replaces the collector's own settings with its field 1, and
+     * an unset field 1 wipes them (checked live on Factry v8.2.3 and v8.3.1), so the collector's
+     * current settings are read with GetCollector just before and sent along unchanged.
+     */
+    public void migrateMeasurementSettings(List<io.factry.historian.proto.MigrateMeasurementSettings> settings) {
+        logger.debug("Sending MigrateSettings for {} measurements", settings.size());
         channelLock.readLock().lock();
         try {
-            blockingStub
+            Struct collectorSettings = blockingStub
                     .withDeadlineAfter(CALL_DEADLINE_SECONDS, TimeUnit.SECONDS)
-                    .migrateSettings(request);
+                    .getCollector(Empty.getDefaultInstance())
+                    .getSettings();
+            blockingStub
+                    .withDeadlineAfter(writeDeadlineMillis(settings.size()), TimeUnit.MILLISECONDS)
+                    .migrateSettings(io.factry.historian.proto.MigrationRequest.newBuilder()
+                            .setSettings(collectorSettings)
+                            .addAllMeasurementSettings(settings)
+                            .build());
+        } catch (StatusRuntimeException e) {
+            if (isConnectionError(e)) {
+                connected = false;
+            }
+            throw e;
         } finally {
             channelLock.readLock().unlock();
         }

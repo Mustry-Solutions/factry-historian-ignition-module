@@ -148,7 +148,9 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
             observer.onError(migrateFailure.asRuntimeException());
             return;
         }
-        // Factry replaces each measurement's whole settings Struct.
+        // Factry replaces the collector's settings with field 1, unset or not, and each
+        // measurement's whole settings Struct (checked live on v8.2.3 and v8.3.1).
+        collectorSettings = request.getSettings();
         for (var change : request.getMeasurementSettingsList()) {
             Measurement m = measurements.get(change.getMeasurementUUID());
             if (m != null) {
@@ -222,9 +224,13 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
     /** The connection check. */
     @Override
     public void getCollector(com.google.protobuf.Empty request, StreamObserver<io.factry.historian.proto.Collector> observer) {
-        observer.onNext(io.factry.historian.proto.Collector.newBuilder().setUuid("collector").build());
+        observer.onNext(io.factry.historian.proto.Collector.newBuilder().setUuid("collector")
+                .setSettings(collectorSettings).build());
         observer.onCompleted();
     }
+
+    /** The collector's own settings; MigrateSettings replaces them with its field 1, as Factry does. */
+    volatile Struct collectorSettings = Struct.getDefaultInstance();
 
     @Override
     public void getAssets(GetAssetsRequest request, StreamObserver<Assets> observer) {
