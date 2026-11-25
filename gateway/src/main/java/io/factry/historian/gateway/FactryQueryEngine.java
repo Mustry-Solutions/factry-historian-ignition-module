@@ -1550,12 +1550,15 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             }
         }
         if (linear) {
-            // Stamped at the bucket start, so the value there; one value for every function, as
-            // an empty block of an analog tag has in the SQL historian.
+            // One value for every function: the line's at the bucket end (or now), stamped at the
+            // bucket start, as Ignition's own historians give an empty analog block (its
+            // LastValue and MinMax see the line at the block start and end, and keep the end).
+            // The value at the start would kink the line at every sample.
+            long blockEndMs = Math.min(rangeEndMs, nowMs);
             long[] at = new long[buckets.size()];
             boolean[] empty = new boolean[buckets.size()];
             for (int i = 0; i < buckets.size(); i++) {
-                at[i] = buckets.get(i).start();
+                at[i] = Math.min(buckets.get(i).start() + periodMs, blockEndMs);
                 empty[i] = buckets.get(i).kind() == BucketFill.Kind.HELD;
             }
             List<Object[]> interpolated = new ArrayList<>();

@@ -94,7 +94,8 @@ class AnalogFillTest {
         return out;
     }
 
-    private static final List<Object> LINE = List.of(0.0, 12.0, 24.0, 36.0, 48.0, 60.0);
+    /** The line at each empty bucket's end, stamped at its start, as Ignition draws it. */
+    private static final List<Object> LINE = List.of(0.0, 24.0, 36.0, 48.0, 60.0, 60.0);
     /** The line averaged over each empty bucket: its value at the bucket middle. */
     private static final List<Object> LINE_AVERAGE = List.of(0.0, 18.0, 30.0, 42.0, 54.0, 60.0);
     private static final List<Object> HELD = List.of(0.0, 0.0, 0.0, 0.0, 0.0, 60.0);
@@ -204,6 +205,17 @@ class AnalogFillTest {
     }
 
     @Test
+    void aRampSampledOffTheBucketStarts_isDrawnStraight() throws Exception {
+        String u = factry.addMeasurement("default/out", "number");
+        factry.add(u, T0 + 11_000, 11, "Good");
+        factry.add(u, T0 + 71_000, 71, "Good");
+        // Ignition's own historians read 11, 24, 36, 48, 60, 71: the line at each empty bucket's
+        // end. The line at the start (11, 12, 24, ...) kinks at every sample.
+        assertEquals(List.of(11.0, 24.0, 36.0, 48.0, 60.0, 71.0), column(AggregationMode.LastValue));
+        assertEquals(List.of(11.0, 11.0, 24.0, 24.0, 36.0, 36.0, 48.0, 48.0, 60.0, 60.0, 71.0, 71.0), minMax());
+    }
+
+    @Test
     void badTimeBetweenTwoGoodBuckets_isNotBridged() throws Exception {
         String u = factry.addMeasurement("default/out", "number");
         factry.add(u, T0, 10, "Good");
@@ -218,7 +230,7 @@ class AnalogFillTest {
         String u = factry.addMeasurement("default/out", "number");
         factry.add(u, T0 - 24_000, 0, "Good");
         factry.add(u, T0 + 36_000, 60, "Good");
-        assertEquals(Arrays.asList(24.0, 36.0, 48.0, 60.0, 60.0, 60.0), lastValues(T0 + 72_000, T0 + 3_600_000));
+        assertEquals(Arrays.asList(36.0, 48.0, 60.0, 60.0, 60.0, 60.0), lastValues(T0 + 72_000, T0 + 3_600_000));
     }
 
     @Test
@@ -226,7 +238,7 @@ class AnalogFillTest {
         String u = factry.addMeasurement("default/out", "number");
         factry.add(u, T0 + 36_000, 0, "Good");
         factry.add(u, T0 + 96_000, 60, "Good");
-        assertEquals(Arrays.asList("Bad", "Bad", "Bad", 0.0, 12.0, 24.0), lastValues(T0 + 72_000, T0 + 3_600_000));
+        assertEquals(Arrays.asList("Bad", "Bad", "Bad", 0.0, 24.0, 36.0), lastValues(T0 + 72_000, T0 + 3_600_000));
     }
 
     @Test
@@ -235,7 +247,7 @@ class AnalogFillTest {
         factry.add(u, T0, 0, "Good");
         factry.add(u, T0 + 24_000, 24, "Good");
         // No extrapolation past the last sample, and nothing after now.
-        assertEquals(Arrays.asList(0.0, 12.0, 24.0, 24.0, 24.0, "Bad"), lastValues(T0 + 72_000, T0 + 60_000));
+        assertEquals(Arrays.asList(0.0, 24.0, 24.0, 24.0, 24.0, "Bad"), lastValues(T0 + 72_000, T0 + 60_000));
     }
 
     @Test
@@ -245,9 +257,9 @@ class AnalogFillTest {
         factry.add(u, T0 + 13_000, 7, "Good");
         factry.add(u, T0 + 26_000, 99, "Bad");
         factry.add(u, T0 + 49_000, 9, "Good");
-        // On the line from 5 at -30 s to 7 at 13 s, Bad through Bad time, and held after the last
-        // sample, since nothing follows the range.
-        assertEquals(Arrays.asList(5 + 2 * 30.0 / 43, 7.0, "Bad", "Bad", 9.0, 9.0),
+        // On the line from 5 at -30 s to 7 at 13 s (at 12 s, the first bucket's end), Bad through
+        // Bad time, and held after the last sample, since nothing follows the range.
+        assertEquals(Arrays.asList(5 + 2 * 42.0 / 43, 7.0, "Bad", "Bad", 9.0, 9.0),
                 lastValues(T0 + 72_000, T0 + 3_600_000));
     }
 

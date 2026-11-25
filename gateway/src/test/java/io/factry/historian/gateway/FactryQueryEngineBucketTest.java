@@ -110,9 +110,10 @@ class FactryQueryEngineBucketTest {
         }
         assertColumn(read(AggregationMode.LastValue, FillMode.DERIVED, T0 + 3_600_000), 7.0, 7.0, 7.0, 7.0, 8.0, 8.0);
         // An analog one (a number tag with Auto) is drawn on the line from 7 at 5 s to 8 at 45 s,
-        // as Ignition's own historians do (#83). The last bucket holds: nothing follows the range.
+        // at each empty bucket's end, as Ignition's own historians do (#83). The last bucket
+        // holds: nothing follows the range.
         discrete = false;
-        assertColumn(read(AggregationMode.LastValue, FillMode.DERIVED, T0 + 3_600_000), 7.0, 7.125, 7.375, 7.625, 8.0, 8.0);
+        assertColumn(read(AggregationMode.LastValue, FillMode.DERIVED, T0 + 3_600_000), 7.0, 7.375, 7.625, 7.875, 8.0, 8.0);
     }
 
     @Test
