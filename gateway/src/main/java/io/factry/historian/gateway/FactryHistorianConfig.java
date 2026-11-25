@@ -42,6 +42,18 @@ public record FactryHistorianConfig(
                 + "grpc-port in the token. 0 (the default) uses the token's port. A new token does not change this value.")
         Integer portOverride,
 
+        // Off by default, as every checkbox here: Ignition's create form shows no defaults
+        // (FactryHistorianExtensionPoint.defaultSettings), so a box that defaults to on would look off.
+        @FormCategory("Connection")
+        @Label("Plain Text (No TLS)")
+        @FormField(FormFieldType.CHECKBOX)
+        @DefaultValue("false")
+        @Description("Connect without TLS. Only for a Factry Historian with its gRPC TLS turned off "
+                + "(USE_SELF_SIGNED_CERTIFICATE=false) and nothing in between that ends TLS: the collector token is "
+                + "then sent unencrypted. The module uses TLS whatever this says when the token says Factry serves "
+                + "its built-in certificate, or when Skip TLS Verification or a Custom CA Certificate is set.")
+        boolean plainText,
+
         @FormCategory("Connection")
         @Label("Skip TLS Verification")
         @FormField(FormFieldType.CHECKBOX)
@@ -84,6 +96,7 @@ public record FactryHistorianConfig(
         settings.setCollectorToken(collectorToken);
         settings.setHostOverride(hostOverride);
         settings.setPortOverride(portOverride);
+        settings.setPlainText(plainText);
         settings.setSkipTlsVerification(skipTlsVerification);
         settings.setCustomCaCert(customCaCert);
         settings.setDebugLogging(debugLogging);
@@ -96,6 +109,7 @@ public record FactryHistorianConfig(
                 settings.getCollectorToken(),
                 settings.getHostOverride(),
                 settings.getPortOverride(),
+                settings.isPlainText(),
                 settings.isSkipTlsVerification(),
                 settings.getCustomCaCert(),
                 settings.isDebugLogging(),

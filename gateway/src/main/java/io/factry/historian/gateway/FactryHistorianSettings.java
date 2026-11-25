@@ -27,6 +27,16 @@ public class FactryHistorianSettings implements HistorianSettings {
     private transient String host = "";
     private transient int port;
     private transient boolean factryCertificate;
+    // On only for a Factry whose gRPC TLS is off (USE_SELF_SIGNED_CERTIFICATE=false) with nothing in
+    // between that ends TLS. Null (not stored) is off; a Boolean so decode can tell it from a stored
+    // false, which then wins over a legacy useTls.
+    private Boolean plainText;
+    // "Use TLS" as profiles from before #42 hold it; moved into plainText when the profile is decoded.
+    private Boolean useTls;
+    // Resolved by applyTokenDefaults: TLS unless Plain Text is on; also with it on when the token says
+    // Factry serves its built-in certificate, which Factry's own collectors then always use TLS for,
+    // and when Skip TLS Verification or a Custom CA is set, which only make sense with TLS.
+    private transient boolean tls = true;
     private boolean debugLogging = false;
     private boolean skipTlsVerification = false;
     // The collector token: encrypted with the gateway's key (Embedded) or read from a secret
@@ -101,7 +111,8 @@ public class FactryHistorianSettings implements HistorianSettings {
 
     /**
      * Moves the host and port of a profile saved before the overrides existed into the overrides,
-     * so they show in the form and the next save stores them under the new names.
+     * so they show in the form and the next save stores them under the new names. Its "Use TLS"
+     * off becomes Plain Text on.
      */
     void moveLegacyConnectionSettings() {
         if (isBlank(hostOverride) && !isBlank(grpcHost) && !LEGACY_DEFAULT_HOST.equals(grpcHost)) {
@@ -112,6 +123,10 @@ public class FactryHistorianSettings implements HistorianSettings {
         }
         grpcHost = null;
         grpcPort = null;
+        if (plainText == null && useTls != null) {
+            plainText = !useTls;
+        }
+        useTls = null;
     }
 
     private static boolean isBlank(String value) {
@@ -120,6 +135,19 @@ public class FactryHistorianSettings implements HistorianSettings {
 
     private static boolean isSet(Integer port) {
         return port != null && port != 0;
+    }
+
+    public boolean isPlainText() {
+        return plainText != null && plainText;
+    }
+
+    public void setPlainText(boolean plainText) {
+        this.plainText = plainText;
+    }
+
+    /** Whether the client uses TLS; set by {@link #applyTokenDefaults(String)}. */
+    public boolean usesTls() {
+        return tls;
     }
 
     public boolean isDebugLogging() {
@@ -185,6 +213,7 @@ public class FactryHistorianSettings implements HistorianSettings {
         this.collectorName = claims.collectorName();
 
         this.factryCertificate = claims.factryCertificate();
+        this.tls = !isPlainText() || factryCertificate || skipTlsVerification || !isBlank(customCaCert);
         boolean hostOverridden = !isBlank(hostOverride);
         boolean portOverridden = isSet(portOverride);
         this.host = hostOverridden ? hostOverride.trim() : claims.host();
@@ -194,7 +223,16 @@ public class FactryHistorianSettings implements HistorianSettings {
                 host, port,
                 hostOverridden ? "from Host Override, the token says " + claims.host() : "from the token",
                 portOverridden ? "from Port Override, the token says " + claims.port() : "from the token",
-                FactryGrpcClient.tlsLabel(true, skipTlsVerification, customCaCert, factryCertificate));
+                FactryGrpcClient.tlsLabel(tls, skipTlsVerification, customCaCert, factryCertificate));
+        if (isPlainText() && tls) {
+            logger.info("Collector {}: Plain Text (No TLS) is on, but {}. Connecting with TLS.", collectorName,
+                    factryCertificate ? "the token says Factry serves its built-in certificate, which always uses TLS"
+                            : "Skip TLS Verification or a Custom CA Certificate is set, which need TLS");
+        } else if (!tls) {
+            logger.warn("Collector {}: Plain Text (No TLS) is on, so the collector token is sent unencrypted to {}:{} "
+                    + "and to Factry's REST port. Turn it off unless Factry's gRPC TLS is off and nothing in between "
+                    + "can read the traffic.", collectorName, host, port);
+        }
         return claims.token();
     }
 
@@ -268,7 +306,8 @@ public class FactryHistorianSettings implements HistorianSettings {
                 && java.util.Objects.equals(collectorName, other.collectorName)
                 && java.util.Objects.equals(token, other.token)
                 && java.util.Objects.equals(grpcHost, other.grpcHost)
-                && java.util.Objects.equals(grpcPort, other.grpcPort);
+                && java.util.Objects.equals(grpcPort, other.grpcPort)
+                && java.util.Objects.equals(useTls, other.useTls);
     }
 
     @Override
@@ -280,6 +319,7 @@ public class FactryHistorianSettings implements HistorianSettings {
                         : collectorToken.getType()) +
                 ", hostOverride='" + hostOverride + '\'' +
                 ", portOverride=" + portOverride +
+                ", plainText=" + plainText +
                 ", debugLogging=" + debugLogging +
                 ", skipTlsVerification=" + skipTlsVerification +
                 ", delimiter='" + delimiter + '\'' +
