@@ -135,6 +135,39 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
         return measurements.get(uuid);
     }
 
+    /** Changes a measurement's settings as an operator in Factry would: its updatedAt moves. */
+    void editSettings(String uuid, Struct settings) {
+        Measurement m = measurements.get(uuid);
+        measurements.put(uuid, m.toBuilder().setSettings(settings)
+                .setUpdatedAt(com.google.protobuf.util.Timestamps.fromMillis(System.currentTimeMillis())).build());
+    }
+
+    /** Every GetMeasurements call, in order. */
+    final List<io.factry.historian.proto.MeasurementRequest> measurementRequests = new CopyOnWriteArrayList<>();
+    /** When set, GetMeasurements fails with this status. */
+    volatile Status getMeasurementsFailure = null;
+
+    /** This collector's measurements changed after {@code since} (all without it), as Factry answers. */
+    @Override
+    public void getMeasurements(io.factry.historian.proto.MeasurementRequest request,
+                                StreamObserver<Measurements> observer) {
+        measurementRequests.add(request);
+        if (getMeasurementsFailure != null) {
+            observer.onError(getMeasurementsFailure.asRuntimeException());
+            return;
+        }
+        Measurements.Builder out = Measurements.newBuilder();
+        for (Measurement m : measurements.values()) {
+            boolean changed = !request.hasSince() || (m.hasUpdatedAt()
+                    && com.google.protobuf.util.Timestamps.compare(m.getUpdatedAt(), request.getSince()) > 0);
+            if (m.getCollectorUUID().equals(request.getCollectorUUID()) && changed) {
+                out.addMeasurements(m);
+            }
+        }
+        observer.onNext(out.setTotal(out.getMeasurementsCount()).build());
+        observer.onCompleted();
+    }
+
     /** Every MigrateSettings call, in order. */
     final List<io.factry.historian.proto.MigrationRequest> migrations = new CopyOnWriteArrayList<>();
     /** When set, MigrateSettings fails with this status, as a proxy that refuses it does. */

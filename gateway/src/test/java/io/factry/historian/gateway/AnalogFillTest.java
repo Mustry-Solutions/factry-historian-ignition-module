@@ -563,6 +563,7 @@ class AnalogFillTest {
 
     @Test
     void aRefusedMigration_isLoggedOnce_andChangesNothingElse() throws Exception {
+        // MigrateSettings refused by a proxy in front of Factry, as ours does on purpose.
         try (FakeFactryServer server = new FakeFactryServer()) {
             server.migrateFailure = Status.PERMISSION_DENIED.withDescription("refused by the proxy");
             String own = server.addMeasurement("default/out", "number", "collector",
@@ -590,7 +591,7 @@ class AnalogFillTest {
     }
 
     @Test
-    void aMigration_storesTheConcreteStyle_andTheTypeWhenMissing() throws Exception {
+    void aMigration_storesTheConcreteStyle_andTheType() throws Exception {
         try (FakeFactryServer server = new FakeFactryServer()) {
             String own = server.addMeasurement("default/count", "number", "collector", settings("other", "x"));
             FactryGrpcClient client = server.client();
@@ -645,23 +646,89 @@ class AnalogFillTest {
     }
 
     @Test
-    void aFailure_isLoggedOncePerStatusCode() throws Exception {
+    void aRefusal_stopsTheCalls_otherFailuresAreTriedAgain() throws Exception {
+        for (Status refusal : List.of(Status.PERMISSION_DENIED, Status.UNIMPLEMENTED)) {
+            try (FakeFactryServer server = new FakeFactryServer()) {
+                server.addMeasurement("default/out", "number", "collector", Struct.getDefaultInstance());
+                FactryGrpcClient client = server.client();
+                try (LogCapture log = new LogCapture(MeasurementCache.class.getName(), Level.INFO)) {
+                    MeasurementCache cache = new MeasurementCache();
+                    cache.refresh(client);
+                    FactryStorageEngine storage = storage(client, cache);
+                    // Another failure: logged once per code, tried again with the next metadata.
+                    server.migrateFailure = Status.INTERNAL.withDescription("hiccup");
+                    storage.doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
+                    storage.doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
+                    assertEquals(2, server.migrations.size());
+                    // A refusal: no more calls this session, logged once.
+                    server.migrateFailure = refusal.withDescription("refused on purpose");
+                    storage.doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
+                    storage.doStoreMetadata(List.of(metadata("out", InterpolationMode.Analog_Compressed)));
+                    assertEquals(3, server.migrations.size(), refusal.toString());
+                    assertEquals(1, log.events().stream()
+                            .filter(e -> e.getFormattedMessage().contains("hiccup")).count(), log::text);
+                    assertEquals(1, log.events().stream()
+                            .filter(e -> e.getFormattedMessage().contains("refused on purpose")).count(), log::text);
+                } finally {
+                    client.shutdown();
+                }
+            }
+        }
+    }
+
+    @Test
+    void aChangedDataType_isStoredToo() throws Exception {
         try (FakeFactryServer server = new FakeFactryServer()) {
-            server.addMeasurement("default/out", "number", "collector", Struct.getDefaultInstance());
+            String own = server.addMeasurement("default/out", "number", "collector",
+                    settings(MeasurementCache.IGNITION_DATA_TYPE_SETTING, "Float8",
+                            MeasurementCache.DEADBAND_STYLE_SETTING, "Analog_Compressed"));
             FactryGrpcClient client = server.client();
-            try (LogCapture log = new LogCapture(MeasurementCache.class.getName(), Level.INFO)) {
+            try {
                 MeasurementCache cache = new MeasurementCache();
                 cache.refresh(client);
-                FactryStorageEngine storage = storage(client, cache);
-                server.migrateFailure = Status.PERMISSION_DENIED.withDescription("refused");
-                storage.doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
-                storage.doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
-                server.migrateFailure = Status.UNIMPLEMENTED.withDescription("unknown method");
-                storage.doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
-                assertEquals(2, log.events().stream()
-                        .filter(e -> e.getFormattedMessage().contains("did not store the Deadband Style")).count(),
-                        log::text);
-                assertEquals(3, server.migrations.size());
+                storage(client, cache).doStoreMetadata(List.of(metadata("out", InterpolationMode.Auto, DataType.Int4)));
+                assertEquals(settings(MeasurementCache.IGNITION_DATA_TYPE_SETTING, "Int4",
+                        MeasurementCache.DEADBAND_STYLE_SETTING, "Discrete"), server.measurement(own).getSettings());
+            } finally {
+                client.shutdown();
+            }
+        }
+    }
+
+    @Test
+    void aSettingChangedInFactrySinceTheLastSync_isKept() throws Exception {
+        try (FakeFactryServer server = new FakeFactryServer()) {
+            String own = server.addMeasurement("default/out", "number", "collector",
+                    settings(MeasurementCache.IGNITION_DATA_TYPE_SETTING, "Float8"));
+            FactryGrpcClient client = server.client();
+            try {
+                MeasurementCache cache = new MeasurementCache();
+                cache.refresh(client);
+                // An operator adds a setting in Factry; the cache has not synced since.
+                server.editSettings(own, settings(MeasurementCache.IGNITION_DATA_TYPE_SETTING, "Float8", "operator", "x"));
+                storage(client, cache).doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
+                assertEquals(settings(MeasurementCache.IGNITION_DATA_TYPE_SETTING, "Float8", "operator", "x",
+                        MeasurementCache.DEADBAND_STYLE_SETTING, "Discrete"), server.measurement(own).getSettings());
+                assertEquals(1, server.measurementRequests.size());
+            } finally {
+                client.shutdown();
+            }
+        }
+    }
+
+    @Test
+    void whenTheFreshReadFails_theBatchIsSkipped() throws Exception {
+        try (FakeFactryServer server = new FakeFactryServer()) {
+            String own = server.addMeasurement("default/out", "number", "collector", Struct.getDefaultInstance());
+            FactryGrpcClient client = server.client();
+            try {
+                MeasurementCache cache = new MeasurementCache();
+                cache.refresh(client);
+                server.getMeasurementsFailure = Status.UNAVAILABLE;
+                var result = storage(client, cache).doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
+                assertTrue(result.error().isEmpty(), result::toString);
+                assertEquals(0, server.migrations.size());
+                assertEquals(Struct.getDefaultInstance(), server.measurement(own).getSettings());
             } finally {
                 client.shutdown();
             }

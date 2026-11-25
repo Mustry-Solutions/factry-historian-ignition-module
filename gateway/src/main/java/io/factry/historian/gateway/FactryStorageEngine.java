@@ -84,10 +84,10 @@ public class FactryStorageEngine extends AbstractStorageEngine {
     protected StorageResult<MetadataPoint> doStoreMetadata(List<MetadataPoint> metadataPoints) {
         // Factry doesn't support updating metadata after creation, but we cache the
         // properties so they can be applied as initial values when a measurement is
-        // first created via MeasurementCache.getOrCreateUUID(). Only the Deadband Style is kept
-        // up to date on existing measurements, as a setting, since trends draw by it.
+        // first created via MeasurementCache.getOrCreateUUID(). The settings the module derives
+        // from it (data type, Deadband Style) are kept up to date on existing measurements.
         logger.debug("doStoreMetadata called with " + metadataPoints.size() + " points");
-        List<String> withStyle = new ArrayList<>();
+        List<String> stored = new ArrayList<>();
         for (MetadataPoint point : metadataPoints) {
             String tagPath = TagPathUtil.storagePathToStoredPath(point.source().toString());
             com.inductiveautomation.ignition.common.config.PropertySet ps = point.value();
@@ -108,14 +108,12 @@ public class FactryStorageEngine extends AbstractStorageEngine {
                 }
                 if (!properties.isEmpty()) {
                     measurementCache.storeMetadata(tagPath, properties);
-                }
-                if (properties.containsKey(MeasurementCache.DEADBAND_STYLE)) {
-                    withStyle.add(tagPath);
+                    stored.add(tagPath);
                 }
             }
         }
-        if (!withStyle.isEmpty()) {
-            measurementCache.storeDeadbandStyles(withStyle, grpcClient);
+        if (!stored.isEmpty()) {
+            measurementCache.storeTagSettings(stored, grpcClient);
         }
         return StorageResult.success(metadataPoints);
     }

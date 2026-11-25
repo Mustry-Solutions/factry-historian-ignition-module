@@ -1522,64 +1522,160 @@ public class MeasurementCache {
     private final Set<io.grpc.Status.Code> migrateFailuresLogged = ConcurrentHashMap.newKeySet();
 
     /**
-     * Writes the Deadband Style Ignition sent for these tags into their measurements' settings
-     * (as {@link #concreteStyle}), where it differs, in MigrateSettings calls of at most
-     * {@link #MIGRATE_BATCH}; also the Ignition data type when the setting lacks it. Only the
-     * measurement this collector writes each tag to: the module never changes another
-     * collector's. MigrateSettings replaces the whole settings Struct, so every other setting is
-     * sent along unchanged. A failure is logged once per status code and changes nothing:
-     * queries on this gateway still read the style from the metadata.
-     *
-     * @param tagPaths tags whose metadata (with the style) was just stored
+     * Set once Factry refuses MigrateSettings for good (PermissionDenied: a proxy that refuses it
+     * on purpose; Unimplemented: a Factry without it). No more calls until the profile restarts.
      */
-    void storeDeadbandStyles(Collection<String> tagPaths, FactryGrpcClient grpcClient) {
+    private volatile String migrateRefused;
+
+    /**
+     * The measurement settings the module keeps from a tag's metadata, setting name to value.
+     * Kept up to date on the measurement by {@link #storeTagSettings}; a new one is one line here.
+     */
+    static Map<String, String> derivedSettings(Map<String, String> metadata) {
+        Map<String, String> out = new LinkedHashMap<>();
+        if (metadata == null) {
+            return out;
+        }
+        String type = metadata.get(IGNITION_DATA_TYPE);
+        out.put(IGNITION_DATA_TYPE_SETTING, type);
+        out.put(DEADBAND_STYLE_SETTING, concreteStyle(metadata.get(DEADBAND_STYLE), type));
+        out.values().removeIf(Objects::isNull);
+        return out;
+    }
+
+    /** {@code settings} with the derived ones put over it. */
+    private static Struct withDerived(Struct settings, Map<String, String> derived) {
+        Struct.Builder b = settings.toBuilder();
+        derived.forEach((name, value) -> b.putFields(name, Value.newBuilder().setStringValue(value).build()));
+        return b.build();
+    }
+
+    /**
+     * Keeps the settings the module derives from these tags' metadata ({@link #derivedSettings})
+     * up to date on the measurement this collector writes each tag to, with MigrateSettings, in
+     * calls of at most {@link #MIGRATE_BATCH}. Ignition sends the metadata at every start and on
+     * every change of a tag's history configuration, so this runs then.
+     *
+     * <p>MigrateSettings replaces each measurement's whole settings Struct. Right before each call
+     * the batch's measurements are read again from Factry, the changes of this collector's
+     * measurements since the oldest of them (GetMeasurements with {@code since}, as {@link #sync}),
+     * and each entry is built from that fresh copy plus the derived settings, so a setting changed
+     * in Factry since the last sync is kept. When that read fails the batch is skipped. Another
+     * collector's measurement is never changed. A failure changes nothing: queries on this gateway
+     * still read the metadata. After PermissionDenied or Unimplemented no more calls are made
+     * until the profile restarts (logged once at INFO); any other failure is logged once per
+     * status code and tried again with the next metadata.
+     *
+     * @param tagPaths tags whose metadata was just stored
+     */
+    void storeTagSettings(Collection<String> tagPaths, FactryGrpcClient grpcClient) {
         String collectorUUID = grpcClient.getCollectorUUID();
-        if (collectorUUID == null || collectorUUID.isEmpty()) {
+        if (migrateRefused != null || collectorUUID == null || collectorUUID.isEmpty()) {
             return;
         }
-        Map<String, Measurement> updated = new LinkedHashMap<>();
+        Map<String, Map<String, String>> derivedByUuid = new LinkedHashMap<>();
         for (String path : tagPaths) {
-            Map<String, String> metadata = tagMetadata.get(path);
-            String style = metadata == null ? null
-                    : concreteStyle(metadata.get(DEADBAND_STYLE), metadata.get(IGNITION_DATA_TYPE));
-            Measurement m = style == null ? null : writeTarget(path, collectorUUID);
-            if (m == null || !collectorUUID.equalsIgnoreCase(m.getCollectorUUID()) || updated.containsKey(m.getUuid())) {
-                continue;
-            }
-            Struct.Builder settings = m.getSettings().toBuilder();
-            if (!style.equals(stringSetting(m, DEADBAND_STYLE_SETTING))) {
-                settings.putFields(DEADBAND_STYLE_SETTING, Value.newBuilder().setStringValue(style).build());
-            }
-            String type = metadata.get(IGNITION_DATA_TYPE);
-            if (type != null && stringSetting(m, IGNITION_DATA_TYPE_SETTING) == null) {
-                settings.putFields(IGNITION_DATA_TYPE_SETTING, Value.newBuilder().setStringValue(type).build());
-            }
-            if (!settings.build().equals(m.getSettings())) {
-                updated.put(m.getUuid(), m.toBuilder().setSettings(settings).build());
+            Map<String, String> derived = derivedSettings(tagMetadata.get(path));
+            Measurement m = derived.isEmpty() ? null : writeTarget(path, collectorUUID);
+            if (m != null && collectorUUID.equalsIgnoreCase(m.getCollectorUUID())
+                    && !withDerived(m.getSettings(), derived).equals(m.getSettings())) {
+                derivedByUuid.put(m.getUuid(), derived);
             }
         }
-        List<Measurement> all = new ArrayList<>(updated.values());
-        for (int from = 0; from < all.size(); from += MIGRATE_BATCH) {
-            List<Measurement> batch = all.subList(from, Math.min(all.size(), from + MIGRATE_BATCH));
+        List<String> uuids = new ArrayList<>(derivedByUuid.keySet());
+        for (int from = 0; from < uuids.size(); from += MIGRATE_BATCH) {
+            List<String> batch = uuids.subList(from, Math.min(uuids.size(), from + MIGRATE_BATCH));
+            Map<String, Measurement> fresh;
+            try {
+                fresh = freshCopies(batch, collectorUUID, grpcClient);
+            } catch (RuntimeException e) {
+                logger.debug("Could not read {} measurement(s) again before storing their settings; skipped",
+                        batch.size(), e);
+                continue;
+            }
             List<MigrateMeasurementSettings> request = new ArrayList<>();
-            for (Measurement m : batch) {
-                request.add(MigrateMeasurementSettings.newBuilder()
-                        .setMeasurementUUID(m.getUuid()).setSettings(m.getSettings()).build());
+            List<Measurement> updated = new ArrayList<>();
+            for (String uuid : batch) {
+                Measurement m = fresh.get(uuid);
+                if (m == null || !collectorUUID.equalsIgnoreCase(m.getCollectorUUID())) {
+                    continue;
+                }
+                Struct settings = withDerived(m.getSettings(), derivedByUuid.get(uuid));
+                if (settings.equals(m.getSettings())) {
+                    continue;
+                }
+                request.add(MigrateMeasurementSettings.newBuilder().setMeasurementUUID(uuid).setSettings(settings).build());
+                updated.add(m.toBuilder().setSettings(settings).build());
+            }
+            if (request.isEmpty()) {
+                continue;
             }
             try {
                 grpcClient.migrateMeasurementSettings(request);
             } catch (RuntimeException e) {
                 io.grpc.Status.Code code = io.grpc.Status.fromThrowable(e).getCode();
-                if (migrateFailuresLogged.add(code)) {
-                    logger.info("Factry did not store the Deadband Style of {} measurement(s) ({}). Trends on this"
-                            + " gateway still follow it; other gateways draw these tags by their data type."
-                            + " Logged once per answer.", batch.size(), e.getMessage());
+                if (code == io.grpc.Status.Code.PERMISSION_DENIED || code == io.grpc.Status.Code.UNIMPLEMENTED) {
+                    migrateRefused = e.getMessage();
+                    logger.info("Factry refuses to store the measurement settings derived from the tags ({});"
+                            + " not tried again until the profile restarts. Trends on this gateway still follow"
+                            + " the tags; other gateways hold tags whose settings are missing.", e.getMessage());
+                } else if (migrateFailuresLogged.add(code)) {
+                    logger.info("Factry did not store the settings of {} measurement(s) ({}); tried again with"
+                            + " the next metadata. Logged once per answer.", request.size(), e.getMessage());
                 }
                 return;
             }
-            batch.forEach(m -> cacheMeasurement(m, collectorUUID));
-            logger.debug("Stored the Deadband Style of {} measurement(s)", batch.size());
+            updated.forEach(m -> cacheMeasurement(m, collectorUUID));
+            logger.debug("Stored the derived settings of {} measurement(s)", updated.size());
         }
+    }
+
+    /**
+     * The measurements of {@code uuids} as Factry has them now: the cached copies, replaced by
+     * those this collector's changes since the oldest of them return. A setting changed in
+     * Factry moves a measurement's updatedAt, so a copy not returned has not changed.
+     */
+    private Map<String, Measurement> freshCopies(List<String> uuids, String collectorUUID,
+                                                 FactryGrpcClient grpcClient) {
+        Map<String, Measurement> out = new LinkedHashMap<>();
+        Timestamp oldest = null;
+        for (String uuid : uuids) {
+            Measurement m = uuidToMeasurement.get(uuid);
+            if (m == null) {
+                m = inactiveByUuid(uuid);
+            }
+            if (m == null) {
+                continue;
+            }
+            out.put(uuid, m);
+            Timestamp t = m.hasUpdatedAt() ? m.getUpdatedAt() : Timestamp.getDefaultInstance();
+            if (oldest == null || Timestamps.compare(t, oldest) < 0) {
+                oldest = t;
+            }
+        }
+        if (oldest == null) {
+            return out;
+        }
+        MeasurementRequest.Builder request = MeasurementRequest.newBuilder().setCollectorUUID(collectorUUID);
+        if (oldest.getSeconds() > 0 || oldest.getNanos() > 0) {
+            // One second earlier: a change in the same second as the cached copy still counts.
+            request.setSince(Timestamps.subtract(oldest, com.google.protobuf.util.Durations.fromSeconds(1)));
+        }
+        for (Measurement m : grpcClient.getMeasurements(request.build()).getMeasurementsList()) {
+            if (out.containsKey(m.getUuid())) {
+                out.put(m.getUuid(), m);
+            }
+        }
+        return out;
+    }
+
+    private Measurement inactiveByUuid(String uuid) {
+        for (Measurement m : inactiveByName.values()) {
+            if (m.getUuid().equals(uuid)) {
+                return m;
+            }
+        }
+        return null;
     }
 
     /** Factry derives EngineeringSpecs from a nested "Config" attribute group with these keys. */
@@ -1623,15 +1719,7 @@ public class MeasurementCache {
             return builder.build();
         }
 
-        Struct.Builder settings = Struct.newBuilder();
-        String ignitionType = metadata.get(IGNITION_DATA_TYPE);
-        if (ignitionType != null) {
-            settings.putFields(IGNITION_DATA_TYPE_SETTING, Value.newBuilder().setStringValue(ignitionType).build());
-        }
-        String deadbandStyle = concreteStyle(metadata.get(DEADBAND_STYLE), ignitionType);
-        if (deadbandStyle != null) {
-            settings.putFields(DEADBAND_STYLE_SETTING, Value.newBuilder().setStringValue(deadbandStyle).build());
-        }
+        Struct settings = withDerived(Struct.getDefaultInstance(), derivedSettings(metadata));
         if (settings.getFieldsCount() > 0) {
             builder.setSettings(settings);
         }
