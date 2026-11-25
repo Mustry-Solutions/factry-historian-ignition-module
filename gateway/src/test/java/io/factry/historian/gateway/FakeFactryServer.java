@@ -153,7 +153,10 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
                 .setUpdatedAt(com.google.protobuf.util.Timestamps.fromMillis(System.currentTimeMillis())).build());
     }
 
-    /** When set, GetMeasurementsByFilter with a keyword fails with this status. */
+    /** Measurements GetMeasurementsByFilter leaves out, though they exist. */
+    final java.util.Set<String> hiddenFromListing = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** When set, GetMeasurementsByFilter fails with this status. */
     volatile Status filterFailure = null;
 
     /** Every GetMeasurementsByFilter call, in order. */
@@ -250,7 +253,7 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
     public void getMeasurementsByFilter(GetMeasurementsByFilterRequest request,
                                         StreamObserver<Measurements> observer) {
         filterRequests.add(request);
-        if (filterFailure != null && request.hasKeyword()) {
+        if (filterFailure != null) {
             observer.onError(filterFailure.asRuntimeException());
             return;
         }
@@ -259,6 +262,7 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
         List<Measurement> all = new ArrayList<>(measurements.values().stream()
                 .filter(m -> keyword == null || m.getUuid().equalsIgnoreCase(keyword)
                         || m.getName().toLowerCase(java.util.Locale.ROOT).contains(keyword))
+                .filter(m -> !hiddenFromListing.contains(m.getUuid()))
                 .filter(m -> request.getCollectorUUIDsCount() == 0
                         || request.getCollectorUUIDsList().contains(m.getCollectorUUID()))
                 .toList());

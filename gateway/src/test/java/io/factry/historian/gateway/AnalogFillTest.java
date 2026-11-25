@@ -731,8 +731,8 @@ class AnalogFillTest {
                 cache.syncTagSettings(client);
                 assertEquals(settings(MeasurementCache.IGNITION_DATA_TYPE_SETTING, "Float8", "operator", "x",
                         MeasurementCache.DEADBAND_STYLE_SETTING, "Discrete"), server.measurement(own).getSettings());
-                // One read of that measurement, by its UUID.
-                assertEquals(1, server.filterRequests.stream().filter(r -> r.getKeyword().equals(own)).count());
+                // One listing of the collector's measurements.
+                assertEquals(1, server.filterRequests.stream().filter(r -> r.getCollectorUUIDsList().equals(List.of("collector"))).count());
             } finally {
                 client.shutdown();
             }
@@ -753,6 +753,11 @@ class AnalogFillTest {
                 assertTrue(result.error().isEmpty(), result::toString);
                 assertEquals(0, server.migrations.size());
                 assertEquals(Struct.getDefaultInstance(), server.measurement(own).getSettings());
+                // The tag stays pending: the next run sends it.
+                server.filterFailure = null;
+                cache.syncTagSettings(client);
+                assertEquals(settings(MeasurementCache.DEADBAND_STYLE_SETTING, "Discrete"),
+                        server.measurement(own).getSettings());
             } finally {
                 client.shutdown();
             }
@@ -850,16 +855,49 @@ class AnalogFillTest {
     }
 
     @Test
-    void theFreshRead_isByUuid_andTakesFactrysCopy() throws Exception {
+    void theFreshRead_isOnePagedListingOfTheCollector_perRun() throws Exception {
+        try (FakeFactryServer server = new FakeFactryServer()) {
+            server.addMeasurement("default/out", "number", "collector", Struct.getDefaultInstance());
+            server.addMeasurement("default/other", "number", "collector", Struct.getDefaultInstance());
+            FactryGrpcClient client = server.client();
+            try {
+                MeasurementCache cache = new MeasurementCache();
+                cache.refresh(client);
+                storage(client, cache).doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete),
+                        metadata("other", InterpolationMode.Discrete)));
+                int before = server.filterRequests.size();
+                cache.syncTagSettings(client);
+                var reads = server.filterRequests.subList(before, server.filterRequests.size());
+                assertEquals(1, reads.size());
+                assertEquals(List.of("collector"), reads.get(0).getCollectorUUIDsList());
+                assertTrue(!reads.get(0).hasKeyword());
+                assertTrue(reads.get(0).getPagination().getLimit() > 0);
+                assertEquals(0, server.measurementRequests.size());
+                assertEquals(1, server.migrations.size());
+                assertEquals(2, server.migrations.get(0).getMeasurementSettingsCount());
+            } finally {
+                client.shutdown();
+            }
+        }
+    }
+
+    @Test
+    void aMeasurementMissingFromTheListing_staysPending() throws Exception {
         try (FakeFactryServer server = new FakeFactryServer()) {
             String own = server.addMeasurement("default/out", "number", "collector", Struct.getDefaultInstance());
             FactryGrpcClient client = server.client();
-            try {
+            try (LogCapture log = new LogCapture(MeasurementCache.class.getName(), Level.INFO)) {
                 MeasurementCache cache = cacheWithPending(server, client);
+                server.hiddenFromListing.add(own);
                 cache.syncTagSettings(client);
-                assertEquals(List.of(own), server.filterRequests.stream()
-                        .filter(r -> r.hasKeyword()).map(r -> r.getKeyword()).toList());
-                assertEquals(0, server.measurementRequests.size());
+                cache.syncTagSettings(client);
+                assertEquals(0, server.migrations.size());
+                assertEquals(1, log.events().stream()
+                        .filter(e -> e.getFormattedMessage().contains("was not in this collector's list")).count(), log::text);
+                server.hiddenFromListing.clear();
+                cache.syncTagSettings(client);
+                assertEquals(settings(MeasurementCache.DEADBAND_STYLE_SETTING, "Discrete"),
+                        server.measurement(own).getSettings());
             } finally {
                 client.shutdown();
             }
@@ -1108,7 +1146,7 @@ class AnalogFillTest {
     }
 
     @Test
-    void aFewBatchesPerRun_eachReadFreshFirst() throws Exception {
+    void aFewBatchesPerRun_afterOneListing() throws Exception {
         try (FakeFactryServer server = new FakeFactryServer()) {
             List<MetadataPoint> points = new ArrayList<>();
             int count = 2 * MeasurementCache.MIGRATE_BATCH + 1;
@@ -1123,10 +1161,10 @@ class AnalogFillTest {
                 storage(client, cache).doStoreMetadata(points);
                 int reads = server.filterRequests.size();
                 cache.syncTagSettings(client);
-                // Two calls this run, each measurement read fresh first; the rest waits for the next run.
+                // Two calls this run, after one listing of the collector; the rest waits for the next run.
                 assertEquals(List.of(MeasurementCache.MIGRATE_BATCH, MeasurementCache.MIGRATE_BATCH),
                         server.migrations.stream().map(r -> r.getMeasurementSettingsCount()).toList());
-                assertEquals(reads + 2 * MeasurementCache.MIGRATE_BATCH, server.filterRequests.size());
+                assertEquals(reads + 1, server.filterRequests.size());
                 cache.syncTagSettings(client);
                 assertEquals(3, server.migrations.size());
                 assertEquals(1, server.migrations.get(2).getMeasurementSettingsCount());
