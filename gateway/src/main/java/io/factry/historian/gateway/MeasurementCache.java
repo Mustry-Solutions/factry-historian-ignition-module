@@ -1720,7 +1720,9 @@ public class MeasurementCache {
      * the call also replaces the collector's own settings, and an unchecked version may do more.
      */
     private boolean migrationSupported(FactryGrpcClient grpcClient) {
-        if (versionRefusal == null) {
+        // One read: forgetFactryVersion() may null the field from the settings-save thread meanwhile.
+        String refusal = versionRefusal;
+        if (refusal == null) {
             String version;
             try {
                 version = grpcClient.getInfo().getVersion();
@@ -1732,15 +1734,16 @@ public class MeasurementCache {
                 }
                 return false;
             }
-            versionRefusal = checkedVersion(version) ? "" : version;
-            if (!versionRefusal.isEmpty() && !version.equals(versionRefusalLogged)) {
+            refusal = checkedVersion(version) ? "" : version;
+            versionRefusal = refusal;
+            if (!refusal.isEmpty() && !version.equals(versionRefusalLogged)) {
                 versionRefusalLogged = version;
                 logger.info("Factry {} is not a version MigrateSettings was checked on (v8.2.3 to v8.3.x), so the"
                         + " settings derived from the tags are not stored on existing measurements. Trends on this"
                         + " gateway still follow the tags.", version);
             }
         }
-        return versionRefusal.isEmpty();
+        return refusal.isEmpty();
     }
 
     /** Logged once: GetInfo failed. */
