@@ -96,7 +96,7 @@ class FactryQueryEngineBucketTest {
 
     @Test
     void aTagStoredOnChange_holdsItsValueThroughEmptyBuckets() throws Exception {
-        String u = factry.addMeasurement("default/out", "number");
+        String u = factry.addMeasurement("default/out", "number", "Float8");
         factry.add(u, T0 - 30_000, 5, "Good");
         factry.add(u, T0 + 5_000, 7, "Good");
         factry.add(u, T0 + 45_000, 8, "Good");
@@ -109,7 +109,7 @@ class FactryQueryEngineBucketTest {
             assertColumn(read(mode), 7.0, 7.0, 7.0, 7.0, 8.0, 8.0);
         }
         assertColumn(read(AggregationMode.LastValue, FillMode.DERIVED, T0 + 3_600_000), 7.0, 7.0, 7.0, 7.0, 8.0, 8.0);
-        // An analog one (a number tag with Auto) is drawn on the line from 7 at 5 s to 8 at 45 s,
+        // An analog one (a Float8 tag with Auto) is drawn on the line from 7 at 5 s to 8 at 45 s,
         // at each empty bucket's end, as Ignition's own historians do (#83). The last bucket
         // holds: nothing follows the range.
         discrete = false;

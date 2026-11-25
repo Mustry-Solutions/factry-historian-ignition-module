@@ -75,8 +75,10 @@ public class FactryRecord implements HistoricalNode {
      * How empty buckets of this tag are filled when the query leaves it to the historian
      * (FillMode.DERIVED), as Ignition's own historians do (QueryUtils.ColumnMapping.getFillMode):
      * LINEAR for an analog tag, PREV (hold) for a discrete one. String and Boolean tags hold; else
-     * the Deadband Style decides, and Auto or an unknown style goes by the data type: a Float, or
-     * a number measurement whose Ignition type is unknown, is analog.
+     * the Deadband Style decides, and Auto or an unknown style goes by the tag's Ignition type: a
+     * Float (or Float array) is analog. With neither known (another collector's measurement, an
+     * asset property, a measurement older than the settings) the tag holds, as before the line:
+     * only a tag known to be analog is drawn as one.
      */
     public FillMode derivedFill() {
         if (dataType == DataType.Boolean || dataType == DataType.String) {
@@ -88,7 +90,7 @@ public class FactryRecord implements HistoricalNode {
         if (ignitionDataType != null) {
             return ignitionDataType.replaceFirst("Array$", "").startsWith("Float") ? FillMode.LINEAR : FillMode.PREV;
         }
-        return dataType == DataType.Float8 ? FillMode.LINEAR : FillMode.PREV;
+        return FillMode.PREV;
     }
 
     /**

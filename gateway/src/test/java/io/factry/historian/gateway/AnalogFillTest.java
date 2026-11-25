@@ -110,10 +110,47 @@ class AnalogFillTest {
     }
 
     @Test
-    void aNumberTag_isDrawnOnAStraightLineThroughEmptyBuckets() throws Exception {
-        minuteTag("number", null);
+    void aFloatTag_isDrawnOnAStraightLineThroughEmptyBuckets() throws Exception {
+        minuteTag("number", "Float8");
         // Before the fix every empty bucket held 0: a staircase that lags the SQL historian's line.
         assertDrawn(LINE);
+    }
+
+    @Test
+    void anOwnTagWithAutoAndFloat8_isDrawnOnALine() throws Exception {
+        // A measurement without settings (older than them): the metadata says what the tag is.
+        minuteTag("number", null);
+        cache.storeMetadata("default/out", Map.of(MeasurementCache.DEADBAND_STYLE, "Auto",
+                MeasurementCache.IGNITION_DATA_TYPE, "Float8"));
+        assertDrawn(LINE);
+    }
+
+    @Test
+    void aNumberMeasurementNothingIsKnownAbout_holds() throws Exception {
+        // Another collector's measurement, an asset property, or one older than the settings, read
+        // on another gateway: not known to be analog, so held as before the line.
+        minuteTag("number", null);
+        assertDrawn(HELD);
+    }
+
+    @Test
+    void anotherCollectorsMeasurement_ignoresThisGatewaysMetadata() throws Exception {
+        String u = factry.addMeasurementOf("another-collector", "default/out", "number");
+        factry.add(u, T0, 0, "Good");
+        factry.add(u, T0 + 60_000, 60, "Good");
+        // This gateway's tag of the same name says Float8, Auto; the measurement is not its own.
+        cache.storeMetadata("default/out", Map.of(MeasurementCache.DEADBAND_STYLE, "Auto",
+                MeasurementCache.IGNITION_DATA_TYPE, "Float8"));
+        assertDrawn(HELD);
+    }
+
+    @Test
+    void aStoredPlainAuto_holds() throws Exception {
+        String u = factry.addMeasurement("default/out", "number");
+        factry.setSetting(u, MeasurementCache.DEADBAND_STYLE_SETTING, "Auto");
+        factry.add(u, T0, 0, "Good");
+        factry.add(u, T0 + 60_000, 60, "Good");
+        assertDrawn(HELD);
     }
 
     @Test
@@ -193,7 +230,7 @@ class AnalogFillTest {
 
     @Test
     void anEmptyBucketAfterABucketWithASpread_getsOneValueForMinAndMax() throws Exception {
-        String u = factry.addMeasurement("default/out", "number");
+        String u = factry.addMeasurement("default/out", "number", "Float8");
         factry.add(u, T0, 0, "Good");
         factry.add(u, T0 + 5_000, 100, "Good");
         factry.add(u, T0 + 60_000, 100, "Good");
@@ -206,7 +243,7 @@ class AnalogFillTest {
 
     @Test
     void aRampSampledOffTheBucketStarts_isDrawnStraight() throws Exception {
-        String u = factry.addMeasurement("default/out", "number");
+        String u = factry.addMeasurement("default/out", "number", "Float8");
         factry.add(u, T0 + 11_000, 11, "Good");
         factry.add(u, T0 + 71_000, 71, "Good");
         // Ignition's own historians read 11, 24, 36, 48, 60, 71: the line at each empty bucket's
@@ -217,7 +254,7 @@ class AnalogFillTest {
 
     @Test
     void badTimeBetweenTwoGoodBuckets_isNotBridged() throws Exception {
-        String u = factry.addMeasurement("default/out", "number");
+        String u = factry.addMeasurement("default/out", "number", "Float8");
         factry.add(u, T0, 10, "Good");
         factry.add(u, T0 + 30_000, 99, "Bad");
         factry.add(u, T0 + 60_000, 60, "Good");
@@ -227,7 +264,7 @@ class AnalogFillTest {
 
     @Test
     void theRangeStart_isOnTheLineFromTheSampleBeforeIt() throws Exception {
-        String u = factry.addMeasurement("default/out", "number");
+        String u = factry.addMeasurement("default/out", "number", "Float8");
         factry.add(u, T0 - 24_000, 0, "Good");
         factry.add(u, T0 + 36_000, 60, "Good");
         assertEquals(Arrays.asList(36.0, 48.0, 60.0, 60.0, 60.0, 60.0), lastValues(T0 + 72_000, T0 + 3_600_000));
@@ -235,7 +272,7 @@ class AnalogFillTest {
 
     @Test
     void aPastRangeEnd_isOnTheLineToTheSampleAfterIt() throws Exception {
-        String u = factry.addMeasurement("default/out", "number");
+        String u = factry.addMeasurement("default/out", "number", "Float8");
         factry.add(u, T0 + 36_000, 0, "Good");
         factry.add(u, T0 + 96_000, 60, "Good");
         assertEquals(Arrays.asList("Bad", "Bad", "Bad", 0.0, 24.0, 36.0), lastValues(T0 + 72_000, T0 + 3_600_000));
@@ -243,7 +280,7 @@ class AnalogFillTest {
 
     @Test
     void towardNow_theLastValueHolds() throws Exception {
-        String u = factry.addMeasurement("default/out", "number");
+        String u = factry.addMeasurement("default/out", "number", "Float8");
         factry.add(u, T0, 0, "Good");
         factry.add(u, T0 + 24_000, 24, "Good");
         // No extrapolation past the last sample, and nothing after now.
@@ -252,7 +289,7 @@ class AnalogFillTest {
 
     @Test
     void aBadStretch_isNotBridged() throws Exception {
-        String u = factry.addMeasurement("default/out", "number");
+        String u = factry.addMeasurement("default/out", "number", "Float8");
         factry.add(u, T0 - 30_000, 5, "Good");
         factry.add(u, T0 + 13_000, 7, "Good");
         factry.add(u, T0 + 26_000, 99, "Bad");
@@ -287,7 +324,7 @@ class AnalogFillTest {
 
     @Test
     void theAverageOfAnEmptyBucket_isTheLineAtItsMiddle() {
-        String u = factry.addMeasurement("default/out", "number");
+        String u = factry.addMeasurement("default/out", "number", "Float8");
         factry.add(u, T0, 0, "Good");
         factry.add(u, T0 + 4 * HOUR, 400, "Good");
         // A ramp from 0 to 400 over 4 h averages 150 in its second hour, not the 100 at its start.
@@ -298,7 +335,7 @@ class AnalogFillTest {
 
     @Test
     void theSampleBeforeTheRange_isReadOnce() throws Exception {
-        String u = factry.addMeasurement("default/out", "number");
+        String u = factry.addMeasurement("default/out", "number", "Float8");
         factry.add(u, T0 - 24_000, 0, "Good");
         factry.add(u, T0 + 36_000, 60, "Good");
         lastValues(T0 + 72_000, T0 + 3_600_000);
@@ -331,7 +368,7 @@ class AnalogFillTest {
 
     @Test
     void aFailedReadAroundEmptyBuckets_holdsInstead() throws Exception {
-        minuteTag("number", null);
+        minuteTag("number", "Float8");
         factry.failWhen = AnalogFillTest::isWindowRead;
         for (Status status : List.of(Status.UNKNOWN, Status.DEADLINE_EXCEEDED)) {
             factry.failWith = status;
@@ -343,7 +380,7 @@ class AnalogFillTest {
 
     @Test
     void aLongRangeWithOneShortGap_readsOnlyAroundTheGap() throws Exception {
-        String u = factry.addMeasurement("default/out", "number");
+        String u = factry.addMeasurement("default/out", "number", "Float8");
         for (int t = 0; t <= 300; t += 6) {
             if (t < 120 || t > 144) {
                 factry.add(u, T0 + t * 1000L, t, "Good");
@@ -362,7 +399,7 @@ class AnalogFillTest {
 
     @Test
     void aReadThatReachesTheLimit_orPastTheCap_holds() throws Exception {
-        String u = factry.addMeasurement("default/out", "number");
+        String u = factry.addMeasurement("default/out", "number", "Float8");
         // Empty buckets at 12 s and 60 s: two runs, read in two windows, 0 to 36 s and 48 to 84 s.
         for (int t : new int[]{0, 24, 36, 48, 72, 84}) {
             factry.add(u, T0 + t * 1000L, t, "Good");
@@ -421,7 +458,7 @@ class AnalogFillTest {
     @Test
     void metadataWithoutAStyle_meansAuto() throws Exception {
         // With Include Metadata on, Ignition leaves a style at its default out.
-        minuteTag("number", null);
+        minuteTag("number", "Float8");
         FactryStorageEngine storage = storage(factry, cache);
         storage.doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
         assertEquals(HELD, column(AggregationMode.LastValue));
