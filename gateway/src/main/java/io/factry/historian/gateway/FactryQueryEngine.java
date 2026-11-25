@@ -28,6 +28,7 @@ import com.inductiveautomation.historian.gateway.api.query.processor.DefaultProc
 import com.inductiveautomation.historian.gateway.api.query.processor.MetadataPointProcessor;
 import com.inductiveautomation.historian.gateway.api.query.processor.ProcessingContext;
 import com.inductiveautomation.historian.gateway.api.query.processor.RawPointProcessor;
+import com.inductiveautomation.ignition.common.FillMode;
 import com.inductiveautomation.ignition.common.QualifiedPath;
 import com.inductiveautomation.ignition.common.StringPath;
 import com.inductiveautomation.ignition.common.browsing.BrowseFilter;
@@ -39,6 +40,7 @@ import com.inductiveautomation.ignition.common.model.values.QualityCode;
 import com.inductiveautomation.ignition.common.sqltags.history.AggregationMode;
 import com.inductiveautomation.ignition.common.sqltags.model.types.DataType;
 import com.inductiveautomation.ignition.common.sqltags.model.types.DataTypeClass;
+import com.inductiveautomation.ignition.common.tags.config.properties.TagHistoryProps;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 
@@ -984,11 +986,12 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     }
                     // Count stays a number; every other aggregate of a date is itself a date.
                     boolean asDate = dateTime && !"Count".equals(aggName);
+                    boolean linear = fillMode(key, node) == FillMode.LINEAR;
 
                     String factryFunction = "MinMax".equals(aggName) ? null : toFactryAggregateFunction(aggName);
                     if (TIME_WEIGHTED_AVERAGE.equals(factryFunction) && options.getTimeRange().isPresent()) {
                         pointCount += queryTimeWeightedAverage(uuid, source, key, period,
-                                periodMs, dataType == DataType.Boolean, asDate, options, pts);
+                                periodMs, dataType == DataType.Boolean, asDate, linear, options, pts);
                     } else if ("count".equals(factryFunction) && options.getTimeRange().isPresent()) {
                         pointCount += queryCount(uuid, source, key, period, periodMs, options, pts);
                     } else if ("count".equals(factryFunction) || TIME_WEIGHTED_AVERAGE.equals(factryFunction)) {
@@ -998,7 +1001,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                         // MinMax asks Factry for min and max, and gives each bucket both.
                         List<String> functions = factryFunction == null ? List.of("min", "max") : List.of(factryFunction);
                         pointCount += queryEveryBucket(uuid, element, source, key, functions, period, periodMs,
-                                options, pts, asDate);
+                                options, pts, asDate, linear);
                     }
                     pointsByKey.put(key, pts);
                 } catch (Exception e) {
@@ -1189,27 +1192,51 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      */
     private int queryTimeWeightedAverage(
             String uuid, QualifiedPath source, AggregatedQueryKey key, String period, long periodMs,
-            boolean isBoolean, boolean asDate, AggregatedQueryOptions options, List<AggregatedPoint<?, ?>> out) {
+            boolean isBoolean, boolean asDate, boolean linear, AggregatedQueryOptions options,
+            List<AggregatedPoint<?, ?>> out) {
 
         long startMs = options.getTimeRange().get().startTime().toEpochMilli();
         long rangeEndMs = options.getTimeRange().get().endTime().toEpochMilli();
+        Set<Long> withSamples = new HashSet<>();
         Map<Long, GoodTimeAverage.Result> values =
-                timeWeightedAverage(uuid, period, periodMs, isBoolean, startMs, rangeEndMs);
+                timeWeightedAverage(uuid, period, periodMs, isBoolean, startMs, rangeEndMs, withSamples);
+
+        List<Long> starts = new ArrayList<>();
+        for (long b = startMs; b < rangeEndMs; b += periodMs) {
+            starts.add(b);
+        }
+        Object[] linearValues = null;
+        if (linear) {
+            // Factry's twa holds the last value through buckets without samples; an analog tag
+            // gets the straight line between its neighbours instead.
+            linearValues = new Object[starts.size()];
+            boolean[] empty = new boolean[starts.size()];
+            boolean[] anchor = new boolean[starts.size()];
+            for (int i = 0; i < starts.size(); i++) {
+                GoodTimeAverage.Result r = values.getOrDefault(starts.get(i), GoodTimeAverage.Result.BAD);
+                linearValues[i] = r.isBad() ? null : r.value();
+                anchor[i] = !r.isBad() && withSamples.contains(starts.get(i));
+                empty[i] = !r.isBad() && !withSamples.contains(starts.get(i));
+            }
+            interpolate(linearValues, empty, anchor);
+        }
 
         // Every bucket gets a point. Ignition fills a bucket without one with a neighbouring
         // value marked Good (checked through its own query path), so a bucket left out would
         // read as a held Good value: in an outage, before the first sample and after now. A
         // bucket without Good time is a Bad point instead, which the Power Chart draws as a gap.
         int count = 0;
-        for (long b = startMs; b < rangeEndMs; b += periodMs) {
+        for (int i = 0; i < starts.size(); i++) {
+            long b = starts.get(i);
             GoodTimeAverage.Result r = values.getOrDefault(b, GoodTimeAverage.Result.BAD);
+            Object value = linearValues != null ? linearValues[i] : r.isBad() ? null : r.value();
             out.add(
                     AggregatedDataPoint.<Object, AggregationType>builder(source, key.aggregationType())
                             // A DateTime tag is stored as epoch ms; its average is a date too.
                             // A Bad bucket has no value. Not NaN: the Power Chart streams history
                             // as strict JSON, which throws at a NaN and cuts the response off. A
                             // null reads as 0.0 in a Float column, but its quality stays Bad.
-                            .value(r.isBad() ? null : asDate ? toDate(r.value()) : r.value())
+                            .value(r.isBad() ? null : asDate ? toDate(value) : value)
                             // A numeric fallback is Good: the Power Chart drops points that are
                             // not Good, and the twa over Good samples bridges Bad time inside the
                             // bucket, as Ignition's own average does there. A Boolean fallback is
@@ -1226,7 +1253,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
     /** The average per bucket start; buckets without Good time are Bad or absent. */
     private Map<Long, GoodTimeAverage.Result> timeWeightedAverage(
-            String uuid, String period, long periodMs, boolean isBoolean, long startMs, long rangeEndMs) {
+            String uuid, String period, long periodMs, boolean isBoolean, long startMs, long rangeEndMs,
+            Set<Long> withSamples) {
         // Stop at now. Fill "previous" would carry the last value into future buckets and weight
         // it up to the bucket end, while Ignition's own Average has no value after now (its
         // interpolator returns nothing past the current time). Factry weights the last bucket
@@ -1264,6 +1292,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                         .add(good, toDouble(pt.getValue()));
             }
         }
+        withSamples.addAll(statuses.keySet());
 
         Map<Long, Double> goodMean = new HashMap<>();
         if (isBoolean) {
@@ -1456,7 +1485,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     private int queryEveryBucket(
             String uuid, int element, QualifiedPath source, AggregatedQueryKey key, List<String> functions,
             String period, long periodMs, AggregatedQueryOptions options,
-            List<AggregatedPoint<?, ?>> out, boolean asDate) {
+            List<AggregatedPoint<?, ?>> out, boolean asDate, boolean linear) {
         TimeRange range = options.getTimeRange()
                 .orElseThrow(() -> new IllegalArgumentException("an aggregated read needs a time range"));
         long startMs = range.startTime().toEpochMilli();
@@ -1493,15 +1522,33 @@ public class FactryQueryEngine extends AbstractQueryEngine {
 
         List<BucketFill.Bucket> buckets = BucketFill.fill(startMs, rangeEndMs, periodMs, nowMs, statuses,
                 ts -> samplesBefore(uuid, element, ts), RAW_BUDGET.seedReadsPerPen(), functions.contains("last"));
-        int count = 0;
-        for (BucketFill.Bucket bucket : buckets) {
-            for (int f = 0; f < functions.size(); f++) {
-                String function = functions.get(f);
-                Object value = switch (bucket.kind()) {
+        Object[][] values = new Object[functions.size()][buckets.size()];
+        for (int f = 0; f < functions.size(); f++) {
+            String function = functions.get(f);
+            for (int i = 0; i < buckets.size(); i++) {
+                BucketFill.Bucket bucket = buckets.get(i);
+                values[f][i] = switch (bucket.kind()) {
                     case GOOD_SAMPLES -> "last".equals(function) ? bucket.value() : good.get(f).get(bucket.start());
                     case HELD -> heldValue(function, bucket.value());
                     case BAD -> null;
                 };
+            }
+            if (linear && INTERPOLATED.contains(function)) {
+                boolean[] empty = new boolean[buckets.size()];
+                boolean[] anchor = new boolean[buckets.size()];
+                for (int i = 0; i < buckets.size(); i++) {
+                    empty[i] = buckets.get(i).kind() == BucketFill.Kind.HELD;
+                    anchor[i] = buckets.get(i).kind() == BucketFill.Kind.GOOD_SAMPLES;
+                }
+                interpolate(values[f], empty, anchor);
+            }
+        }
+        int count = 0;
+        for (int i = 0; i < buckets.size(); i++) {
+            BucketFill.Bucket bucket = buckets.get(i);
+            for (int f = 0; f < functions.size(); f++) {
+                String function = functions.get(f);
+                Object value = values[f][i];
                 // No value is a Bad point. Not NaN: the Power Chart streams history as strict
                 // JSON, which throws at a NaN (a variance of one sample can be one). A null
                 // reads as 0.0 in a Float column, but its quality stays Bad.
@@ -1519,6 +1566,41 @@ public class FactryQueryEngine extends AbstractQueryEngine {
             }
         }
         return count;
+    }
+
+    /**
+     * The functions whose empty buckets an analog tag fills on the straight line between its
+     * neighbours. A sum, spread, variance or standard deviation of an empty bucket stays as it is
+     * (see {@link #heldValue}), as Ignition's own historians never interpolate those.
+     */
+    private static final Set<String> INTERPOLATED = Set.of("min", "max", "mean", "last");
+
+    /**
+     * Fills each run of empty buckets that lies between two buckets with Good samples on the
+     * straight line between those two buckets' values, as Ignition's own historians fill an
+     * analog tag (Core's FILL(LINEAR)). Empty buckets before the first such bucket, after the last
+     * one, or next to a Bad bucket keep their value.
+     *
+     * @param values per bucket, its value; replaced in place
+     * @param empty  per bucket, whether it has no samples and holds a Good value
+     * @param anchor per bucket, whether it has Good samples
+     */
+    static void interpolate(Object[] values, boolean[] empty, boolean[] anchor) {
+        int from = -1;
+        for (int i = 0; i < values.length; i++) {
+            if (anchor[i] && values[i] instanceof Number to) {
+                if (from >= 0 && i - from > 1 && values[from] instanceof Number start) {
+                    double a = start.doubleValue();
+                    double b = to.doubleValue();
+                    for (int k = from + 1; k < i; k++) {
+                        values[k] = a + (b - a) * (k - from) / (i - from);
+                    }
+                }
+                from = i;
+            } else if (!empty[i]) {
+                from = -1;
+            }
+        }
     }
 
     /**
@@ -1796,19 +1878,70 @@ public class FactryQueryEngine extends AbstractQueryEngine {
     private Optional<FactryRecord> measurementNode(String tagPath, QualifiedPath path, boolean lookUp) {
         Measurement m = lookUp ? measurementCache.findForRead(tagPath, grpcClient) : measurementCache.cachedForRead(tagPath);
         if (m != null) {
-            return Optional.of(new FactryRecord(m.getUuid(), -1, path, m.getDatatype(),
-                    MeasurementCache.ignitionDataType(m), createdTime(m)));
+            return Optional.of(new FactryRecord(m.getUuid(), -1, path, m.getDatatype(), ignitionDataType(m),
+                    deadbandStyle(m), createdTime(m)));
         }
         ArrayPointMerger.ArrayRef ref = ArrayPointMerger.parseArrayPath(tagPath);
         Measurement base = ref == null ? null : lookUp
                 ? measurementCache.findForRead(ref.basePath, grpcClient)
                 : measurementCache.cachedForRead(ref.basePath);
         if (base != null && base.getDatatype().startsWith("[]")) {
-            String ignitionType = MeasurementCache.ignitionDataType(base);
+            String ignitionType = ignitionDataType(base);
             return Optional.of(new FactryRecord(base.getUuid(), ref.index, path, base.getDatatype().substring(2),
-                    ignitionType != null ? ignitionType.replaceFirst("Array$", "") : null, createdTime(base)));
+                    ignitionType != null ? ignitionType.replaceFirst("Array$", "") : null, deadbandStyle(base),
+                    createdTime(base)));
         }
         return Optional.empty();
+    }
+
+    /** The tag's Ignition data type: from the metadata this gateway has, else the measurement's setting. */
+    private String ignitionDataType(Measurement m) {
+        return measurementCache.tagProperty(m, grpcClient.getCollectorUUID(),
+                MeasurementCache.IGNITION_DATA_TYPE, MeasurementCache.IGNITION_DATA_TYPE_SETTING);
+    }
+
+    /**
+     * The tag's Deadband Style: from the metadata, which is current on the gateway that
+     * historizes the tag, else the measurement's setting, for other gateways and before the
+     * metadata arrives.
+     */
+    private String deadbandStyle(Measurement m) {
+        return measurementCache.tagProperty(m, grpcClient.getCollectorUUID(),
+                MeasurementCache.DEADBAND_STYLE, MeasurementCache.DEADBAND_STYLE_SETTING);
+    }
+
+    /**
+     * Tells Ignition each tag's Deadband Style, as Core's historian does, so the aggregates
+     * Ignition computes itself from raw points hold a discrete tag instead of interpolating it.
+     */
+    @Override
+    protected Optional<PropertySet> getProcessorProperties(HistoricalNode node) {
+        Optional<PropertySet> properties = super.getProcessorProperties(node);
+        if (node instanceof FactryRecord r && r.deadbandStyle().isPresent()) {
+            PropertySet set = properties.orElseGet(BasicPropertySet::new);
+            set.set(TagHistoryProps.HistoricalDeadbandStyle, r.deadbandStyle().get());
+            return Optional.of(set);
+        }
+        return properties;
+    }
+
+    /**
+     * How a pen fills buckets without samples: as the query asks, else (FillMode.DERIVED, which
+     * the charts and queryTagHistory send) by the tag, as Ignition's own historians do. Only
+     * LINEAR changes what the module returns; every other mode holds as before.
+     */
+    static FillMode fillMode(AggregatedQueryKey key, HistoricalNode node) {
+        FillMode asked = key.fillMode();
+        if (node instanceof FactryRecord r) {
+            DataType type = r.dataType().orElse(null);
+            if (type == DataType.String || type == DataType.Boolean) {
+                return FillMode.PREV;
+            }
+            if (asked == null || asked == FillMode.DERIVED) {
+                return r.derivedFill();
+            }
+        }
+        return asked == null || asked == FillMode.DERIVED ? FillMode.PREV : asked;
     }
 
     private static Instant createdTime(Measurement m) {

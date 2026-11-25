@@ -16,6 +16,8 @@ import io.factry.historian.proto.GetAssetsRequest;
 import io.factry.historian.proto.GetMeasurementsByFilterRequest;
 import io.factry.historian.proto.Measurement;
 import io.factry.historian.proto.MetadataProperty;
+import io.factry.historian.proto.MigrateMeasurementSettings;
+import io.factry.historian.proto.MigrationRequest;
 import io.factry.historian.proto.MeasurementRequest;
 import io.factry.historian.proto.Measurements;
 import io.factry.historian.proto.Pagination;
@@ -1434,8 +1436,93 @@ public class MeasurementCache {
 
     /** The Ignition data type recorded on a measurement at creation, or null when there is none. */
     static String ignitionDataType(Measurement m) {
-        Value v = m.getSettings().getFieldsMap().get(IGNITION_DATA_TYPE_SETTING);
+        return stringSetting(m, IGNITION_DATA_TYPE_SETTING);
+    }
+
+    /**
+     * Ignition tag property that holds the tag's History Deadband Style (an InterpolationMode
+     * name). Ignition sends it as metadata every time a tag's history is configured, at every
+     * start and on every change, even with Include Metadata off (AtomicHistoryActor).
+     */
+    static final String DEADBAND_STYLE = "historicalDeadbandStyle";
+
+    /**
+     * Measurement setting that keeps the tag's Deadband Style, so that another gateway, and this
+     * one before Ignition sends the metadata, draws the tag as Ignition's own historians do.
+     */
+    static final String DEADBAND_STYLE_SETTING = "ignitionDeadbandStyle";
+
+    /** A string setting of a measurement, or null when there is none. */
+    private static String stringSetting(Measurement m, String name) {
+        Value v = m.getSettings().getFieldsMap().get(name);
         return v != null && v.getKindCase() == Value.KindCase.STRING_VALUE ? v.getStringValue() : null;
+    }
+
+    /**
+     * The tag property {@code property} of the tag behind {@code m}: from the metadata Ignition
+     * sent this gateway, when {@code m} is this collector's measurement for that tag, else from
+     * the measurement setting {@code setting}. Null when neither has it.
+     */
+    String tagProperty(Measurement m, String collectorUUID, String property, String setting) {
+        // Only this collector's measurement: another collector's with the same name may be
+        // another Site's tag, configured differently.
+        if (m.getCollectorUUID().equalsIgnoreCase(collectorUUID)) {
+            Map<String, String> metadata = tagMetadata.get(m.getName());
+            if (metadata != null && metadata.get(property) != null) {
+                return metadata.get(property);
+            }
+        }
+        return stringSetting(m, setting);
+    }
+
+    /** Logged once per profile: a proxy in front of Factry may refuse MigrateSettings on purpose. */
+    private final java.util.concurrent.atomic.AtomicBoolean migrateRefusalLogged =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    /**
+     * Writes the Deadband Style Ignition sent for these tags into their measurements' settings,
+     * where it differs, with one MigrateSettings call. Only this collector's measurements: the
+     * module never changes another collector's. MigrateSettings replaces the whole settings
+     * Struct, so every other setting is sent along unchanged. A failure is logged once and
+     * changes nothing: queries on this gateway still read the style from the metadata.
+     *
+     * @param styles tag path to Deadband Style name
+     */
+    void storeDeadbandStyles(Map<String, String> styles, FactryGrpcClient grpcClient) {
+        String collectorUUID = grpcClient.getCollectorUUID();
+        if (collectorUUID == null || collectorUUID.isEmpty()) {
+            return;
+        }
+        Map<String, Measurement> updated = new LinkedHashMap<>();
+        MigrationRequest.Builder request = MigrationRequest.newBuilder();
+        styles.forEach((path, style) -> {
+            Measurement m = writeTarget(path, collectorUUID);
+            if (m == null || !collectorUUID.equalsIgnoreCase(m.getCollectorUUID())
+                    || !m.getName().equals(path) || style.equals(stringSetting(m, DEADBAND_STYLE_SETTING))) {
+                return;
+            }
+            Struct settings = m.getSettings().toBuilder()
+                    .putFields(DEADBAND_STYLE_SETTING, Value.newBuilder().setStringValue(style).build())
+                    .build();
+            request.addMeasurementSettings(MigrateMeasurementSettings.newBuilder()
+                    .setMeasurementUUID(m.getUuid()).setSettings(settings));
+            updated.put(m.getUuid(), m.toBuilder().setSettings(settings).build());
+        });
+        if (updated.isEmpty()) {
+            return;
+        }
+        try {
+            grpcClient.migrateSettings(request.build());
+        } catch (RuntimeException e) {
+            if (migrateRefusalLogged.compareAndSet(false, true)) {
+                logger.info("Factry did not store the Deadband Style of {} measurement(s) ({}). Trends on this"
+                        + " gateway still follow it; other gateways draw these tags by their data type."
+                        + " Logged once.", updated.size(), e.getMessage());
+            }
+            return;
+        }
+        updated.values().forEach(m -> cacheMeasurement(m, collectorUUID));
+        logger.debug("Stored the Deadband Style of {} measurement(s)", updated.size());
     }
 
     /** Factry derives EngineeringSpecs from a nested "Config" attribute group with these keys. */
@@ -1479,10 +1566,17 @@ public class MeasurementCache {
             return builder.build();
         }
 
+        Struct.Builder settings = Struct.newBuilder();
         String ignitionType = metadata.get(IGNITION_DATA_TYPE);
         if (ignitionType != null) {
-            builder.setSettings(Struct.newBuilder()
-                    .putFields(IGNITION_DATA_TYPE_SETTING, Value.newBuilder().setStringValue(ignitionType).build()));
+            settings.putFields(IGNITION_DATA_TYPE_SETTING, Value.newBuilder().setStringValue(ignitionType).build());
+        }
+        String deadbandStyle = metadata.get(DEADBAND_STYLE);
+        if (deadbandStyle != null) {
+            settings.putFields(DEADBAND_STYLE_SETTING, Value.newBuilder().setStringValue(deadbandStyle).build());
+        }
+        if (settings.getFieldsCount() > 0) {
+            builder.setSettings(settings);
         }
 
         Struct.Builder config = Struct.newBuilder();

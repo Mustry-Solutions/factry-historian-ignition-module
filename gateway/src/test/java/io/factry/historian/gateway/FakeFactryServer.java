@@ -122,6 +122,43 @@ final class FakeFactryServer extends HistorianGrpc.HistorianImplBase implements 
         return uuid;
     }
 
+    /** Adds an Active measurement of {@code collector} with these settings and returns its UUID. */
+    String addMeasurement(String name, String datatype, String collector, Struct settings) {
+        String uuid = "uuid-" + (measurements.size() + 1);
+        measurements.put(uuid, Measurement.newBuilder().setUuid(uuid).setName(name).setStatus("active")
+                .setDatatype(datatype).setCollectorUUID(collector).setSettings(settings).build());
+        points.put(uuid, new ArrayList<>());
+        return uuid;
+    }
+
+    Measurement measurement(String uuid) {
+        return measurements.get(uuid);
+    }
+
+    /** Every MigrateSettings call, in order. */
+    final List<io.factry.historian.proto.MigrationRequest> migrations = new CopyOnWriteArrayList<>();
+    /** When set, MigrateSettings fails with this status, as a proxy that refuses it does. */
+    volatile Status migrateFailure = null;
+
+    @Override
+    public void migrateSettings(io.factry.historian.proto.MigrationRequest request,
+                                StreamObserver<com.google.protobuf.Empty> observer) {
+        migrations.add(request);
+        if (migrateFailure != null) {
+            observer.onError(migrateFailure.asRuntimeException());
+            return;
+        }
+        // Factry replaces each measurement's whole settings Struct.
+        for (var change : request.getMeasurementSettingsList()) {
+            Measurement m = measurements.get(change.getMeasurementUUID());
+            if (m != null) {
+                measurements.put(m.getUuid(), m.toBuilder().setSettings(change.getSettings()).build());
+            }
+        }
+        observer.onNext(com.google.protobuf.Empty.getDefaultInstance());
+        observer.onCompleted();
+    }
+
     void addPoint(String uuid, long ts, Value value, String status) {
         points.get(uuid).add(new Pt(ts, value, status));
     }

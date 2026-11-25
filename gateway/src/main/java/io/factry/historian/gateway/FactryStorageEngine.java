@@ -18,6 +18,7 @@ import java.util.Map;
 
 public class FactryStorageEngine extends AbstractStorageEngine {
     private volatile FactryHistorianSettings settings;
+    private final FactryGrpcClient grpcClient;
     private final MeasurementCache measurementCache;
     private final HistorianMetrics metrics;
     private final PointWriter pointWriter;
@@ -45,6 +46,7 @@ public class FactryStorageEngine extends AbstractStorageEngine {
         super(context, historianName, LoggerEx.newBuilder().build(FactryStorageEngine.class),
                 QualifiedPathAdapter.DEFAULT, ImmediateStorageStrategy.create(historianName));
         this.settings = settings;
+        this.grpcClient = grpcClient;
         this.measurementCache = measurementCache;
         this.metrics = metrics;
         this.pointWriter = new PointWriter(grpcClient, measurementCache, metrics, writeHealth);
@@ -81,8 +83,10 @@ public class FactryStorageEngine extends AbstractStorageEngine {
     protected StorageResult<MetadataPoint> doStoreMetadata(List<MetadataPoint> metadataPoints) {
         // Factry doesn't support updating metadata after creation, but we cache the
         // properties so they can be applied as initial values when a measurement is
-        // first created via MeasurementCache.getOrCreateUUID().
+        // first created via MeasurementCache.getOrCreateUUID(). Only the Deadband Style is kept
+        // up to date on existing measurements, as a setting, since trends draw by it.
         logger.debug("doStoreMetadata called with " + metadataPoints.size() + " points");
+        Map<String, String> deadbandStyles = new HashMap<>();
         for (MetadataPoint point : metadataPoints) {
             String tagPath = TagPathUtil.storagePathToStoredPath(point.source().toString());
             com.inductiveautomation.ignition.common.config.PropertySet ps = point.value();
@@ -97,7 +101,14 @@ public class FactryStorageEngine extends AbstractStorageEngine {
                 if (!properties.isEmpty()) {
                     measurementCache.storeMetadata(tagPath, properties);
                 }
+                String style = properties.get(MeasurementCache.DEADBAND_STYLE);
+                if (style != null) {
+                    deadbandStyles.put(tagPath, style);
+                }
             }
+        }
+        if (!deadbandStyles.isEmpty()) {
+            measurementCache.storeDeadbandStyles(deadbandStyles, grpcClient);
         }
         return StorageResult.success(metadataPoints);
     }

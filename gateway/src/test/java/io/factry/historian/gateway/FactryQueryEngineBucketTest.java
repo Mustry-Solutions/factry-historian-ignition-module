@@ -32,12 +32,17 @@ class FactryQueryEngineBucketTest {
     private static final Object BAD = "Bad";
 
     private final TwaFakeFactry factry = new TwaFakeFactry();
+    /** Whether the tag's Deadband Style is Discrete, as Ignition sends it in the metadata. */
+    private boolean discrete;
 
     private FactryQueryEngine engine(long now) {
         FactryHistorianSettings settings = new FactryHistorianSettings();
         settings.setDelimiter("/");
         MeasurementCache cache = new MeasurementCache();
         cache.refresh(factry);
+        if (discrete) {
+            cache.storeMetadata("default/out", java.util.Map.of(MeasurementCache.DEADBAND_STYLE, "Discrete"));
+        }
         FactryQueryEngine engine = new FactryQueryEngine(TwaFakeFactry.gatewayContext(), "Factry", settings,
                 factry, cache, new HistorianMetrics());
         engine.now = () -> now;
@@ -96,12 +101,18 @@ class FactryQueryEngineBucketTest {
         factry.add(u, T0 + 5_000, 7, "Good");
         factry.add(u, T0 + 45_000, 8, "Good");
 
-        // Before the fix: 7, 8, 8, 8, 8, 8 (Ignition filled the empty buckets with the next value).
+        // A Discrete tag holds its value. Before the fix: 7, 8, 8, 8, 8, 8 (Ignition filled the
+        // empty buckets with the next value).
+        discrete = true;
         for (AggregationMode mode : List.of(AggregationMode.LastValue, AggregationMode.Minimum,
                 AggregationMode.Maximum, AggregationMode.SimpleAverage)) {
             assertColumn(read(mode), 7.0, 7.0, 7.0, 7.0, 8.0, 8.0);
         }
         assertColumn(read(AggregationMode.LastValue, FillMode.DERIVED, T0 + 3_600_000), 7.0, 7.0, 7.0, 7.0, 8.0, 8.0);
+        // An analog one (a number tag with Auto) is drawn on the line between its samples, as
+        // Ignition's own historians do (#83).
+        discrete = false;
+        assertColumn(read(AggregationMode.LastValue, FillMode.DERIVED, T0 + 3_600_000), 7.0, 7.25, 7.5, 7.75, 8.0, 8.0);
     }
 
     @Test

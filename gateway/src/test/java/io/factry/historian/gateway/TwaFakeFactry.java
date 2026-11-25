@@ -74,6 +74,13 @@ class TwaFakeFactry extends FactryGrpcClient {
                         Value.newBuilder().setStringValue(ignitionDataType).build())));
     }
 
+    /** Sets a string setting of a measurement, keeping its other settings. */
+    void setSetting(String uuid, String name, String value) {
+        Measurement m = measurements.get(uuid);
+        measurements.put(uuid, m.toBuilder().setSettings(m.getSettings().toBuilder()
+                .putFields(name, Value.newBuilder().setStringValue(value).build())).build());
+    }
+
     private String addMeasurement(Measurement.Builder m) {
         String uuid = "uuid-" + (measurements.size() + 1);
         measurements.put(uuid, m.setUuid(uuid).setStatus("Active").setCollectorUUID("collector").build());

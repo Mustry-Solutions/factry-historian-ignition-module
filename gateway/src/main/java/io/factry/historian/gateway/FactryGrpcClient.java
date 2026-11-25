@@ -437,6 +437,19 @@ public class FactryGrpcClient {
         }
     }
 
+    /** Replaces the settings of the measurements in {@code request}, each with the whole Struct given. */
+    public void migrateSettings(io.factry.historian.proto.MigrationRequest request) {
+        logger.debug("Sending MigrateSettings for {} measurements", request.getMeasurementSettingsCount());
+        channelLock.readLock().lock();
+        try {
+            blockingStub
+                    .withDeadlineAfter(CALL_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .migrateSettings(request);
+        } finally {
+            channelLock.readLock().unlock();
+        }
+    }
+
     public CreateMeasurementsReply createMeasurements(CreateMeasurementsRequest request) {
         logger.debug("Sending CreateMeasurements with {} measurements", request.getMeasurementsCount());
         channelLock.readLock().lock();
