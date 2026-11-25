@@ -1471,7 +1471,11 @@ public class MeasurementCache {
         // Only the measurement this collector writes the tag to, which may differ in letter case
         // after a rename: another collector's with the same name may be another Site's tag,
         // configured differently.
-        Map<String, String> metadata = tagMetadata.get(tagPath);
+        // Ignition sends an array tag's metadata under the array's path, the one written to.
+        Map<String, String> metadata = tagMetadata.get(writePath);
+        if (metadata == null || metadata.get(property) == null) {
+            metadata = tagMetadata.get(tagPath);
+        }
         if (metadata != null && metadata.get(property) != null && collectorUUID != null
                 && collectorUUID.equalsIgnoreCase(m.getCollectorUUID())) {
             Measurement target = writeTarget(writePath, collectorUUID);

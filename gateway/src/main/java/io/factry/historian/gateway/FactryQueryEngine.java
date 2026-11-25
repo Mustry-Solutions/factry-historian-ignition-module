@@ -1224,7 +1224,8 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 long b = starts.get(i);
                 at[i] = b + (Math.min(b + periodMs, endMs) - b) / 2;
             }
-            fillLinear(uuid, -1, at, empty, startMs, rangeEndMs, before.get(), new Object[][]{linearValues});
+            fillLinear(uuid, -1, at, empty, startMs, rangeEndMs, periodMs, before.get(),
+                    new Object[][]{linearValues});
         }
 
         // Every bucket gets a point. Ignition fills a bucket without one with a neighbouring
@@ -1567,7 +1568,7 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                     interpolated.add(values[f]);
                 }
             }
-            fillLinear(uuid, element, at, empty, startMs, rangeEndMs,
+            fillLinear(uuid, element, at, empty, startMs, rangeEndMs, periodMs,
                     beforeRange.isEmpty() ? null : beforeRange.get(0), interpolated.toArray(new Object[0][]));
         }
         int count = 0;
@@ -1602,18 +1603,31 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      */
     private static final Set<String> INTERPOLATED = Set.of("min", "max", "mean", "last");
 
-    /** Most raw samples per status one analog pen reads to find the samples around its empty buckets. */
-    static final int LINEAR_RAW_LIMIT = 50_000;
+    /**
+     * Most raw samples per status in one read around empty buckets of an analog pen. Such a read
+     * covers the buckets next to a run of empty buckets, so a tag that is sparse there needs few;
+     * a read that reaches this many leaves its runs held. Tests lower it.
+     */
+    int linearRawLimit = 10_000;
+
+    /** Most reads around empty buckets per analog pen; the runs past it hold. Tests lower it. */
+    int linearReadsPerPen = 10;
+
+    /** Whether a failed read around empty buckets was logged; it only costs the line. */
+    private volatile boolean linearReadFailureLogged;
 
     /**
      * Gives each empty bucket of an analog tag one value, for every function alike (a minimum,
      * maximum, mean or last value of an empty bucket are all the same), on the straight line
      * from the last Good sample before it to the first Good sample after it, each at its own
-     * time, as Ignition's own historians interpolate an analog tag. The samples come from one raw
-     * read of the range, the sample before the range (for the empty buckets it starts with) and,
-     * when the range ends before now, the first sample after it. A bucket whose neighbouring
-     * sample is not Good (Bad time), with no sample after it (toward now), or of a pen with more
-     * raw samples than {@link #LINEAR_RAW_LIMIT} keeps the value it had (held).
+     * time, as Ignition's own historians interpolate an analog tag. Those samples are read raw
+     * around each run of empty buckets only: from the bucket before the run to the bucket after
+     * it (adjacent windows merged), at most {@link #linearReadsPerPen} reads of at most
+     * {@link #linearRawLimit} samples per status. A run at the range start takes the sample
+     * before the range, and one at the end of a past range the first sample after it. A run
+     * whose neighbouring sample is not Good (Bad time), with no sample after it (toward now),
+     * past the read cap, in a read that hit the limit, or whose read failed keeps the value it had
+     * (held): the line is never worth failing a pen that would draw.
      *
      * @param at      per bucket, the time whose value on the line it gets; in time order
      * @param empty   per bucket, whether it has no samples and holds a Good value
@@ -1621,55 +1635,102 @@ public class FactryQueryEngine extends AbstractQueryEngine {
      * @param columns per function to fill, its value per bucket; replaced in place
      */
     private void fillLinear(String uuid, int element, long[] at, boolean[] empty, long startMs,
-                            long rangeEndMs, List<BucketFill.Sample> before, Object[][] columns) {
-        int first = -1;
-        for (int i = 0; i < empty.length && first < 0; i++) {
-            if (empty[i]) {
-                first = i;
+                            long rangeEndMs, long periodMs, List<BucketFill.Sample> before, Object[][] columns) {
+        if (columns.length == 0) {
+            return;
+        }
+        long nowMs = now.getAsLong();
+        long endMs = Math.min(rangeEndMs, nowMs);
+        // Runs of empty buckets, and the window each needs read: the bucket before to the bucket after.
+        List<int[]> runs = new ArrayList<>();
+        for (int i = 0; i < empty.length; i++) {
+            if (empty[i] && (i == 0 || !empty[i - 1])) {
+                int j = i;
+                while (j + 1 < empty.length && empty[j + 1]) {
+                    j++;
+                }
+                runs.add(new int[]{i, j});
+                i = j;
             }
         }
-        if (first < 0 || columns.length == 0) {
+        if (runs.isEmpty()) {
             return;
         }
-        List<BucketFill.Sample> samples = samplesAround(uuid, element, startMs, rangeEndMs, first == 0, before);
-        if (samples == null) {
+        List<long[]> windows = new ArrayList<>();
+        List<List<int[]>> windowRuns = new ArrayList<>();
+        for (int[] run : runs) {
+            long from = startMs + Math.max(0, run[0] - 1) * periodMs;
+            long to = Math.min(startMs + (run[1] + 2) * periodMs, endMs);
+            if (!windows.isEmpty() && from <= windows.get(windows.size() - 1)[1]) {
+                long[] last = windows.get(windows.size() - 1);
+                last[1] = Math.max(last[1], to);
+                windowRuns.get(windowRuns.size() - 1).add(run);
+            } else {
+                windows.add(new long[]{from, to});
+                windowRuns.add(new ArrayList<>(List.of(run)));
+            }
+        }
+
+        List<BucketFill.Sample> samples = new ArrayList<>();
+        List<int[]> drawn = new ArrayList<>();
+        try {
+            for (int w = 0; w < windows.size() && w < linearReadsPerPen; w++) {
+                List<BucketFill.Sample> read = readWindow(uuid, element, windows.get(w)[0], windows.get(w)[1]);
+                if (read == null) {
+                    continue;
+                }
+                samples.addAll(read);
+                drawn.addAll(windowRuns.get(w));
+            }
+            if (!drawn.isEmpty() && drawn.get(0)[0] == 0) {
+                samples.addAll(before != null ? before : samplesBefore(uuid, element, startMs));
+            }
+            if (!drawn.isEmpty() && drawn.get(drawn.size() - 1)[1] == empty.length - 1 && rangeEndMs < nowMs) {
+                // A past range: the line runs on to the first sample after it. Toward now there is
+                // nothing to draw to, so the last value holds, as Ignition's own historians do.
+                for (Series series : grpcClient.queryTimeseries(withRange(QueryTimeseriesRequest.newBuilder()
+                        .addMeasurementUUIDs(uuid).addGroupBy("status").setLimit(1), rangeEndMs, nowMs).build())
+                        .getSeriesList()) {
+                    boolean isGood = isGoodStatus(seriesStatus(series));
+                    for (SeriesPoint pt : series.getDataPointsList()) {
+                        samples.add(new BucketFill.Sample(pt.getTimestamp(), storedValue(pt.getValue(), element), isGood));
+                    }
+                }
+            }
+        } catch (RuntimeException e) {
+            if (!linearReadFailureLogged) {
+                linearReadFailureLogged = true;
+                logger.debug("Could not read the samples around empty buckets of " + uuid
+                        + "; they hold their value instead (logged once)", e);
+            }
             return;
         }
+        samples.sort(Comparator.comparingLong(BucketFill.Sample::ts));
+
         // The times only grow, so the first sample at or after each one only moves forward.
         int next = 0;
-        for (int i = 0; i < empty.length; i++) {
-            if (!empty[i]) {
-                continue;
-            }
-            while (next < samples.size() && samples.get(next).ts() < at[i]) {
-                next++;
-            }
-            Double v = lineAt(at[i], samples, next);
-            if (v != null) {
-                for (Object[] column : columns) {
-                    column[i] = v;
+        for (int[] run : drawn) {
+            for (int i = run[0]; i <= run[1]; i++) {
+                while (next < samples.size() && samples.get(next).ts() < at[i]) {
+                    next++;
+                }
+                Double v = lineAt(at[i], samples, next);
+                if (v != null) {
+                    for (Object[] column : columns) {
+                        column[i] = v;
+                    }
                 }
             }
         }
     }
 
-    /**
-     * The raw samples of a range in time order, of every status, with the last sample before
-     * it when {@code withBefore} and the first sample after it when the range ends before now;
-     * null when the range holds more than {@link #LINEAR_RAW_LIMIT} samples of one status.
-     */
-    private List<BucketFill.Sample> samplesAround(String uuid, int element, long startMs, long rangeEndMs,
-                                                  boolean withBefore, List<BucketFill.Sample> before) {
-        long nowMs = now.getAsLong();
-        long endMs = Math.min(rangeEndMs, nowMs);
+    /** The raw samples of one window, of every status; null when one status reaches the limit. */
+    private List<BucketFill.Sample> readWindow(String uuid, int element, long fromMs, long toMs) {
         List<BucketFill.Sample> out = new ArrayList<>();
-        if (withBefore) {
-            out.addAll(before != null ? before : samplesBefore(uuid, element, startMs));
-        }
         QueryTimeseriesResponse reply = grpcClient.queryTimeseries(withRange(QueryTimeseriesRequest.newBuilder()
-                .addMeasurementUUIDs(uuid).addGroupBy("status").setLimit(LINEAR_RAW_LIMIT), startMs, endMs).build());
+                .addMeasurementUUIDs(uuid).addGroupBy("status").setLimit(linearRawLimit), fromMs, toMs).build());
         for (Series series : reply.getSeriesList()) {
-            if (series.getDataPointsCount() >= LINEAR_RAW_LIMIT) {
+            if (series.getDataPointsCount() >= linearRawLimit) {
                 return null;
             }
             boolean isGood = isGoodStatus(seriesStatus(series));
@@ -1677,19 +1738,6 @@ public class FactryQueryEngine extends AbstractQueryEngine {
                 out.add(new BucketFill.Sample(pt.getTimestamp(), storedValue(pt.getValue(), element), isGood));
             }
         }
-        if (rangeEndMs < nowMs) {
-            // A past range: the line runs on to the first sample after it. Toward now there is
-            // nothing to draw to, so the last value holds, as Ignition's own historians do.
-            for (Series series : grpcClient.queryTimeseries(withRange(QueryTimeseriesRequest.newBuilder()
-                    .addMeasurementUUIDs(uuid).addGroupBy("status").setLimit(1), rangeEndMs, nowMs).build())
-                    .getSeriesList()) {
-                boolean isGood = isGoodStatus(seriesStatus(series));
-                for (SeriesPoint pt : series.getDataPointsList()) {
-                    out.add(new BucketFill.Sample(pt.getTimestamp(), storedValue(pt.getValue(), element), isGood));
-                }
-            }
-        }
-        out.sort(Comparator.comparingLong(BucketFill.Sample::ts));
         return out;
     }
 

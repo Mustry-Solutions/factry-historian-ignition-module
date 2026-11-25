@@ -99,6 +99,13 @@ public class FactryStorageEngine extends AbstractStorageEngine {
                         properties.put(pv.getProperty().getName(), val.toString());
                     }
                 }
+                // With Include Metadata on, Ignition sends what it finds iterating the tag's config
+                // (AtomicHistoryActor.calculateMetadataToStore), which can leave a style at its
+                // default, Auto, out. Without this a change from Discrete back to
+                // Auto would keep Discrete, since the cache merges what it is given.
+                if (!properties.isEmpty() && !properties.containsKey(MeasurementCache.DEADBAND_STYLE)) {
+                    properties.put(MeasurementCache.DEADBAND_STYLE, "Auto");
+                }
                 if (!properties.isEmpty()) {
                     measurementCache.storeMetadata(tagPath, properties);
                 }

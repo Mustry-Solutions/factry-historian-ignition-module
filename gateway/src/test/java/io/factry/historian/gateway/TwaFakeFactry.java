@@ -51,6 +51,10 @@ class TwaFakeFactry extends FactryGrpcClient {
     /** Requests that include one of these measurements fail, as Factry fails a whole request. */
     final java.util.Set<String> failingMeasurements = new java.util.HashSet<>();
 
+    /** Requests that match {@link #failWhen} fail with this status, when set. */
+    Status failWith = null;
+    java.util.function.Predicate<QueryTimeseriesRequest> failWhen = q -> true;
+
     TwaFakeFactry() {
         super("localhost", 1, "collector", "token", false, false, null);
     }
@@ -152,6 +156,9 @@ class TwaFakeFactry extends FactryGrpcClient {
     @Override
     public QueryTimeseriesResponse queryTimeseries(QueryTimeseriesRequest request) {
         queries.add(request);
+        if (failWith != null && failWhen.test(request)) {
+            throw failWith.asRuntimeException();
+        }
         if (request.getMeasurementUUIDsList().stream().anyMatch(failingMeasurements::contains)) {
             throw Status.UNKNOWN.withDescription("measurement not found").asRuntimeException();
         }

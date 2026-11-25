@@ -316,6 +316,121 @@ class AnalogFillTest {
         assertEquals("Analog_Compressed", MeasurementCache.concreteStyle("Auto", "Float8"));
     }
 
+    /** The raw reads around empty buckets, as [start, end) in seconds from T0. */
+    private List<List<Long>> windowReads() {
+        return factry.queries.stream()
+                .filter(q -> !q.hasAggregation() && !q.getDesc() && q.getLimit() > 1)
+                .map(q -> List.of((com.google.protobuf.util.Timestamps.toMillis(q.getStart()) - T0) / 1000,
+                        (com.google.protobuf.util.Timestamps.toMillis(q.getEnd()) - T0) / 1000))
+                .toList();
+    }
+
+    private static boolean isWindowRead(io.factry.historian.proto.QueryTimeseriesRequest q) {
+        return !q.hasAggregation() && !q.getDesc() && q.getLimit() > 1;
+    }
+
+    @Test
+    void aFailedReadAroundEmptyBuckets_holdsInstead() throws Exception {
+        minuteTag("number", null);
+        factry.failWhen = AnalogFillTest::isWindowRead;
+        for (Status status : List.of(Status.UNKNOWN, Status.DEADLINE_EXCEEDED)) {
+            factry.failWith = status;
+            // The pen draws as before the line, not Bad and not a failed query.
+            assertEquals(HELD, column(AggregationMode.LastValue), status.toString());
+            assertEquals(HELD, column(AggregationMode.Average), status.toString());
+        }
+    }
+
+    @Test
+    void aLongRangeWithOneShortGap_readsOnlyAroundTheGap() throws Exception {
+        String u = factry.addMeasurement("default/out", "number");
+        for (int t = 0; t <= 300; t += 6) {
+            if (t < 120 || t > 144) {
+                factry.add(u, T0 + t * 1000L, t, "Good");
+            }
+        }
+        FactryQueryEngine engine = engine();
+        AverageHistoryQuery.Dataset ds = AverageHistoryQuery.wide(engine, T0, T0 + 300_000, 25,
+                AggregationMode.LastValue, FillMode.DERIVED, "out");
+        assertNull(ds.error, ds::toString);
+        // Buckets 120 s and 132 s are empty: one read from the bucket before (108 s) to the one after (156 s).
+        assertEquals(List.of(List.of(108L, 156L)), windowReads());
+        // On the line from 114 at 114 s to 150 at 150 s, at each bucket's end.
+        assertEquals(132.0, ((Number) ds.rows.get(10)[1]).doubleValue(), ds::toString);
+        assertEquals(144.0, ((Number) ds.rows.get(11)[1]).doubleValue(), ds::toString);
+    }
+
+    @Test
+    void aReadThatReachesTheLimit_orPastTheCap_holds() throws Exception {
+        String u = factry.addMeasurement("default/out", "number");
+        // Empty buckets at 12 s and 60 s: two runs, read in two windows, 0 to 36 s and 48 to 84 s.
+        for (int t : new int[]{0, 24, 36, 48, 72, 84}) {
+            factry.add(u, T0 + t * 1000L, t, "Good");
+        }
+        assertEquals(List.of(0.0, 24.0, 24.0, 36.0, 48.0, 72.0, 72.0, 84.0), eightBuckets(engine()));
+        assertEquals(List.of(List.of(0L, 36L), List.of(48L, 84L)), windowReads());
+
+        // Past the cap of reads per pen, the second run holds.
+        factry.queries.clear();
+        FactryQueryEngine engine = engine();
+        engine.linearReadsPerPen = 1;
+        assertEquals(List.of(0.0, 24.0, 24.0, 36.0, 48.0, 48.0, 72.0, 84.0), eightBuckets(engine));
+        assertEquals(1, windowReads().size());
+
+        // A read that reaches the limit may be cut short: its runs hold.
+        engine = engine();
+        engine.linearRawLimit = 2;
+        assertEquals(List.of(0.0, 0.0, 24.0, 36.0, 48.0, 48.0, 72.0, 84.0), eightBuckets(engine));
+    }
+
+    private List<Object> eightBuckets(FactryQueryEngine engine) throws Exception {
+        AverageHistoryQuery.Dataset ds = AverageHistoryQuery.wide(engine, T0, T0 + 96_000, 8,
+                AggregationMode.LastValue, FillMode.DERIVED, "out");
+        assertNull(ds.error, ds::toString);
+        return values(ds);
+    }
+
+    private static List<Object> values(AverageHistoryQuery.Dataset ds) {
+        List<Object> out = new ArrayList<>();
+        for (Object[] row : ds.rows) {
+            out.add(((Number) row[1]).doubleValue());
+        }
+        return out;
+    }
+
+    @Test
+    void anArrayElement_followsTheArraysMetadata() throws Exception {
+        String arr = factry.addMeasurement("default/Arr", "[]number");
+        factry.add(arr, T0, List.of(0, 5), "Good");
+        factry.add(arr, T0 + 60_000, List.of(60, 5), "Good");
+        // Ignition sends an array tag's metadata under the array's path.
+        cache.storeMetadata("default/Arr", Map.of(MeasurementCache.DEADBAND_STYLE, "Auto",
+                MeasurementCache.IGNITION_DATA_TYPE, "Float8Array"));
+        assertEquals(LINE, elementColumn());
+        cache.storeMetadata("default/Arr", Map.of(MeasurementCache.DEADBAND_STYLE, "Discrete"));
+        assertEquals(HELD, elementColumn());
+    }
+
+    private List<Object> elementColumn() throws Exception {
+        AverageHistoryQuery.Dataset ds = AverageHistoryQuery.wide(engine(), T0, T0 + 72_000, 6,
+                AggregationMode.LastValue, FillMode.DERIVED, "Arr[0]");
+        assertNull(ds.error, ds::toString);
+        return values(ds);
+    }
+
+    @Test
+    void metadataWithoutAStyle_meansAuto() throws Exception {
+        // With Include Metadata on, Ignition leaves a style at its default out.
+        minuteTag("number", null);
+        FactryStorageEngine storage = storage(factry, cache);
+        storage.doStoreMetadata(List.of(metadata("out", InterpolationMode.Discrete)));
+        assertEquals(HELD, column(AggregationMode.LastValue));
+        BasicPropertySet ps = new BasicPropertySet();
+        ps.set(WellKnownTagProps.EngUnit, "m3/h");
+        storage.doStoreMetadata(List.of(MetadataPoint.from(ps, QualifiedPath.parseSafe(PATH))));
+        assertEquals(LINE, column(AggregationMode.LastValue));
+    }
+
     // The write side: the style is stored on the measurement and kept up to date.
 
     @Test
